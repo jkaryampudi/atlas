@@ -30,7 +30,7 @@ alembic upgrade head
 ## Remaining for Phase 1 exit (see docs/architecture/08-development-roadmap.md)
 - [x] EODHD live adapter + ingestion job writing `price_bars_daily` and gates (vendor symbol map; exchange calendars XNYS/XASX replace weekend-skip)
 - [x] FX rates ingestion (`fx_rates_daily`): daily job `python -m atlas.dcp.market_data.fx --date …` + range backfill
-- [ ] 2-year history backfill for seed universe; zero red gates on a clean day — CLI built (`python -m atlas.dcp.market_data.backfill --years 2 --end …`), **real run pending EODHD key in `.env`**
+- [x] History backfill for seed universe; zero red gates on a clean day — **1 year accepted per ADR-0004** (EODHD tier caps history at 1y): 2025-07-11→2026-07-10 backfilled, 2,262 bars + 313 FX rows, 505/505 gates green. 2-year re-run pending plan upgrade.
 - [x] Golden ingestion regression tests (fixture backfill week incl. split-explained move; honest-RED market test)
 - [ ] Audit repository (Postgres-backed chain) + nightly verification job
 - [x] `make replay DATE=…` end-to-end on fixtures (gate=green, chain verified)

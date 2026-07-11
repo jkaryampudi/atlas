@@ -18,16 +18,34 @@ from atlas.dcp.market_data.models import Bar, Split
 BASE = "https://eodhd.com/api"
 
 
+_US_EXCHANGES = frozenset({"NYSE", "NASDAQ", "NYSEARCA", "BATS", "AMEX"})
+
+
 def vendor_symbol(symbol: str, exchange: str) -> str:
-    """EODHD ticker code: every US venue shares the .US suffix; ASX is .AU."""
-    return f"{symbol}.AU" if exchange == "ASX" else f"{symbol}.US"
+    """EODHD ticker code: every US venue shares the .US suffix; ASX is .AU.
+    Unknown exchanges fail loudly — a silent .US default would fetch the wrong
+    listing's prices without any gate noticing (review finding)."""
+    if exchange == "ASX":
+        return f"{symbol}.AU"
+    if exchange in _US_EXCHANGES:
+        return f"{symbol}.US"
+    raise ValueError(f"no EODHD suffix mapping for exchange {exchange!r} ({symbol}); "
+                     "add it to _US_EXCHANGES or map it explicitly")
 
 
 def symbol_map_from_seeds(csv_path: Path) -> dict[str, str]:
-    """Canonical symbol -> EODHD vendor code, from the instrument seed CSV."""
+    """Canonical symbol -> EODHD vendor code, from the instrument seed CSV.
+    Rejects dual-listed symbol collisions instead of last-row-wins."""
+    out: dict[str, str] = {}
     with csv_path.open() as f:
-        return {row["symbol"]: vendor_symbol(row["symbol"], row["exchange"])
-                for row in csv.DictReader(f)}
+        for row in csv.DictReader(f):
+            sym = row["symbol"]
+            code = vendor_symbol(sym, row["exchange"])
+            if sym in out and out[sym] != code:
+                raise ValueError(f"dual-listed symbol {sym!r}: {out[sym]} vs {code} — "
+                                 "symbol-map keys must be unambiguous")
+            out[sym] = code
+    return out
 
 
 class EodhdAdapter:
@@ -38,7 +56,15 @@ class EodhdAdapter:
         self._symbol_map = dict(symbol_map or {})
 
     def _sym(self, symbol: str) -> str:
-        return self._symbol_map.get(symbol, symbol)
+        if not self._symbol_map:
+            return symbol  # explicit vendor-code mode (caller passes AVGO.US etc.)
+        try:
+            return self._symbol_map[symbol]
+        except KeyError:
+            # Suffixless tickers resolve as US-venue at EODHD — a silent pass-
+            # through would fetch the wrong instrument (review finding).
+            raise ValueError(f"symbol {symbol!r} not in vendor symbol map — "
+                             "refusing bare pass-through") from None
 
     def _get(self, path: str, **params: str) -> list[dict[str, object]]:
         r = self._client.get(f"{BASE}{path}",

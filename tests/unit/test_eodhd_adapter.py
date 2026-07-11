@@ -3,8 +3,10 @@ from datetime import date
 from decimal import Decimal
 
 import httpx
+import pytest
 
-from atlas.dcp.market_data.adapters.eodhd import EodhdAdapter, vendor_symbol
+from atlas.dcp.market_data.adapters.eodhd import (EodhdAdapter, symbol_map_from_seeds,
+                                                  vendor_symbol)
 
 
 def _transport(payload):
@@ -34,9 +36,11 @@ def test_fetch_splits_parses_ratio():
     assert splits[0].ratio == Decimal("10")
 
 
-def _url_capturing_transport(payload, seen_paths):
+def _url_capturing_transport(payload, seen_paths, seen_params=None):
     def handler(request: httpx.Request) -> httpx.Response:
         seen_paths.append(request.url.path)
+        if seen_params is not None:
+            seen_params.append(dict(request.url.params))
         return httpx.Response(200, text=json.dumps(payload))
     return httpx.MockTransport(handler)
 
@@ -70,13 +74,39 @@ def test_fetch_fx_missing_day_returns_none():
     assert a.fetch_fx("USD", "AUD", date(2026, 7, 12)) is None
 
 
-def test_fetch_fx_series_parses_range():
+def test_fetch_fx_series_parses_range_and_sends_bounds():
     seen: list[str] = []
+    params: list[dict] = []
     payload = [{"date": "2024-07-10", "close": 1.50},
                {"date": "2024-07-11", "close": 1.51}]
     a = EodhdAdapter("test-key", client=httpx.Client(
-        transport=_url_capturing_transport(payload, seen)))
+        transport=_url_capturing_transport(payload, seen, params)))
     series = a.fetch_fx_series("USD", "AUD", date(2024, 7, 10), date(2024, 7, 12))
     assert seen == ["/api/eod/USDAUD.FOREX"]
+    # range params must reach the vendor — dropping them fetches ALL history
+    assert params[0]["from"] == "2024-07-10"
+    assert params[0]["to"] == "2024-07-12"
     assert series == {date(2024, 7, 10): Decimal("1.50"),
                       date(2024, 7, 11): Decimal("1.51")}
+
+
+def test_unmapped_symbol_with_map_refuses_bare_passthrough():
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport([])),
+                     symbol_map={"NDIA": "NDIA.AU"})
+    with pytest.raises(ValueError, match="not in vendor symbol map"):
+        a.fetch_bars("SPY", date(2026, 7, 1), date(2026, 7, 11))
+
+
+def test_vendor_symbol_unknown_exchange_raises():
+    with pytest.raises(ValueError, match="no EODHD suffix mapping"):
+        vendor_symbol("RELIANCE", "NSE")
+
+
+def test_symbol_map_from_seeds_builds_and_rejects_collisions(tmp_path):
+    good = tmp_path / "seeds.csv"
+    good.write_text("symbol,exchange\nSPY,NYSEARCA\nNDIA,ASX\n")
+    assert symbol_map_from_seeds(good) == {"SPY": "SPY.US", "NDIA": "NDIA.AU"}
+    dual = tmp_path / "dual.csv"
+    dual.write_text("symbol,exchange\nNDIA,ASX\nNDIA,NYSE\n")
+    with pytest.raises(ValueError, match="dual-listed"):
+        symbol_map_from_seeds(dual)

@@ -47,6 +47,34 @@ class MarketBackfill:
     first_red: tuple[str, ...]  # first few red dates, for the report
 
 
+@dataclass(frozen=True)
+class FxPairSummary:
+    pair: str
+    rows: int
+    missing_weekdays: int  # weekdays with no vendor rate (FOREX holidays expected ~2-3/yr)
+    empty: bool            # zero rows over the whole window — always a failure
+
+
+@dataclass(frozen=True)
+class BackfillReport:
+    markets: dict[str, MarketBackfill]
+    fx: dict[str, FxPairSummary]
+
+    @property
+    def failed(self) -> bool:
+        return (any(m.red for m in self.markets.values())
+                or any(f.empty for f in self.fx.values()))
+
+
+def _weekdays(start: date, end: date) -> list[date]:
+    d, out = start, []
+    while d <= end:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
 def _backfill_market(session: Session, adapter: MarketDataAdapter, market: str,
                      days: list[date], end: date) -> MarketBackfill:
     instruments = session.execute(text(
@@ -66,13 +94,15 @@ def _backfill_market(session: Session, adapter: MarketDataAdapter, market: str,
             bars_by_day[b.bar_date].append(b)
             n_bars += 1
 
+    expected_symbols = frozenset(inst["symbol"] for inst in instruments)
     red = amber = 0
     first_red: list[str] = []
     for i, d in enumerate(days):
         window = {k: bars_by_day.get(k, []) for k in days[max(0, i - 1):i + 1]}
         gate = evaluate_gate(market=market, as_of=d, expected_days=[d],
                              bars_by_day=window,
-                             explained_symbols=frozenset(explained_by_day.get(d, set())))
+                             explained_symbols=frozenset(explained_by_day.get(d, set())),
+                             expected_symbols=expected_symbols)
         write_gate(session, gate)
         if gate.status is GateStatus.RED:
             red += 1
@@ -87,7 +117,7 @@ def _backfill_market(session: Session, adapter: MarketDataAdapter, market: str,
 
 def backfill(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAuditLog,
              markets: list[str], start: date, end: date,
-             seeds_csv: Path) -> dict[str, MarketBackfill]:
+             seeds_csv: Path) -> BackfillReport:
     seed_instruments(session, seeds_csv)
 
     results: dict[str, MarketBackfill] = {}
@@ -97,23 +127,33 @@ def backfill(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAud
             continue
         results[market] = _backfill_market(session, adapter, market, days, end)
 
-    fx_written = 0
+    # FX with reconciliation: an empty series is a hard failure; sparse weekdays
+    # are surfaced (FOREX holidays make a few expected). Review finding: FX
+    # previously had no effect on success reporting at all.
+    fx: dict[str, FxPairSummary] = {}
+    weekdays = _weekdays(start, end)
     for base, quote in required_pairs(session):
         series = adapter.fetch_fx_series(base, quote, start, end)
         for d, rate in sorted(series.items()):
             upsert_rate(session, base=base, quote=quote, day=d, rate=rate,
                         source=type(adapter).__name__)
-            fx_written += 1
+        pair = f"{base}{quote}"
+        fx[pair] = FxPairSummary(pair=pair, rows=len(series),
+                                 missing_weekdays=sum(1 for d in weekdays
+                                                      if d not in series),
+                                 empty=not series)
 
+    report = BackfillReport(markets=results, fx=fx)
     audit.append(event_type="market.backfill.completed", entity_type="market",
                  entity_id=",".join(markets), actor_type="scheduler", actor_id="backfill",
                  payload={"start": start.isoformat(), "end": end.isoformat(),
-                          "fx_written": fx_written,
+                          "fx": {p: {"rows": f.rows, "missing_weekdays": f.missing_weekdays,
+                                     "empty": f.empty} for p, f in fx.items()},
                           "markets": {m: {"sessions": r.sessions, "bars": r.bars,
                                           "red": r.red, "amber": r.amber,
                                           "first_red": list(r.first_red)}
                                       for m, r in results.items()}})
-    return results
+    return report
 
 
 def _seed_markets(seeds_csv: Path) -> list[str]:
@@ -146,19 +186,20 @@ def main() -> None:
 
     with session_scope() as s:
         audit = PostgresAuditLog(s, clock)
-        results = backfill(session=s, adapter=adapter, audit=audit, markets=markets,
-                           start=start, end=end, seeds_csv=a.seeds)
+        report = backfill(session=s, adapter=adapter, audit=audit, markets=markets,
+                          start=start, end=end, seeds_csv=a.seeds)
 
-    any_red = False
-    for m, r in results.items():
+    for m, r in report.markets.items():
         line = f"{m}: {r.sessions} sessions, {r.bars} bars, red={r.red} amber={r.amber}"
         if r.first_red:
             line += f" first_red={list(r.first_red)}"
-            any_red = True
         print(line)
+    for pair, f in report.fx.items():
+        print(f"fx {pair}: {f.rows} rows, missing_weekdays={f.missing_weekdays}"
+              + (" EMPTY — FAILURE" if f.empty else ""))
     print(f"backfill {start}..{end} via {type(adapter).__name__}: "
-          f"{'RED GATES PRESENT — inspect market.data_quality_gates' if any_red else 'zero red gates'}")
-    raise SystemExit(2 if any_red else 0)
+          f"{'FAILURES PRESENT — inspect market.data_quality_gates' if report.failed else 'zero red gates'}")
+    raise SystemExit(2 if report.failed else 0)
 
 
 if __name__ == "__main__":

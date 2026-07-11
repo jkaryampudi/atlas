@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
-from atlas.dcp.market_data.calendars import is_trading_day, recent_sessions
+from atlas.dcp.market_data.calendars import (is_trading_day, previous_trading_day,
+                                              recent_sessions)
 from atlas.dcp.market_data.models import Bar, GateStatus, Split
 from atlas.dcp.market_data.quality import GateResult, evaluate_gate
 
@@ -49,10 +50,14 @@ def upsert_bar(session: Session, instrument_id: object, bar: Bar, source: str) -
 
 
 def record_split(session: Session, instrument_id: object, split: Split, source: str) -> None:
+    # Arbiter columns are required: a bare ON CONFLICT never matches the natural
+    # key (migration 0005), so re-runs would duplicate splits and compound N× on
+    # read-side adjustment (review finding).
     session.execute(text(
         "INSERT INTO market.corporate_actions "
         "(instrument_id, action_date, action_type, ratio, source) "
-        "VALUES (:iid, :d, 'split', :r, :src) ON CONFLICT DO NOTHING"),
+        "VALUES (:iid, :d, 'split', :r, :src) "
+        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
         {"iid": instrument_id, "d": split.action_date, "r": split.ratio, "src": source})
 
 
@@ -65,11 +70,35 @@ def write_gate(session: Session, gate: GateResult) -> None:
          "r": json.dumps(list(gate.reasons))})
 
 
+def _non_trading_day_gate(session: Session, market: str, day: date) -> GateResult:
+    """A non-trading day must never mask an unresolved problem: the latest-gate
+    view (API/dashboard) reads only the newest row per market, so a weekend GREEN
+    after a red Friday would silently unblock downstream work (review finding,
+    critical). Carry the previous session's gate status forward instead."""
+    prev = previous_trading_day(market, day)
+    prev_status = session.execute(text(
+        "SELECT status FROM market.data_quality_gates "
+        "WHERE market = :m AND gate_date = :d"), {"m": market, "d": prev}).scalar()
+    if prev_status is None:
+        has_bars = session.execute(text(
+            "SELECT 1 FROM market.price_bars_daily pb "
+            "JOIN market.instruments i ON i.id = pb.instrument_id "
+            "WHERE i.market = :m AND pb.bar_date = :d LIMIT 1"),
+            {"m": market, "d": prev}).scalar()
+        status = GateStatus.GREEN if has_bars else GateStatus.RED
+        detail = (f"no gate for previous session {prev}; bars "
+                  f"{'present' if has_bars else 'MISSING'}")
+    else:
+        status = GateStatus(prev_status)
+        detail = f"carried forward from {prev}: {prev_status}"
+    return GateResult(market=market, gate_date=day, status=status,
+                      reasons=("non-trading day", detail))
+
+
 def ingest_day(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAuditLog,
                market: str, day: date, lookback_sessions: int = 1) -> GateStatus:
     if not is_trading_day(market, day):
-        gate = GateResult(market=market, gate_date=day, status=GateStatus.GREEN,
-                          reasons=("non-trading day",))
+        gate = _non_trading_day_gate(session, market, day)
         write_gate(session, gate)
         audit.append(event_type="market.bars.ingested", entity_type="market",
                      entity_id=market, actor_type="scheduler", actor_id="ingest_day",
@@ -95,7 +124,8 @@ def ingest_day(*, session: Session, adapter: MarketDataAdapter, audit: PostgresA
 
     gate = evaluate_gate(market=market, as_of=day, expected_days=expected_days,
                          bars_by_day=bars_by_day,
-                         explained_symbols=frozenset(explained))
+                         explained_symbols=frozenset(explained),
+                         expected_symbols=frozenset(i["symbol"] for i in instruments))
     write_gate(session, gate)
 
     audit.append(event_type="market.bars.ingested", entity_type="market", entity_id=market,

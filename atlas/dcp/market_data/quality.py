@@ -1,7 +1,9 @@
 """Data-quality gates (Doc 01 par.2 principle enforcement, Doc 05 market.data_quality_gates).
 
-A RED gate for a market blocks all downstream workflow for that market. Rules v1:
+A RED gate for a market blocks all downstream workflow for that market. Rules v1.1:
 - missing trading day in the expected calendar -> gap -> RED
+- any expected instrument missing bars on an expected day -> RED (one instrument's
+  bars must never mask another's hole; pass expected_symbols to enable)
 - any bar older than expected as-of date (stale feed) -> RED
 - day-over-day close move beyond sanity bound without a matching corporate action -> AMBER
 """
@@ -26,7 +28,8 @@ class GateResult:
 
 def evaluate_gate(*, market: str, as_of: date, expected_days: list[date],
                   bars_by_day: dict[date, list[Bar]],
-                  explained_symbols: frozenset[str] = frozenset()) -> GateResult:
+                  explained_symbols: frozenset[str] = frozenset(),
+                  expected_symbols: frozenset[str] = frozenset()) -> GateResult:
     reasons: list[str] = []
     status = GateStatus.GREEN
 
@@ -34,6 +37,15 @@ def evaluate_gate(*, market: str, as_of: date, expected_days: list[date],
     if missing:
         reasons.append(f"missing bars for {len(missing)} expected day(s): {missing[:3]}")
         status = GateStatus.RED
+
+    if expected_symbols:
+        for d in expected_days:
+            got = {b.symbol for b in bars_by_day.get(d, [])}
+            holes = sorted(expected_symbols - got)
+            if holes and got:  # fully-missing days are already RED above
+                reasons.append(
+                    f"{len(holes)} instrument(s) missing bars on {d}: {holes[:3]}")
+                status = GateStatus.RED
 
     if expected_days and max(bars_by_day.keys(), default=date.min) < as_of:
         latest = max(bars_by_day.keys(), default=None)

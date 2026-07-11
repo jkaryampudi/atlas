@@ -14,6 +14,13 @@ import exchange_calendars as xcals
 
 MARKET_CALENDARS = {"US": "XNYS", "AU": "XASX"}
 
+# Deterministic calendar bounds. exchange_calendars' defaults are wall-clock
+# relative (today-20y .. today+1y) and lru_cache would pin whatever the run day
+# was — the same query could work today and crash tomorrow (review finding;
+# injectable-time invariant). Fixed bounds are bumped deliberately, in review.
+CALENDAR_START = date(2006, 1, 3)
+CALENDAR_END = date(2030, 12, 31)
+
 
 @lru_cache(maxsize=None)
 def _calendar(market: str) -> Any:
@@ -21,15 +28,25 @@ def _calendar(market: str) -> Any:
         code = MARKET_CALENDARS[market]
     except KeyError:
         raise ValueError(f"no exchange calendar mapped for market {market!r}") from None
-    return xcals.get_calendar(code)
+    return xcals.get_calendar(code, start=CALENDAR_START.isoformat(),
+                              end=CALENDAR_END.isoformat())
+
+
+def _check_bounds(day: date) -> None:
+    if not (CALENDAR_START <= day <= CALENDAR_END):
+        raise ValueError(f"{day} outside supported calendar bounds "
+                         f"[{CALENDAR_START}, {CALENDAR_END}] — bump CALENDAR_END "
+                         "deliberately if the horizon moved")
 
 
 def is_trading_day(market: str, day: date) -> bool:
+    _check_bounds(day)
     return bool(_calendar(market).is_session(day.isoformat()))
 
 
 def previous_trading_day(market: str, day: date) -> date:
     """Latest session strictly before `day` (skips weekends AND holidays)."""
+    _check_bounds(day)
     ts = _calendar(market).date_to_session(
         (day - timedelta(days=1)).isoformat(), direction="previous")
     prev: date = ts.date()
@@ -40,6 +57,8 @@ def trading_days_between(market: str, start: date, end: date) -> list[date]:
     """All sessions in [start, end] inclusive, ascending. Empty if start > end."""
     if start > end:
         return []
+    _check_bounds(start)
+    _check_bounds(end)
     return [ts.date() for ts in
             _calendar(market).sessions_in_range(start.isoformat(), end.isoformat())]
 

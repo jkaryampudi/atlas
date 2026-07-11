@@ -1,4 +1,5 @@
-"""FX daily job (task 1b): writes market.fx_rates_daily, audited, idempotent."""
+"""FX daily job (task 1b): writes market.fx_rates_daily, audited, idempotent,
+and honest about missing rates (review finding: the 'reports' half was untested)."""
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -23,8 +24,9 @@ def _audit(s, day: date) -> PostgresAuditLog:
 def test_required_pairs_derived_from_instrument_currencies(clean_audit):
     s = clean_audit
     seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
-    # Seed universe holds USD instruments and one AUD instrument; base is AUD.
-    assert required_pairs(s) == [("USD", "AUD")]
+    pairs = required_pairs(s)
+    assert ("USD", "AUD") in pairs
+    assert all(quote == "AUD" and base != "AUD" for base, quote in pairs)
 
 
 def test_ingest_fx_writes_rate_and_audits(clean_audit):
@@ -32,9 +34,10 @@ def test_ingest_fx_writes_rate_and_audits(clean_audit):
     seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
     day = date(2026, 7, 10)
     s.execute(text("DELETE FROM market.fx_rates_daily WHERE rate_date = :d"), {"d": day})
-    written = ingest_fx(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
-                        audit=_audit(s, day), day=day)
-    assert written == 1
+    res = ingest_fx(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
+                    audit=_audit(s, day), day=day)
+    assert res.written == 1
+    assert res.missing == ()
     row = s.execute(text(
         "SELECT rate, source FROM market.fx_rates_daily "
         "WHERE base='USD' AND quote='AUD' AND rate_date=:d"), {"d": day}).one()
@@ -59,14 +62,21 @@ def test_ingest_fx_is_idempotent(clean_audit):
     assert n == 1
 
 
-def test_ingest_fx_missing_rate_writes_nothing_but_reports(clean_audit):
+def test_ingest_fx_missing_rate_writes_nothing_and_reports(clean_audit):
     s = clean_audit
     seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
     day = date(2026, 7, 12)  # no fixture rate for this day
     s.execute(text("DELETE FROM market.fx_rates_daily WHERE rate_date = :d"), {"d": day})
-    written = ingest_fx(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
-                        audit=_audit(s, day), day=day)
-    assert written == 0
+    res = ingest_fx(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
+                    audit=_audit(s, day), day=day)
+    assert res.written == 0
+    assert res.missing == ("USDAUD",)
     n = s.execute(text(
         "SELECT count(*) FROM market.fx_rates_daily WHERE rate_date=:d"), {"d": day}).scalar()
     assert n == 0
+    # the 'reports' half: the audit payload must carry the missing pair
+    payload = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type='market.fx.ingested' ORDER BY seq DESC LIMIT 1")).scalar()
+    assert payload["missing"] == ["USDAUD"]
+    assert payload["written"] == 0

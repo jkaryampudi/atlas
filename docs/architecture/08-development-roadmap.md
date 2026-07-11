@@ -16,7 +16,7 @@ Deliverable: this architecture package. Exit: sign-off table in README completed
 
 **Explicitly not built:** any agent, any signal, any order path.
 
-**Exit criteria:** 2 years of adjusted history for the seed universe ingested with zero red gates on a clean day; golden ingestion regression tests green; audit hash chain verifying nightly; `make daily-cycle` replays deterministically; NAV math matches a hand-computed fixture portfolio to the cent.
+**Exit criteria:** 2 years of adjusted history for the seed universe ingested with zero red gates on a clean day *(amended to 1 year per ADR-0004 — EODHD tier constraint; Phase 3 decision-grade validation still requires the full-history upgrade)*; golden ingestion regression tests green; audit hash chain verifying nightly; `make daily-cycle` replays deterministically; NAV math matches a hand-computed fixture portfolio to the cent.
 
 ## Phase 2 — Research agents (≈ 3 weeks)
 

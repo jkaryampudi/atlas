@@ -7,6 +7,7 @@ Usage: python -m atlas.dcp.market_data.fx --date 2026-07-10
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -17,6 +18,12 @@ from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 
 BASE_CURRENCY = "AUD"
+
+
+@dataclass(frozen=True)
+class FxIngestResult:
+    written: int
+    missing: tuple[str, ...]  # pairs the vendor had no rate for
 
 
 def required_pairs(session: Session) -> list[tuple[str, str]]:
@@ -36,9 +43,10 @@ def upsert_rate(session: Session, *, base: str, quote: str, day: date,
 
 
 def ingest_fx(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAuditLog,
-              day: date, pairs: list[tuple[str, str]] | None = None) -> int:
-    """Fetch and upsert the day's rates. Returns how many were written; pairs the
-    vendor has no rate for (weekend/holiday) are reported in the audit payload."""
+              day: date, pairs: list[tuple[str, str]] | None = None) -> FxIngestResult:
+    """Fetch and upsert the day's rates. Pairs the vendor has no rate for are
+    returned AND audited — callers decide whether missing is fatal (a weekday
+    with no rate is an incident; a FOREX holiday is not)."""
     pairs = required_pairs(session) if pairs is None else pairs
     written, missing = 0, []
     for base, quote in pairs:
@@ -52,7 +60,7 @@ def ingest_fx(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAu
     audit.append(event_type="market.fx.ingested", entity_type="market", entity_id="fx",
                  actor_type="scheduler", actor_id="ingest_fx",
                  payload={"day": day.isoformat(), "written": written, "missing": missing})
-    return written
+    return FxIngestResult(written=written, missing=tuple(missing))
 
 
 def main() -> None:
@@ -71,8 +79,13 @@ def main() -> None:
     from atlas.core.clock import FrozenClock
     with session_scope() as s:
         audit = PostgresAuditLog(s, FrozenClock(clock_dt))
-        written = ingest_fx(session=s, adapter=adapter, audit=audit, day=day)
-    print(f"fx {day}: wrote {written} rate(s)")
+        res = ingest_fx(session=s, adapter=adapter, audit=audit, day=day)
+    print(f"fx {day}: wrote {res.written} rate(s)"
+          + (f", MISSING: {list(res.missing)}" if res.missing else ""))
+    if res.missing and day.weekday() < 5:
+        # Missing rate on a weekday is an incident, not a quiet success
+        # (review finding: the job previously had no red path at all).
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

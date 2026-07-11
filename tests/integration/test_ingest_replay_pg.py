@@ -6,8 +6,9 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
-from atlas.dcp.market_data.ingest import ingest_day, seed_instruments
+from atlas.dcp.market_data.ingest import ingest_day, seed_instruments, write_gate
 from atlas.dcp.market_data.models import GateStatus
+from atlas.dcp.market_data.quality import GateResult
 from atlas.dcp.risk.seed_limits import seed_limit_set
 from tests.conftest import requires_pg
 
@@ -57,15 +58,52 @@ def test_split_day_with_lookback_is_green(clean_audit):
     assert status is GateStatus.GREEN
 
 
-def test_non_trading_day_gate_is_green_not_red(clean_audit):
-    """Saturday: no bars are expected, so the gate must not be a false RED."""
+def test_missing_day_red_at_production_lookback(clean_audit):
+    """The RED path must hold in the production configuration (lookback=1, as
+    replay.py runs it), not only at lookback=0 (review finding)."""
     s = clean_audit
     seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
-    audit = PostgresAuditLog(s, FrozenClock(datetime(2024, 7, 13, 22, 0, tzinfo=UTC)))
+    audit = PostgresAuditLog(s, FrozenClock(datetime(2024, 7, 16, 22, 0, tzinfo=UTC)))
     status = ingest_day(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
-                        audit=audit, market="US", day=date(2024, 7, 13),
+                        audit=audit, market="US", day=date(2024, 7, 16),  # no fixture data
                         lookback_sessions=1)
+    assert status is GateStatus.RED
+
+
+def test_non_trading_day_carries_forward_green(clean_audit):
+    """Saturday after a clean Friday: gate is green, explicitly carried forward."""
+    s = clean_audit
+    seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
+    s.execute(text("DELETE FROM market.data_quality_gates "
+                   "WHERE market='US' AND gate_date IN ('2024-07-12','2024-07-13')"))
+    adapter = FixtureAdapter(ROOT / "tests" / "fixtures")
+    audit = PostgresAuditLog(s, FrozenClock(datetime(2024, 7, 13, 22, 0, tzinfo=UTC)))
+    assert ingest_day(session=s, adapter=adapter, audit=audit, market="US",
+                      day=date(2024, 7, 12), lookback_sessions=0) is GateStatus.GREEN
+    status = ingest_day(session=s, adapter=adapter, audit=audit, market="US",
+                        day=date(2024, 7, 13), lookback_sessions=1)
     assert status is GateStatus.GREEN
     gate = s.execute(text("SELECT reasons FROM market.data_quality_gates "
                           "WHERE market='US' AND gate_date='2024-07-13'")).scalar()
     assert "non-trading day" in str(gate)
+
+
+def test_non_trading_day_carries_forward_red_not_false_green(clean_audit):
+    """CRITICAL (review finding): a weekend gate must NOT go green after a red
+    Friday — the latest-gate view would silently unblock downstream work while
+    Friday's bars are still missing."""
+    s = clean_audit
+    seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
+    s.execute(text("DELETE FROM market.data_quality_gates "
+                   "WHERE market='US' AND gate_date IN ('2024-07-12','2024-07-13')"))
+    write_gate(s, GateResult(market="US", gate_date=date(2024, 7, 12),
+                             status=GateStatus.RED, reasons=("vendor outage",)))
+    audit = PostgresAuditLog(s, FrozenClock(datetime(2024, 7, 13, 22, 0, tzinfo=UTC)))
+    status = ingest_day(session=s, adapter=FixtureAdapter(ROOT / "tests" / "fixtures"),
+                        audit=audit, market="US", day=date(2024, 7, 13),
+                        lookback_sessions=1)
+    assert status is GateStatus.RED
+    gate = s.execute(text("SELECT status, reasons FROM market.data_quality_gates "
+                          "WHERE market='US' AND gate_date='2024-07-13'")).one()
+    assert gate.status == "red"
+    assert "carried forward" in str(gate.reasons)

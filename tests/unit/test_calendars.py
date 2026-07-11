@@ -78,3 +78,19 @@ def test_au_weekday_is_trading_day():
 def test_unknown_market_raises():
     with pytest.raises(ValueError, match="no exchange calendar"):
         is_trading_day("MARS", date(2024, 7, 15))
+
+
+def test_out_of_bounds_date_raises_clearly():
+    # Bounds are fixed literals, not wall-clock-relative (review finding):
+    # the same query must behave identically regardless of the day it runs.
+    with pytest.raises(ValueError, match="outside supported calendar bounds"):
+        is_trading_day("US", date(2031, 1, 2))
+    with pytest.raises(ValueError, match="outside supported calendar bounds"):
+        previous_trading_day("US", date(2005, 6, 1))
+
+
+def test_early_bound_is_deterministic():
+    # 2007 is inside the fixed bounds even though it is >20y before some future
+    # run date — the default (today-20y) window would eventually break this.
+    days = trading_days_between("US", date(2007, 1, 3), date(2007, 1, 5))
+    assert days == [date(2007, 1, 3), date(2007, 1, 4), date(2007, 1, 5)]
