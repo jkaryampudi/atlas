@@ -26,9 +26,11 @@ class CommitteeMemo(BaseModel):
     kill_criteria: list[str]
     evidence_refs: list[str]
     dissent: str
+    debate_summary: str = ""  # ADR-0005: required when a debate was run
 
-    # context flag injected by the runtime, not the model
+    # context flags injected by the runtime, not the model
     evidence_available: bool = False
+    debate_present: bool = False
 
     @model_validator(mode="after")
     def constitution_gates(self) -> "CommitteeMemo":
@@ -42,9 +44,11 @@ class CommitteeMemo(BaseModel):
             raise ValueError("Constitution 5: at least two kill criteria required")
         if self.recommendation != "INSUFFICIENT_EVIDENCE" and not self.dissent.strip():
             raise ValueError("Constitution 5: dissent required")
+        if self.debate_present and not self.debate_summary.strip():
+            raise ValueError("ADR-0005: debate_summary required when a debate was run")
         return self
 
-    @field_validator("thesis", "dissent")
+    @field_validator("thesis", "dissent", "debate_summary")
     @classmethod
     def no_execution_numbers(cls, v: str) -> str:
         if _EXEC_NUMBER.search(v):
