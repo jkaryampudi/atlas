@@ -99,7 +99,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-        "t5_snapshot", "t6_reconcile", "t7_report"]
+        "t5_snapshot", "t6_reconcile", "t7_desk", "t8_report"]
     # the entry order fills at the 7/14 open AND the 7/15 bar fires the stop
     # in ONE cycle: settle runs before the scan precisely so a just-entered
     # position is never naked while its breaching bar is already ingested
@@ -107,6 +107,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     assert results["t4_stops"] == "stops_fired=1"
     assert results["t6_reconcile"] == "clean"
     assert results["t1_verify_chain"] == "chain ok"
+    assert results["t7_desk"] == "desk off (no model key configured)"
 
     pos = s.execute(text(
         "SELECT qty, closed_at FROM trading.positions")).one()
@@ -150,3 +151,43 @@ def test_reconciliation_break_kills_the_run(clean_audit):
         "SELECT status FROM trading.reconciliations ORDER BY created_at DESC "
         "LIMIT 1")).scalar()
     assert row == "break"
+
+
+def test_desk_failure_pages_but_never_undoes_trading(clean_audit):
+    """The desk runs AFTER settlement and reconciliation: a model-side
+    catastrophe flags the run for the operator, but every trading step's
+    work stands — agents can never take the book down with them."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+
+    def exploding_desk(session, clk):
+        raise RuntimeError("model API melted")
+
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES),
+                              desk=exploding_desk)
+    assert results["t3_settle"] == "fills=1"              # trading unaffected
+    assert results["t6_reconcile"] == "clean"
+    assert results["t7_desk"].startswith("desk FAILED: model API melted")
+    assert "desk FAILED" in results["t8_report"]
+    n_ex = s.execute(text("SELECT count(*) FROM trading.executions")).scalar()
+    assert n_ex == 1
+
+
+def test_desk_skipped_on_non_us_session_day(clean_audit):
+    """2026-07-12 is a Sunday in UTC: the desk has nothing new to read, so it
+    must not spend a cent — and must say so."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(datetime(2026, 7, 12, 23, 30, tzinfo=UTC))
+    calls = {"n": 0}
+
+    def counting_desk(session, clk):
+        calls["n"] += 1
+
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES),
+                              desk=counting_desk)
+    assert results["t7_desk"] == "desk skipped (2026-07-12 is not a US session)"
+    assert calls["n"] == 0

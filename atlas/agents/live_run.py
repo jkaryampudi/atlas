@@ -37,7 +37,7 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
         "WHERE i.symbol = :sym AND pb.source = 'EodhdAdapter' "
         "ORDER BY pb.bar_date DESC LIMIT 60"), {"sym": symbol}).all()
     if len(rows) < 51:
-        raise SystemExit(f"not enough real bars for {symbol} — run the backfill first")
+        raise LookupError(f"not enough real bars for {symbol} — run the backfill first")
     rows = list(reversed(rows))
     closes = [float(r.close) for r in rows]
     last_date = rows[-1].bar_date.isoformat()
@@ -89,7 +89,10 @@ def main() -> None:
     print(f"models: debate={resolve_model('debate_bull')} cio={resolve_model('cio')}")
     with session_scope() as s:
         audit = PostgresAuditLog(s, SystemClock())
-        evidence = build_evidence(s, a.symbol)
+        try:
+            evidence = build_evidence(s, a.symbol)
+        except LookupError as e:
+            raise SystemExit(str(e)) from None
         for ref, body in evidence:
             print(f"\nEVIDENCE [{ref}]\n  {body}")
 

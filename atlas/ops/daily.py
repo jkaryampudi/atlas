@@ -10,7 +10,12 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
   T5 snapshot     mark the book -> trading.portfolio_snapshots (+ breaker fold)
   T6 reconcile    internal consistency: positions ≡ open lots, ledger cash
                   finite and NAV recomputable; writes trading.reconciliations
-  T7 report       one-line summary -> audit + operator alert
+  T7 desk         the research desk: debate + committee memo per eligible
+                  universe symbol through the full cage — memos EMIT to the
+                  console Research page; runs only on US session days and only
+                  when a model key is configured; a desk failure pages but
+                  never undoes the trading steps (they are already done)
+  T8 report       summary incl. desk results -> audit + operator alert
 
 The run is checkpointed under run_id = daily-<date> (WorkflowRunner). The
 whole cycle runs in ONE transaction: an in-process node failure that is
@@ -31,17 +36,19 @@ fail closed per-instrument on their own) — but they DO fail the run's exit
 code and page the operator. A chain break or reconciliation break is a KILL
 condition: the run raises immediately and pages at high priority.
 
-The agent desk (memo generation) is deliberately NOT in this loop yet: the
-memo->proposal bridge needs a deterministic stop-derivation policy (agents
-must never produce sizing/pricing numbers — CLAUDE.md invariant 2), and that
-policy is a Principal decision. Until then proposals are built explicitly.
+The desk emits MEMOS only. The memo->proposal bridge stays absent until the
+deterministic stop-derivation policy is decided (agents must never produce
+sizing/pricing numbers — CLAUDE.md invariant 2; a Principal decision).
+Proposals are still built explicitly and approved on the console desk.
 """
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+import os
+from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any, Callable
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -51,6 +58,7 @@ from atlas.core.clock import Clock, FrozenClock, SystemClock
 from atlas.core.db import session_scope
 from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
+from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -96,8 +104,9 @@ def _reconcile(session: Session, clock: Clock) -> str:
     return status
 
 
-def run_daily_cycle(session: Session, clock: Clock,
-                    adapter: MarketDataAdapter) -> dict[str, str | None]:
+def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
+                    desk: Callable[[Session, Clock], Any] | None = None,
+                    ) -> dict[str, str | None]:
     """One day's full cycle under a single checkpointed run_id. Returns the
     node-result map; raises on kill conditions (chain break, recon break)."""
     day = clock.now().date().isoformat()
@@ -139,15 +148,36 @@ def run_daily_cycle(session: Session, clock: Clock,
     def t6_reconcile() -> str:
         return _reconcile(session, clock)
 
-    def t7_report() -> str:
+    def t7_desk() -> str:
+        if desk is None:
+            return "desk off (no model key configured)"
+        us_day = clock.now().astimezone(UTC).date()
+        if not is_trading_day("US", us_day):
+            return f"desk skipped ({us_day} is not a US session)"
+        try:
+            report = desk(session, clock)
+        except Exception as e:  # noqa: BLE001 — a desk failure pages, but the
+            #                     book is already settled and protected
+            state["desk_failed"] = True
+            return f"desk FAILED: {e}"[:300]
+        state["desk"] = report
+        return report.summary()
+
+    def t8_report() -> str:
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
         nav = state.get("nav", Decimal(0))
-        failed = bool(state.get("ingest_failed", False))
+        desk_report = state.get("desk")
+        failed = bool(state.get("ingest_failed", False)) or bool(
+            state.get("desk_failed", False))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
-                 "ingest FAILED — see log" if failed else "ingest clean"]
+                 desk_report.summary() if desk_report is not None else "desk idle",
+                 "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
+                 else "ingest clean"]
+        if state.get("desk_failed"):
+            lines.append("desk FAILED — see log")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -167,7 +197,8 @@ def run_daily_cycle(session: Session, clock: Clock,
         Node("t4_stops", t4_stops),
         Node("t5_snapshot", t5_snapshot),
         Node("t6_reconcile", t6_reconcile),
-        Node("t7_report", t7_report),
+        Node("t7_desk", t7_desk),
+        Node("t8_report", t8_report),
     ])
 
 
@@ -184,10 +215,17 @@ def main() -> None:
     root = Path(__file__).resolve().parents[2]
     adapter = adapter_from_settings(fixtures_root=root / "tests" / "fixtures",
                                     seeds_csv=root / "seeds" / "instruments_seed.csv")
+    desk: Callable[[Session, Clock], Any] | None = None
+    if os.environ.get("ATLAS_ANTHROPIC_API_KEY"):
+        from atlas.agents.desk import desk_symbols, run_desk
+
+        def desk(s: Session, c: Clock) -> Any:
+            return run_desk(s, c, desk_symbols(s))
     with session_scope() as s:
-        results = run_daily_cycle(s, clock, adapter)
+        results = run_daily_cycle(s, clock, adapter, desk=desk)
     ingest_line = results.get("t0_ingest") or ""
-    failed = "failed=True" in ingest_line
+    failed = ("failed=True" in ingest_line
+              or "desk FAILED" in (results.get("t7_desk") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 
