@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.agents.runtime.budget import BudgetExhausted, spend_and_check
+from atlas.agents.runtime.grounding import grounding_violations
 from atlas.agents.runtime.llm import LlmClient
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.config import get_settings
@@ -34,6 +35,7 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
               agent_role: str, template_rel_path: str, context: str,
               output_model: type[BaseModel], input_refs: list[dict[str, str]],
               extra_fields: dict[str, object] | None = None,
+              evidence_bodies: dict[str, str] | None = None,
               max_tokens: int = 1200) -> tuple[BaseModel, str]:
     template, t_hash = load_template(template_rel_path)
     prompt = template + "\n\n" + context
@@ -64,6 +66,19 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
             last_err = str(e)
             status = "schema_fail"
             validated = None
+        if validated is not None and evidence_bodies is not None:
+            # ADR-0005 pattern 2: fabricated numbers take the schema_fail path
+            # (retry once, then fail closed) with a dedicated audit event
+            violations = grounding_violations(validated, evidence_bodies)
+            if violations:
+                last_err = "; ".join(violations)
+                status = "schema_fail"
+                validated = None
+                audit.append(event_type="agent.grounding.failed",
+                             entity_type="agent_run", entity_id=agent_role,
+                             actor_type="agent", actor_id=agent_role,
+                             payload={"attempt": attempt,
+                                      "violations": violations[:10]})
         run_id = session.execute(text(
             "INSERT INTO research.agent_runs "
             "(agent_role, prompt_template_hash, model, input_refs, output_hash, status, "
