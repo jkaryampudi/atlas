@@ -132,6 +132,7 @@
     <div class="nav-item" data-view="overview">OVERVIEW</div>
     <div class="nav-item" data-view="research">RESEARCH</div>
     <div class="nav-item" data-view="quant">QUANT</div>
+    <div class="nav-item" data-view="risk">RISK</div>
     <div class="nav-item" data-view="market">MARKET</div>
     <div class="rail-foot">EVERY DECISION<br>RECONSTRUCTIBLE<br>· HASH-CHAINED ·<br><br><span id="refresh-at">—</span></div>
   </nav>
@@ -145,7 +146,8 @@
       <div class="sub">The machine tells the truth. The human holds the seal.</div>
       <div class="pipe" id="pipe"></div>
       <div class="plane-tags"><span class="r">REASONING</span><span class="d">DETERMINISTIC</span></div>
-      <div id="gates-alerts" style="margin-top:18px"></div>
+      <div id="brief" style="margin-top:20px"></div>
+      <div id="gates-alerts" style="margin-top:14px"></div>
       <h2>Data Freshness</h2>
       <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
       <h2>Quality Gates — Latest Per Market</h2>
@@ -158,7 +160,10 @@
     <section class="view" id="view-research">
       <h1>Research</h1>
       <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
-      <div style="margin-bottom:18px"><input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34"></div>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
+        <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
+        <span class="pill bl" id="review-progress">PHASE-2 REVIEW: — / 10</span>
+      </div>
       <div class="grid" id="memos"><div class="quiet">awaiting data</div></div>
       <h2>Agent Activity — The Flight Recorder</h2>
       <div class="note">Every model call, pass or fail. schema_fail = the cage killed a violation and retried or failed closed. Prompt hashes pin the exact template version per run.</div>
@@ -169,11 +174,29 @@
     <section class="view" id="view-quant">
       <h1>Quant</h1>
       <div class="sub">Honest failures are deliverables. A failed gate is the system working.</div>
-      <h2>Validation Verdicts</h2>
+      <h2>Gate Verdicts — Real Data</h2>
+      <div id="gate-report"><div class="quiet">awaiting data</div></div>
+      <h2>Approval Decisions — Change Control</h2>
       <div class="grid" id="verdicts"><div class="quiet">awaiting data</div></div>
       <h2>Trial Registry</h2>
       <div class="note">Every backtest is registered — the deflated Sharpe uses this count. <span id="trial-count"></span></div>
       <div class="card" style="overflow-x:auto" id="trials"><div class="quiet">awaiting data</div></div>
+    </section>
+
+    <!-- RISK -->
+    <section class="view" id="view-risk">
+      <h1>Risk</h1>
+      <div class="sub">Risk is a structural property, not an opinion. Limits live in a versioned table; code enforces them.</div>
+      <div id="limit-banner"></div>
+      <h2>Limit Register — L1–L11</h2>
+      <div class="card" id="limit-register"><div class="quiet">awaiting data</div></div>
+      <h2>Drawdown Circuit Breakers</h2>
+      <div class="card" id="breaker-ladder"><div class="quiet">awaiting data</div></div>
+      <h2>Position Sizing — Doc 04 §4</h2>
+      <div class="card" style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--dim)">
+        size = min( NAV × risk% ÷ (entry − stop) , weight-cap ÷ entry , L10 × ADV ) — floored to lot<br>
+        reject if value &lt; A$2,000 · size is an output of risk, never conviction · DD1 halves the risk budget
+      </div>
     </section>
 
     <!-- MARKET -->
@@ -206,7 +229,27 @@ async function get(path){
     return {data: await r.json()};
   }catch(e){ return {err:`${path}: unreachable`}; }
 }
-const deg = (el,msg) => { el.innerHTML = `<div class="unreachable">◌ ${esc(msg)}</div>`; };
+async function post(path, body){
+  try{
+    const r = await fetch(API + path, {method:"POST", cache:"no-store",
+      headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+    if(!r.ok) return {err:`${r.status} from ${path}`};
+    return {data: await r.json()};
+  }catch(e){ return {err:`${path}: unreachable`}; }
+}
+/* keep-last-good: never destroy a rendered panel on a transient failure —
+   badge it STALE instead (roundtable P0: panels must degrade independently) */
+const deg = (el,msg) => {
+  if(el.dataset.good === "1"){
+    if(!el.querySelector(".stale-badge"))
+      el.insertAdjacentHTML("afterbegin",
+        `<div class="stale-badge" style="font-family:var(--mono);font-size:9.5px;color:var(--gold);letter-spacing:0.14em;margin-bottom:8px">◌ STALE — ${esc(msg)}</div>`);
+  } else el.innerHTML = `<div class="unreachable">◌ ${esc(msg)}</div>`;
+};
+const good = el => { el.dataset.good = "1"; const b=el.querySelector(".stale-badge"); if(b) b.remove(); };
+const ts = s => (s||"").slice(0,19).replace("T"," ");
+const rel = s => { if(!s) return "—"; const m=(Date.now()-new Date(s))/6e4;
+  return m<1?"just now":m<60?`${m|0}m ago`:m<1440?`${(m/60)|0}h ago`:`${(m/1440)|0}d ago`; };
 
 /* ---------- nav ---------- */
 const views = [...document.querySelectorAll(".nav-item")];
@@ -220,21 +263,66 @@ show(location.hash.replace("#","") || "overview");
 
 /* ---------- status strip ---------- */
 async function renderStrip(){
-  const [h, chain, cost] = await Promise.all([
-    get("/v1/system/health"), get("/v1/audit/events/verify"), get("/v1/research/cost")]);
+  const [h, chain, cost, gates] = await Promise.all([
+    get("/v1/system/health"), get("/v1/audit/events/verify"),
+    get("/v1/research/cost"), get("/v1/market/quality-gates")]);
   const cells = [];
   if(h.data){
+    const armed = h.data.armed === true;  // DATA-BOUND — never hardcode a safety indicator
     cells.push(`<div class="cell"><span class="dot b"></span>MODE ${esc(h.data.trading_mode).toUpperCase()} · ${esc(h.data.limit_mode).toUpperCase()}</div>`);
-    cells.push(`<div class="cell"><span class="dot au"></span>ARMED · NO — SEALED</div>`);
+    cells.push(armed
+      ? `<div class="cell"><span class="dot r"></span>⚠ ARMED · LIVE</div>`
+      : `<div class="cell"><span class="dot au"></span>ARMED · NO — SEALED</div>`);
   } else cells.push(`<div class="cell"><span class="dot r"></span>API UNREACHABLE</div>`);
-  cells.push(chain.data
-    ? `<div class="cell"><span class="dot g"></span>AUDIT CHAIN ${esc(chain.data.chain).toUpperCase()} · ${chain.data.events_verified} EVENTS</div>`
-    : `<div class="cell"><span class="dot r"></span>CHAIN UNVERIFIED</div>`);
+  if(chain.data && chain.data.chain === "ok")
+    cells.push(`<div class="cell"><span class="dot g"></span>AUDIT CHAIN OK · ${chain.data.events_verified} EVENTS</div>`);
+  else if(chain.data && chain.data.chain === "broken")
+    cells.push(`<div class="cell"><span class="dot r"></span>■ CHAIN BROKEN @ SEQ ${chain.data.break_at_seq} — ${esc(chain.data.reason)} — KILL CONDITION</div>`);
+  else
+    cells.push(`<div class="cell"><span class="dot r"></span>CHAIN UNVERIFIED (endpoint unreachable)</div>`);
+  if(gates.data && gates.data.length){
+    const worst = gates.data.some(x=>x.status==="red")?"red":
+                  gates.data.some(x=>x.status==="amber")?"amber":"green";
+    cells.push(`<div class="cell"><span class="dot ${worst==="green"?"g":worst==="amber"?"au":"r"}"></span>DATA GATES ${worst.toUpperCase()}</div>`);
+  }
   if(cost.data){
     const c = cost.data, warn = c.spent_usd > 0.8*c.daily_cap_usd;
-    cells.push(`<div class="cell"><span class="dot ${warn?"r":"g"}"></span>LLM SPEND $${c.spent_usd.toFixed(2)} / $${c.daily_cap_usd.toFixed(0)}</div>`);
+    cells.push(`<div class="cell"><span class="dot ${warn?"r":"g"}"></span>LLM SPEND $${(c.spent_usd??0).toFixed(2)} / $${(c.daily_cap_usd??0).toFixed(0)}${c.spent_usd>=c.daily_cap_usd?" — BREAKER TRIPPED":""}</div>`);
   }
   document.getElementById("strip").innerHTML = cells.join("");
+}
+
+/* ---------- morning brief ---------- */
+async function renderBrief(){
+  const el = document.getElementById("brief");
+  const today = new Date().toISOString().slice(0,10);
+  const [memos, runs, cost, gates, chain] = await Promise.all([
+    get("/v1/research/memos?limit=25"), get("/v1/research/runs?limit=40"),
+    get("/v1/research/cost"), get("/v1/market/quality-gates"),
+    get("/v1/audit/events/verify")]);
+  if(memos.err && runs.err) return deg(el, memos.err);
+  const mToday = (memos.data||[]).filter(m=>(m.created_at||"").startsWith(today));
+  const byRec = {};
+  mToday.forEach(m=>byRec[m.recommendation]=(byRec[m.recommendation]||0)+1);
+  const kills = (runs.data||[]).filter(r=>(r.created_at||"").startsWith(today) && r.status!=="ok").length;
+  const buys = byRec["BUY"]||0;
+  const alerts = [];
+  if(chain.data && chain.data.chain==="broken")
+    alerts.push(`<div class="alert-red">■ KILL CONDITION — audit chain broken at seq ${chain.data.break_at_seq}: ${esc(chain.data.reason)}. Halt and post-mortem before anything else.</div>`);
+  if(gates.data && gates.data.some(x=>x.status==="red"))
+    alerts.push(`<div class="alert-red">■ RED DATA GATE — downstream workflow blocked for the affected market. See Overview gates.</div>`);
+  if(cost.data && cost.data.spent_usd >= cost.data.daily_cap_usd)
+    alerts.push(`<div class="alert-red">■ LLM BUDGET BREAKER TRIPPED — reasoning plane halted for today.</div>`);
+  const recs = Object.entries(byRec).map(([k,v])=>`${v} ${esc(k)}`).join(" · ") || "none";
+  const needsYou = buys>0
+    ? `<span style="color:var(--gold)">■ ${buys} BUY memo(s) await your judgement on the Research page.</span>`
+    : `<span style="color:var(--green)">Nothing needs your signature.</span> <span style="color:var(--dim)">Reason: no BUY memos — no validated strategy exists (momentum v1 failed its gates).</span>`;
+  el.innerHTML = alerts.join("") + `<div class="card" style="font-family:var(--mono);font-size:12px;line-height:2">
+    <div style="font-size:10px;letter-spacing:0.2em;color:var(--faint);margin-bottom:6px">MORNING BRIEF — ${today}</div>
+    <div>${needsYou}</div>
+    <div style="color:var(--dim)">Memos today: ${mToday.length} (${recs}) · cage kills: <span style="color:${kills?"var(--gold)":"var(--dim)"}">${kills}</span> · spend $${((cost.data||{}).spent_usd??0).toFixed(2)} of $${((cost.data||{}).daily_cap_usd??10).toFixed(0)}</div>
+  </div>`;
+  good(el);
 }
 
 /* ---------- live pipeline ---------- */
@@ -248,28 +336,31 @@ async function renderPipeline(){
 
   const gatesOk = g.data && g.data.length && g.data.every(x=>x.status==="green");
   const gatesRed = g.data && g.data.some(x=>x.status==="red");
-  const nRuns = role => (runs.data||[]).filter(r=>r.created_at.startsWith(today) && r.agent_role.startsWith(role)).length;
-  const memosToday = (memos.data||[]).filter(m=>m.created_at.startsWith(today)).length;
+  const nRuns = role => (runs.data||[]).filter(r=>(r.created_at||"").startsWith(today) && r.agent_role.startsWith(role)).length;
+  const memosToday = (memos.data||[]).filter(m=>(m.created_at||"").startsWith(today)).length;
   const nTrials = (trials.data||[]).length;
+  const lastOf = arr => arr && arr.length ? rel(arr[0].created_at) : null;  // endpoints sort desc
+  const lastRun = role => lastOf((runs.data||[]).filter(r=>r.agent_role.startsWith(role)));
+  const lastGate = g.data && g.data.length ? g.data.map(x=>x.gate_date).sort().reverse()[0] : null;
 
   // status: live | ready | alert | p5 ; shape: reason | det | seal
   const stages = [
     {n:"01",l:"DATA",shape:"det",view:"overview",
      st:gatesRed?"alert":gatesOk?"live":"ready",
-     cap:g.data?(gatesRed?"RED GATE — BLOCKED":"GATES GREEN"):"—"},
+     cap:g.data?(gatesRed?"RED GATE — BLOCKED":`GATES GREEN<br>latest ${lastGate||"—"}`):"—"},
     {n:"02",l:"SCANNER",shape:"reason",view:"research",
      st:nRuns("scanner")?"live":"ready",
      cap:nRuns("scanner")?`${nRuns("scanner")} RUNS TODAY`:"BUILT · IDLE"},
     {n:"03",l:"RESEARCH",shape:"reason",view:"research",
      st:nRuns("debate")?"live":"ready",
-     cap:nRuns("debate")?`${nRuns("debate")} DEBATE CALLS`:"BUILT · IDLE"},
+     cap:nRuns("debate")?`${nRuns("debate")} DEBATE CALLS<br>${lastRun("debate")||""}`:"BUILT · IDLE"},
     {n:"04",l:"QUANT",shape:"reason",view:"quant",
      st:nTrials?"live":"ready",
-     cap:nTrials?`${nTrials} TRIALS REGISTERED`:"REGISTRY EMPTY"},
+     cap:nTrials?`${nTrials} TRIALS<br>${lastOf(trials.data)||""}`:"REGISTRY EMPTY"},
     {n:"05",l:"CIO MEMO",shape:"reason",view:"research",
      st:memosToday?"live":"ready",
-     cap:memosToday?`${memosToday} MEMOS TODAY`:"NO MEMOS TODAY"},
-    {n:"06",l:"RISK ENGINE",shape:"det",view:null,
+     cap:memosToday?`${memosToday} MEMOS TODAY<br>${lastOf(memos.data)||""}`:"NO MEMOS TODAY"},
+    {n:"06",l:"RISK ENGINE",shape:"det",view:"risk",
      st:"ready",cap:"L1–L11 ARMED<br>AWAITING PROPOSALS"},
     {n:"07",l:"HUMAN SEAL",shape:"seal",view:null,
      st:"seal",cap:"QUEUE EMPTY<br>NOTHING NEEDS YOU"},
@@ -323,10 +414,11 @@ async function renderOverview(){
   const ael = document.getElementById("audit");
   if(a.err) deg(ael, a.err);
   else if(!a.data.length) ael.innerHTML = `<div class="quiet">chain is empty</div>`;
-  else ael.innerHTML = a.data.map(e=>`<div class="ledger-row">
+  else { ael.innerHTML = a.data.map(e=>`<div class="ledger-row" ${e.event_type.includes("fail")||e.event_type.includes("breach")?'style="color:#ffb3b3"':""}>
       <span class="seq">#${e.seq}</span><span class="etype">${esc(e.event_type)}</span>
       <span class="eent">${esc(e.entity_type)} · ${esc(e.entity_id)} · ${esc(e.actor_type)}</span>
-      <span class="etime">${esc(e.created_at.slice(0,19).replace("T"," "))}</span></div>`).join("");
+      <span class="etime">${esc(ts(e.created_at))}</span></div>`).join("");
+    good(ael); }
 }
 
 /* ---------- research ---------- */
@@ -351,8 +443,37 @@ async function renderResearch(){
         ${x.debate_summary?`<div class="debate-block"><div class="sect-label" style="color:rgba(90,167,255,0.7)">DEBATE — BULL v BEAR</div><p>${esc(x.debate_summary)}</p></div>`:""}
         <div><div class="sect-label">EVIDENCE</div><div class="chips">${(x.evidence_refs||[]).map(r=>`<span class="chip">${esc(r)}</span>`).join("")||`<span class="chip">none cited</span>`}</div></div>
       </div>
-      <div class="memo-foot"><span>${esc(x.created_at.slice(0,16).replace("T"," "))}</span><span>model ${esc(x.model||"—")}</span><span>run ${esc(x.run_status||"—")}</span></div>
+      <div class="memo-foot"><span>${esc(ts(x.created_at))}</span><span>model ${esc(x.model||"—")}</span><span>run ${esc(x.run_status||"—")}</span></div>
+      <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        ${x.review_verdict
+          ? `<span class="pill ${x.review_verdict==="agree"?"g":"r"}">REVIEWED — ${esc(x.review_verdict).toUpperCase()}</span>
+             <span class="note" style="margin:0">${esc(x.review_notes||"")} · ${esc(rel(x.reviewed_at))}</span>
+             <button class="rv" data-id="${esc(x.id)}" data-v="${x.review_verdict==="agree"?"disagree":"agree"}"
+               style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:10px;padding:3px 9px;cursor:pointer">CHANGE TO ${x.review_verdict==="agree"?"DISAGREE":"AGREE"}</button>`
+          : `<span class="sect-label" style="margin:0">YOUR JUDGEMENT (Doc 08 gate):</span>
+             <button class="rv" data-id="${esc(x.id)}" data-v="agree" style="background:none;border:1px solid rgba(53,217,138,0.5);color:var(--green);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer">AGREE</button>
+             <button class="rv" data-id="${esc(x.id)}" data-v="disagree" style="background:none;border:1px solid rgba(255,92,92,0.5);color:var(--red);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer">DISAGREE</button>
+             <input class="rv-notes" data-id="${esc(x.id)}" placeholder="notes (optional)" size="40" style="font-size:11px;padding:5px 9px">`}
+      </div>
     </article>`).join("");
+  el.querySelectorAll("button.rv").forEach(b=>b.onclick=async()=>{
+    const notes = el.querySelector(`input.rv-notes[data-id="${b.dataset.id}"]`);
+    const r = await post(`/v1/research/memos/${b.dataset.id}/review`,
+                         {verdict: b.dataset.v, notes: notes?notes.value:""});
+    if(r.err) b.textContent = "FAILED — RETRY";
+    else { renderResearch(); renderProgress(); }
+  });
+  good(el);
+}
+
+async function renderProgress(){
+  const p = await get("/v1/research/review-progress");
+  const el = document.getElementById("review-progress");
+  if(p.data){
+    const d = p.data;
+    el.textContent = `PHASE-2 REVIEW: ${d.reviewed} / ${d.target} (${d.agree}✓ ${d.disagree}✗)`;
+    el.className = "pill " + (d.reviewed >= d.target ? "g" : "bl");
+  }
 }
 document.getElementById("sym-filter").addEventListener("input", ()=>renderResearch());
 
@@ -363,25 +484,78 @@ async function renderRuns(){
   if(!r.data.length) return el.innerHTML = `<div class="quiet">no runs yet</div>`;
   el.innerHTML = `<table><tr><th>WHEN</th><th>ROLE</th><th>STATUS</th><th>MODEL</th><th>TOKENS IN/OUT</th><th>COST</th><th>TEMPLATE</th></tr>` +
     r.data.map(x=>`<tr>
-      <td>${esc(x.created_at.slice(5,19).replace("T"," "))}</td>
+      <td>${esc(ts(x.created_at).slice(5))}</td>
       <td>${esc(x.agent_role)}</td>
       <td><span class="pill ${x.status==="ok"?"g":x.status==="budget_kill"?"am":"r"}">${esc(x.status).toUpperCase()}</span>${x.shadow?` <span class="pill au">SHADOW</span>`:""}</td>
       <td style="color:var(--faint)">${esc(x.model)}</td>
       <td>${x.tokens_in??"—"} / ${x.tokens_out??"—"}</td>
-      <td>$${(x.cost_usd).toFixed(4)}</td>
+      <td>$${(x.cost_usd??0).toFixed(4)}</td>
       <td style="color:var(--faint)">${esc(x.template||"—")}</td></tr>`).join("") + `</table>`;
+  good(el);
+}
+
+/* ---------- risk ---------- */
+async function renderRisk(){
+  const [ls, br] = await Promise.all([get("/v1/risk/limit-set/current"), get("/v1/risk/breakers")]);
+  const banner = document.getElementById("limit-banner");
+  const reg = document.getElementById("limit-register");
+  if(ls.err) deg(reg, ls.err);
+  else if(!ls.data.seeded){ reg.innerHTML = `<div class="quiet">no limit set seeded</div>`; }
+  else {
+    const d = ls.data;
+    banner.innerHTML = d.active
+      ? `<div class="card" style="border-color:rgba(53,217,138,0.4);font-family:var(--mono);font-size:11.5px;color:var(--dim)">LIMIT SET v${d.version} · ${esc(d.mode).toUpperCase()} · ACTIVE since ${esc(d.effective_from)} · ${esc(d.created_by)}</div>`
+      : `<div class="alert-red" style="border-color:rgba(226,185,91,0.55);background:rgba(226,185,91,0.06);color:#f3e3bd">■ LIMIT SET v${d.version} NOT YET EFFECTIVE — activates ${esc(d.effective_from)}. Until then the risk engine refuses to run ("no limit set effective"). This is by design: limits take effect next trading day (Doc 04 §10).</div>`;
+    reg.innerHTML = `<table><tr><th>RULE</th><th>DESCRIPTION</th><th>VALUE</th><th>UTILISATION</th></tr>` +
+      d.register.map(r=>`<tr><td>${esc(r.rule)}</td><td style="white-space:normal">${esc(r.description)}</td>
+        <td>${r.value==null?"—":esc(String(r.value))}</td>
+        <td style="color:var(--faint)">awaiting first proposal</td></tr>`).join("") + `</table>`;
+    good(reg);
+  }
+  const bel = document.getElementById("breaker-ladder");
+  if(br.err) deg(bel, br.err);
+  else {
+    bel.innerHTML = `<div class="note">CURRENT LEVEL: <span class="pill g">${esc(br.data.current_level)}</span> — ${esc(br.data.provenance)}</div>
+      <table><tr><th>LEVEL</th><th>TRIGGER</th><th>AUTOMATIC ACTION</th></tr>` +
+      br.data.ladder.map(l=>`<tr><td>${esc(l.level)}</td><td class="num-neg">${l.trigger_pct}%</td>
+        <td style="white-space:normal">${esc(l.action)}</td></tr>`).join("") + `</table>`;
+    good(bel);
+  }
 }
 
 /* ---------- quant ---------- */
 async function renderQuant(){
+  const gr = await get("/v1/quant/gate-report");
+  const gel = document.getElementById("gate-report");
+  if(gr.err) deg(gel, gr.err);
+  else if(!gr.data.available || !gr.data.symbols.length)
+    gel.innerHTML = `<div class="quiet">no real-data gate report yet</div>`;
+  else {
+    gel.innerHTML = `<div class="note" style="color:var(--gold)">⚠ ${esc(gr.data.warning)}</div>` +
+      gr.data.symbols.map(s=>`
+      <div class="${s.verdict==="PASS"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:12px;align-items:flex-start">
+        <span class="stamp">${esc(s.verdict)}</span>
+        <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.9">
+          <b style="color:var(--txt)">${esc(s.symbol)}</b> · ${esc(gr.data.strategy)} · ${esc(s.window)}<br>
+          null-model p <span class="${(s.null_p??1)>s.null_p_max?"num-neg":"num-pos"}">${s.null_p??"—"}</span> vs ≤ ${s.null_p_max}
+          · deflated Sharpe <span class="${(s.dsr??0)<s.dsr_min?"num-neg":"num-pos"}">${s.dsr??"—"}</span> vs ≥ ${s.dsr_min} (n_trials ${s.n_trials??"—"})<br>
+          strategy ${s.strategy_return_pct??"—"}% vs buy-and-hold ${s.bh_return_pct??"—"}%
+          · walk-forward ${s.wf_positive??"—"}/${s.wf_total??"—"} folds positive${s.fold_returns?` (${esc(s.fold_returns)})`:""}<br>
+          Sharpe ${s.sharpe??"—"} · max DD ${s.max_drawdown_pct??"—"}%${s.trial_id?` · trial <span style="color:var(--faint)">${esc(s.trial_id.slice(0,8))}</span>`:""}
+        </div>
+      </div>`).join("");
+    good(gel);
+  }
+
   const v = await get("/v1/quant/verdicts?limit=50");
   const vel = document.getElementById("verdicts");
   if(v.err) deg(vel, v.err);
-  else if(!v.data.length) vel.innerHTML = `<div class="quiet">no approval verdicts recorded — the first real run sought none (ADR-0004: the one-year window is not decision-grade). Gate verdicts live in docs/reports/.</div>`;
-  else vel.innerHTML = v.data.map(x=>`
-    <div class="${x.verdict==="approve"?"fail-seal pass-seal":"fail-seal"}">
+  else if(!v.data.length) vel.innerHTML = `<div class="quiet">no approval decisions recorded — none sought on real data (ADR-0004: the one-year window is not decision-grade)</div>`;
+  else vel.innerHTML = `<div class="note">Change-control decisions only. Provenance matters: entries below predate real-data validation.</div>` + v.data.map(x=>`
+    <div class="${x.verdict==="approve"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:10px">
       <span class="stamp">${x.verdict==="approve"?"PASS":"FAIL"}</span>
-      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${esc(x.created_at.slice(0,16).replace("T"," "))} — ${esc(x.reasons||"no reasons recorded")}</div>
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${esc(ts(x.created_at))} — ${esc(x.strategy_name||"unknown strategy")} (state: ${esc(x.strategy_state||"—")}) — ${esc(x.reasons||"no reasons recorded")}<br>
+      <span class="pill am">SYNTHETIC-FIXTURE ERA</span> <span style="color:var(--faint)">predates real-data validation — see the gate report above for the honest record</span></div>
     </div>`).join("");
 
   const t = await get("/v1/quant/trials?limit=50");
@@ -443,8 +617,15 @@ document.getElementById("inst").addEventListener("change",()=>renderMarket());
 document.getElementById("days").addEventListener("change",()=>renderMarket());
 
 /* ---------- refresh loop ---------- */
+/* allSettled + per-renderer isolation: one panel's throw must never freeze the
+   rest (roundtable P0) */
+const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
+                   renderResearch, renderProgress, renderRuns, renderQuant,
+                   renderRisk, renderMarket];
 async function refreshAll(){
-  await Promise.all([renderStrip(),renderPipeline(),renderOverview(),renderResearch(),renderRuns(),renderQuant(),renderMarket()]);
+  const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
+  results.forEach((r,i)=>{ if(r.status==="rejected")
+    console.warn("panel failed:", RENDERERS[i].name, r.reason); });
   document.getElementById("refresh-at").textContent="REFRESHED "+new Date().toTimeString().slice(0,8);
 }
 refreshAll();

@@ -86,3 +86,82 @@ def test_research_memos_and_cost(client):
     cost = c.get("/v1/research/cost").json()
     assert cost["daily_cap_usd"] > 0
     assert cost["remaining_usd"] <= cost["daily_cap_usd"]
+
+
+def test_risk_limit_set_reports_effective_date_honestly(client):
+    """Roundtable catch: limit set v1 activates 2026-07-13 — before that the
+    console must say NOT ACTIVE, not pretend the engine is governed."""
+    from pathlib import Path
+
+    from atlas.dcp.risk.seed_limits import seed_limit_set
+    c, s = client
+    seed_limit_set(s, Path(__file__).parents[2] / "seeds" / "limit_set_v1.json")
+    s.commit()
+    d = c.get("/v1/risk/limit-set/current").json()
+    assert d["seeded"] is True and d["version"] == 1 and d["mode"] == "small_aum"
+    assert d["effective_from"] == "2026-07-13"
+    rules = {r["rule"]: r["value"] for r in d["register"]}
+    assert rules["L6"] == 0.01 and rules["L9"] == 2
+
+
+def test_risk_breakers_ladder(client):
+    c, _ = client
+    d = c.get("/v1/risk/breakers").json()
+    assert d["current_level"] == "NONE" and "NAV" in d["provenance"]
+    assert [x["level"] for x in d["ladder"]] == ["DD1", "DD2", "DD3"]
+
+
+def test_quant_gate_report_surfaces_the_real_fail(client):
+    c, _ = client
+    d = c.get("/v1/quant/gate-report").json()
+    assert d["available"] is True
+    avgo = next(x for x in d["symbols"] if x["symbol"] == "AVGO")
+    assert avgo["verdict"] == "FAIL"
+    assert avgo["null_p"] == 0.059 and avgo["dsr"] == 0.257
+    assert "ADR-0004" in d["warning"]
+
+
+def test_chain_break_is_structured_state_not_500(client):
+    from datetime import UTC, datetime
+
+    from atlas.core.audit_repo import PostgresAuditLog
+    from atlas.core.clock import FrozenClock
+    c, s = client
+    log = PostgresAuditLog(s, FrozenClock(datetime(2026, 7, 11, 6, tzinfo=UTC)))
+    for i in range(2):
+        log.append(event_type="t.e", entity_type="t", entity_id=str(i),
+                   actor_type="scheduler", actor_id="t", payload={"i": i})
+    s.commit()
+    assert c.get("/v1/audit/events/verify").json()["chain"] == "ok"
+    s.execute(text("UPDATE audit.decision_events SET payload = CAST(:p AS jsonb) "
+                   "WHERE entity_id='0'"), {"p": '{"i": 9}'})
+    s.commit()
+    d = c.get("/v1/audit/events/verify").json()
+    assert d["chain"] == "broken"
+    assert d["break_at_seq"] is not None and "mismatch" in d["reason"]
+
+
+def test_memo_review_write_path(client):
+    c, s = client
+    memo_id = s.execute(text(
+        "INSERT INTO research.memos (memo_type, instrument_symbol, recommendation, "
+        " conviction, thesis, dissent) "
+        "VALUES ('committee','TAPI','REJECT','LOW','t','d') RETURNING id")).scalar()
+    s.commit()
+    r = c.post(f"/v1/research/memos/{memo_id}/review",
+               json={"verdict": "agree", "notes": "solid reasoning"})
+    assert r.status_code == 200 and r.json()["reviewed"] >= 1
+    # upsert: changing the verdict replaces, not duplicates
+    c.post(f"/v1/research/memos/{memo_id}/review", json={"verdict": "disagree"})
+    p = c.get("/v1/research/review-progress").json()
+    assert p["reviewed"] == 1 and p["disagree"] == 1 and p["target"] == 10
+    memo = next(m for m in c.get("/v1/research/memos?symbol=TAPI").json()
+                if m["id"] == str(memo_id))
+    assert memo["review_verdict"] == "disagree"
+    # audited as a HUMAN action
+    n = s.execute(text("SELECT count(*) FROM audit.decision_events "
+                       "WHERE event_type='memo.review.recorded' "
+                       "AND actor_type='human'")).scalar()
+    assert n == 2
+    assert c.post("/v1/research/memos/00000000-0000-0000-0000-000000000000/review",
+                  json={"verdict": "agree"}).status_code == 404
