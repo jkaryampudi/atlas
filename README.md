@@ -28,11 +28,11 @@ alembic upgrade head
 ```
 
 ## Remaining for Phase 1 exit (see docs/architecture/08-development-roadmap.md)
-- [ ] EODHD live adapter + ingestion job writing `price_bars_daily` and gates
-- [ ] FX rates ingestion (`fx_rates_daily`)
-- [ ] 2-year history backfill for seed universe; zero red gates on a clean day
-- [ ] Golden ingestion regression tests
+- [x] EODHD live adapter + ingestion job writing `price_bars_daily` and gates (vendor symbol map; exchange calendars XNYS/XASX replace weekend-skip)
+- [x] FX rates ingestion (`fx_rates_daily`): daily job `python -m atlas.dcp.market_data.fx --date …` + range backfill
+- [ ] 2-year history backfill for seed universe; zero red gates on a clean day — CLI built (`python -m atlas.dcp.market_data.backfill --years 2 --end …`), **real run pending EODHD key in `.env`**
+- [x] Golden ingestion regression tests (fixture backfill week incl. split-explained move; honest-RED market test)
 - [ ] Audit repository (Postgres-backed chain) + nightly verification job
-- [ ] `make replay DATE=…` end-to-end on fixtures
+- [x] `make replay DATE=…` end-to-end on fixtures (gate=green, chain verified)
 - [ ] `/v1/market/*`, `/v1/portfolio/snapshot` read endpoints
 - [ ] Streamlit Overview page (pure API client)

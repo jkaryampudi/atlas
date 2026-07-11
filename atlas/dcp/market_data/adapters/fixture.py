@@ -42,12 +42,25 @@ class FixtureAdapter:
                                          ratio=Decimal(row["ratio"])))
         return out
 
-    def fetch_fx(self, base: str, quote: str, on: date) -> float | None:
+    def fetch_fx(self, base: str, quote: str, on: date) -> Decimal | None:
         path = self._root / "fx.csv"
         if not path.exists():
             return None
         with path.open() as f:
             for row in csv.DictReader(f):
                 if (row["base"], row["quote"], row["date"]) == (base, quote, on.isoformat()):
-                    return float(row["rate"])
+                    return Decimal(row["rate"])
         return None
+
+    def fetch_fx_series(self, base: str, quote: str, start: date,
+                        end: date) -> dict[date, Decimal]:
+        path = self._root / "fx.csv"
+        out: dict[date, Decimal] = {}
+        if not path.exists():
+            return out
+        with path.open() as f:
+            for row in csv.DictReader(f):
+                d = date.fromisoformat(row["date"])
+                if row["base"] == base and row["quote"] == quote and start <= d <= end:
+                    out[d] = Decimal(row["rate"])
+        return out

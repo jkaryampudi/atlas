@@ -5,7 +5,7 @@ Usage: python -m atlas.dcp.market_data.replay --date 2024-07-15
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime, date, timedelta
+from datetime import UTC, datetime, date
 from pathlib import Path
 
 from atlas.core.audit_repo import PostgresAuditLog
@@ -26,11 +26,8 @@ def main() -> None:
     with session_scope() as s:
         seed_instruments(s, SEEDS / "instruments_seed.csv")
         audit = PostgresAuditLog(s, clock)
-        prev = day - timedelta(days=1)
-        while prev.weekday() >= 5:          # naive weekend skip; exchange holiday
-            prev -= timedelta(days=1)       # calendars are a Phase 1 checklist item
         status = ingest_day(session=s, adapter=FixtureAdapter(FIXTURES), audit=audit,
-                            market="US", day=day, lookback_days=[prev])
+                            market="US", day=day, lookback_sessions=1)
         verified = audit.verify()
     print(f"replay {day}: gate={status.value} chain_verified={verified} events")
 

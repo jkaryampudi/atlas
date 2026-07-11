@@ -1,4 +1,9 @@
-"""Daily ingestion: instruments seed, bars, FX, quality gate — with audit events."""
+"""Daily ingestion: instruments seed, bars, quality gate — with audit events.
+
+Expected days come from the exchange calendar (task 1a): the previous
+`lookback_sessions` sessions plus the day itself when it is a session. A
+non-trading day writes an explicit green gate instead of a false RED.
+"""
 from __future__ import annotations
 
 import csv
@@ -11,8 +16,9 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
-from atlas.dcp.market_data.models import Bar, GateStatus
-from atlas.dcp.market_data.quality import evaluate_gate
+from atlas.dcp.market_data.calendars import is_trading_day, recent_sessions
+from atlas.dcp.market_data.models import Bar, GateStatus, Split
+from atlas.dcp.market_data.quality import GateResult, evaluate_gate
 
 
 def seed_instruments(session: Session, csv_path: Path) -> int:
@@ -30,47 +36,67 @@ def seed_instruments(session: Session, csv_path: Path) -> int:
     return n
 
 
+def upsert_bar(session: Session, instrument_id: object, bar: Bar, source: str) -> None:
+    session.execute(text(
+        "INSERT INTO market.price_bars_daily "
+        "(instrument_id, bar_date, open, high, low, close, volume, source, quality_flags) "
+        "VALUES (:iid, :d, :o, :h, :l, :c, :v, :src, :qf) "
+        "ON CONFLICT (instrument_id, bar_date) DO UPDATE SET "
+        "  open=:o, high=:h, low=:l, close=:c, volume=:v, source=:src"),
+        {"iid": instrument_id, "d": bar.bar_date, "o": bar.open, "h": bar.high,
+         "l": bar.low, "c": bar.close, "v": bar.volume, "src": source,
+         "qf": list(bar.quality_flags)})
+
+
+def record_split(session: Session, instrument_id: object, split: Split, source: str) -> None:
+    session.execute(text(
+        "INSERT INTO market.corporate_actions "
+        "(instrument_id, action_date, action_type, ratio, source) "
+        "VALUES (:iid, :d, 'split', :r, :src) ON CONFLICT DO NOTHING"),
+        {"iid": instrument_id, "d": split.action_date, "r": split.ratio, "src": source})
+
+
+def write_gate(session: Session, gate: GateResult) -> None:
+    session.execute(text(
+        "INSERT INTO market.data_quality_gates (market, gate_date, status, reasons) "
+        "VALUES (:m, :d, :s, CAST(:r AS jsonb)) "
+        "ON CONFLICT (market, gate_date) DO UPDATE SET status=:s, reasons=CAST(:r AS jsonb)"),
+        {"m": gate.market, "d": gate.gate_date, "s": gate.status.value,
+         "r": json.dumps(list(gate.reasons))})
+
+
 def ingest_day(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAuditLog,
-               market: str, day: date, lookback_days: list[date]) -> GateStatus:
+               market: str, day: date, lookback_sessions: int = 1) -> GateStatus:
+    if not is_trading_day(market, day):
+        gate = GateResult(market=market, gate_date=day, status=GateStatus.GREEN,
+                          reasons=("non-trading day",))
+        write_gate(session, gate)
+        audit.append(event_type="market.bars.ingested", entity_type="market",
+                     entity_id=market, actor_type="scheduler", actor_id="ingest_day",
+                     payload={"market": market, "day": day.isoformat(), "instruments": 0,
+                              "gate": gate.status.value, "reasons": list(gate.reasons)})
+        return gate.status
+
+    expected_days = recent_sessions(market, day, lookback=lookback_sessions)
+    window_start = expected_days[0]
     instruments = session.execute(text(
         "SELECT id, symbol FROM market.instruments "
         "WHERE market = :m AND is_active"), {"m": market}).mappings().all()
 
     bars_by_day: dict[date, list[Bar]] = {}
     explained: set[str] = set()
-    window_start = min(lookback_days + [day])
     for inst in instruments:
         for sp in adapter.fetch_splits(inst["symbol"], window_start, day):
             explained.add(inst["symbol"])
-            session.execute(text(
-                "INSERT INTO market.corporate_actions "
-                "(instrument_id, action_date, action_type, ratio, source) "
-                "VALUES (:iid, :d, 'split', :r, :src) ON CONFLICT DO NOTHING"),
-                {"iid": inst["id"], "d": sp.action_date, "r": sp.ratio,
-                 "src": type(adapter).__name__})
-        bars = adapter.fetch_bars(inst["symbol"], window_start, day)
-        for b in bars:
+            record_split(session, inst["id"], sp, type(adapter).__name__)
+        for b in adapter.fetch_bars(inst["symbol"], window_start, day):
             bars_by_day.setdefault(b.bar_date, []).append(b)
-            session.execute(text(
-                "INSERT INTO market.price_bars_daily "
-                "(instrument_id, bar_date, open, high, low, close, volume, source, "
-                " quality_flags) "
-                "VALUES (:iid, :d, :o, :h, :l, :c, :v, :src, :qf) "
-                "ON CONFLICT (instrument_id, bar_date) DO UPDATE SET "
-                "  open=:o, high=:h, low=:l, close=:c, volume=:v, source=:src"),
-                {"iid": inst["id"], "d": b.bar_date, "o": b.open, "h": b.high, "l": b.low,
-                 "c": b.close, "v": b.volume, "src": type(adapter).__name__,
-                 "qf": list(b.quality_flags)})
+            upsert_bar(session, inst["id"], b, type(adapter).__name__)
 
-    gate = evaluate_gate(market=market, as_of=day, expected_days=lookback_days + [day],
+    gate = evaluate_gate(market=market, as_of=day, expected_days=expected_days,
                          bars_by_day=bars_by_day,
                          explained_symbols=frozenset(explained))
-    session.execute(text(
-        "INSERT INTO market.data_quality_gates (market, gate_date, status, reasons) "
-        "VALUES (:m, :d, :s, CAST(:r AS jsonb)) "
-        "ON CONFLICT (market, gate_date) DO UPDATE SET status=:s, reasons=CAST(:r AS jsonb)"),
-        {"m": market, "d": day, "s": gate.status.value,
-         "r": json.dumps(list(gate.reasons))})
+    write_gate(session, gate)
 
     audit.append(event_type="market.bars.ingested", entity_type="market", entity_id=market,
                  actor_type="scheduler", actor_id="ingest_day",
