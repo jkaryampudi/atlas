@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070a12; --card:#0d1220; --line:rgba(150,170,210,0.13);
+    --line-strong:rgba(150,170,210,0.32);
+    --txt:rgba(232,237,248,0.92); --dim:rgba(206,217,240,0.55); --faint:rgba(206,217,240,0.38);
+    --green:#35d98a; --red:#ff5c5c; --gold:#e2b95b; --blue:#5aa7ff;
+    --mono:'JetBrains Mono',monospace; --disp:'Space Grotesk',Inter,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:Inter,sans-serif;font-size:14px;line-height:1.55}
+  a{color:inherit;text-decoration:none}
+
+  .shell{display:grid;grid-template-columns:216px 1fr;min-height:100vh}
+  .rail{border-right:1px solid var(--line);padding:26px 18px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+  .wordmark{font-family:var(--mono);font-size:11px;letter-spacing:0.22em;color:var(--dim);margin-bottom:6px}
+  .badge-paper{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.18em;color:var(--gold);border:1px solid rgba(226,185,91,0.45);padding:4px 9px;margin-bottom:22px}
+  .nav-item{font-family:var(--mono);font-size:11.5px;letter-spacing:0.14em;color:var(--dim);padding:9px 10px;border-left:2px solid transparent;cursor:pointer}
+  .nav-item:hover{color:var(--txt)}
+  .nav-item.active{color:var(--blue);border-left-color:var(--blue);background:rgba(90,167,255,0.06)}
+  .rail-foot{margin-top:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;color:var(--faint);line-height:1.8}
+
+  .main{padding:0 34px 60px;min-width:0}
+  .strip{display:flex;flex-wrap:wrap;align-items:stretch;border-bottom:1px solid var(--line);margin:0 -34px;padding:0 34px;background:#0a0f1c}
+  .cell{display:flex;align-items:center;gap:8px;padding:13px 20px;border-left:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:rgba(220,230,248,0.78)}
+  .cell:first-child{border-left:none;padding-left:0}
+  .dot{width:7px;height:7px;display:inline-block;flex:none}
+  .dot.g{background:var(--green);box-shadow:0 0 8px rgba(53,217,138,0.7)}
+  .dot.r{background:var(--red);box-shadow:0 0 8px rgba(255,92,92,0.7)}
+  .dot.au{background:var(--gold);box-shadow:0 0 8px rgba(226,185,91,0.7)}
+  .dot.b{background:var(--blue);box-shadow:0 0 8px rgba(90,167,255,0.7)}
+
+  h1{font-family:var(--disp);font-weight:600;font-size:26px;letter-spacing:-0.01em;margin:34px 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:26px}
+  h2{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:0.22em;color:rgba(140,185,255,0.72);margin:34px 0 12px;text-transform:uppercase}
+
+  .card{background:var(--card);border:1px solid var(--line);padding:18px 20px}
+  .grid{display:grid;gap:14px}
+
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th{font-size:10px;letter-spacing:0.14em;color:var(--faint);text-align:left;font-weight:500;padding:8px 14px 8px 0;border-bottom:1px solid var(--line)}
+  td{padding:9px 14px 9px 0;border-bottom:1px solid var(--line);color:rgba(220,230,248,0.8);white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .num-neg{color:var(--red)} .num-pos{color:var(--green)}
+
+  .pill{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:0.12em;padding:2px 9px;border:1px solid}
+  .pill.g{color:var(--green);border-color:rgba(53,217,138,0.5)}
+  .pill.r{color:var(--red);border-color:rgba(255,92,92,0.5)}
+  .pill.am{color:var(--gold);border-color:rgba(226,185,91,0.5)}
+  .pill.bl{color:var(--blue);border-color:rgba(90,167,255,0.5)}
+  .pill.gray{color:var(--dim);border-color:var(--line-strong)}
+
+  .alert-red{border:1px solid rgba(255,92,92,0.55);background:rgba(255,92,92,0.06);padding:14px 18px;font-family:var(--mono);font-size:12px;color:#ffb3b3;margin-bottom:14px}
+  .quiet{color:var(--faint);font-family:var(--mono);font-size:11.5px;padding:14px 0}
+
+  .ledger{font-family:var(--mono);font-size:11.5px}
+  .ledger-row{display:flex;gap:16px;padding:7px 0;border-bottom:1px solid var(--line);color:rgba(220,230,248,0.7)}
+  .ledger-row:last-child{border-bottom:none}
+  .seq{color:var(--faint);width:46px;flex:none;text-align:right}
+  .etype{color:var(--blue);width:230px;flex:none;overflow:hidden;text-overflow:ellipsis}
+  .eent{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}
+  .etime{color:var(--faint);flex:none}
+
+  .memo{background:var(--card);border:1px solid var(--line);padding:0;position:relative;overflow:hidden}
+  .memo-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .rec{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:0.06em;padding:5px 14px;border:1.5px solid}
+  .rec.BUY{color:var(--green);border-color:var(--green)}
+  .rec.WATCHLIST{color:var(--blue);border-color:var(--blue)}
+  .rec.REJECT{color:var(--red);border-color:var(--red)}
+  .rec.INSUFFICIENT_EVIDENCE{color:var(--dim);border-color:var(--line-strong);font-size:12px}
+  .sym{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:0.08em}
+  .conv{font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--dim)}
+  .shadow-ribbon{position:absolute;top:14px;right:-42px;transform:rotate(38deg);background:rgba(226,185,91,0.15);border:1px solid rgba(226,185,91,0.5);color:var(--gold);font-family:var(--mono);font-size:9px;letter-spacing:0.14em;padding:3px 44px}
+  .memo-body{padding:18px 20px;display:grid;gap:16px}
+  .sect-label{font-family:var(--mono);font-size:9.5px;letter-spacing:0.2em;color:var(--faint);margin-bottom:5px}
+  .memo p{font-size:13.5px;line-height:1.65;color:rgba(220,230,248,0.82)}
+  .dissent-block{border-left:2px solid var(--red);padding-left:14px}
+  .debate-block{border-left:2px solid var(--blue);padding-left:14px}
+  .kill li{list-style:none;font-size:13px;color:rgba(220,230,248,0.75);padding:4px 0 4px 22px;position:relative}
+  .kill li::before{content:'✕';position:absolute;left:0;color:var(--red);font-family:var(--mono);font-size:11px;top:6px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line-strong);padding:2px 8px}
+  .memo-foot{padding:10px 20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--faint);display:flex;gap:18px}
+
+  input,select{background:#0a0f1c;border:1px solid var(--line-strong);color:var(--txt);font-family:var(--mono);font-size:12px;padding:8px 12px;outline:none}
+  input:focus,select:focus{border-color:var(--blue)}
+
+  .fail-seal{display:flex;align-items:center;gap:14px;border:1px solid rgba(255,92,92,0.45);background:rgba(255,92,92,0.05);padding:14px 18px}
+  .fail-seal .stamp{font-family:var(--disp);font-weight:700;color:var(--red);border:2px solid var(--red);padding:4px 12px;transform:rotate(-4deg);letter-spacing:0.1em;flex:none}
+  .pass-seal .stamp{color:var(--green);border-color:var(--green)}
+  .pass-seal{border-color:rgba(53,217,138,0.4);background:rgba(53,217,138,0.04)}
+
+  svg text{font-family:var(--mono);font-size:9px;fill:var(--faint)}
+  .unreachable{color:var(--faint);font-family:var(--mono);font-size:11px;padding:10px 0}
+  .view{display:none} .view.active{display:block}
+  .note{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="rail">
+    <div class="wordmark">ATLAS AI CAPITAL</div>
+    <div class="badge-paper">◉ PAPER MODE</div>
+    <div class="nav-item" data-view="overview">OVERVIEW</div>
+    <div class="nav-item" data-view="research">RESEARCH</div>
+    <div class="nav-item" data-view="quant">QUANT</div>
+    <div class="nav-item" data-view="market">MARKET</div>
+    <div class="rail-foot">EVERY DECISION<br>RECONSTRUCTIBLE<br>· HASH-CHAINED ·<br><br><span id="refresh-at">—</span></div>
+  </nav>
+
+  <main class="main">
+    <div class="strip" id="strip"><div class="cell">connecting to API…</div></div>
+
+    <!-- OVERVIEW -->
+    <section class="view" id="view-overview">
+      <h1>Overview</h1>
+      <div class="sub">The machine tells the truth. The human holds the seal.</div>
+      <div id="gates-alerts"></div>
+      <h2>Data Freshness</h2>
+      <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
+      <h2>Quality Gates — Latest Per Market</h2>
+      <div class="card" id="gates"><div class="quiet">awaiting data</div></div>
+      <h2>Audit Ledger — Recent Events</h2>
+      <div class="card ledger" id="audit"><div class="quiet">awaiting data</div></div>
+    </section>
+
+    <!-- RESEARCH -->
+    <section class="view" id="view-research">
+      <h1>Research</h1>
+      <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
+      <div style="margin-bottom:18px"><input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34"></div>
+      <div class="grid" id="memos"><div class="quiet">awaiting data</div></div>
+    </section>
+
+    <!-- QUANT -->
+    <section class="view" id="view-quant">
+      <h1>Quant</h1>
+      <div class="sub">Honest failures are deliverables. A failed gate is the system working.</div>
+      <h2>Validation Verdicts</h2>
+      <div class="grid" id="verdicts"><div class="quiet">awaiting data</div></div>
+      <h2>Trial Registry</h2>
+      <div class="note">Every backtest is registered — the deflated Sharpe uses this count. <span id="trial-count"></span></div>
+      <div class="card" style="overflow-x:auto" id="trials"><div class="quiet">awaiting data</div></div>
+    </section>
+
+    <!-- MARKET -->
+    <section class="view" id="view-market">
+      <h1>Market</h1>
+      <div class="sub">Vendor bars, split-adjusted on read. What the gates guard.</div>
+      <div style="display:flex;gap:12px;margin-bottom:18px;align-items:center">
+        <select id="inst"></select>
+        <select id="days"><option>60</option><option selected>90</option><option>180</option><option>250</option></select>
+        <span class="note" style="margin:0">sessions</span>
+      </div>
+      <div class="card" id="chart"><div class="quiet">awaiting data</div></div>
+      <h2>FX — USD → AUD</h2>
+      <div class="card" id="fx"><div class="quiet">awaiting data</div></div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+const API = location.origin;  // served BY the API — same origin, no CORS
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function get(path){
+  try{
+    const r = await fetch(API + path, {cache:"no-store"});
+    if(!r.ok) return {err:`${r.status} from ${path}`};
+    return {data: await r.json()};
+  }catch(e){ return {err:`${path}: unreachable`}; }
+}
+const deg = (el,msg) => { el.innerHTML = `<div class="unreachable">◌ ${esc(msg)}</div>`; };
+
+/* ---------- nav ---------- */
+const views = [...document.querySelectorAll(".nav-item")];
+function show(v){
+  views.forEach(n=>n.classList.toggle("active", n.dataset.view===v));
+  document.querySelectorAll(".view").forEach(s=>s.classList.toggle("active", s.id==="view-"+v));
+  location.hash = v;
+}
+views.forEach(n=>n.onclick=()=>show(n.dataset.view));
+show(location.hash.replace("#","") || "overview");
+
+/* ---------- status strip ---------- */
+async function renderStrip(){
+  const [h, chain, cost] = await Promise.all([
+    get("/v1/system/health"), get("/v1/audit/events/verify"), get("/v1/research/cost")]);
+  const cells = [];
+  if(h.data){
+    cells.push(`<div class="cell"><span class="dot b"></span>MODE ${esc(h.data.trading_mode).toUpperCase()} · ${esc(h.data.limit_mode).toUpperCase()}</div>`);
+    cells.push(`<div class="cell"><span class="dot au"></span>ARMED · NO — SEALED</div>`);
+  } else cells.push(`<div class="cell"><span class="dot r"></span>API UNREACHABLE</div>`);
+  cells.push(chain.data
+    ? `<div class="cell"><span class="dot g"></span>AUDIT CHAIN ${esc(chain.data.chain).toUpperCase()} · ${chain.data.events_verified} EVENTS</div>`
+    : `<div class="cell"><span class="dot r"></span>CHAIN UNVERIFIED</div>`);
+  if(cost.data){
+    const c = cost.data, warn = c.spent_usd > 0.8*c.daily_cap_usd;
+    cells.push(`<div class="cell"><span class="dot ${warn?"r":"g"}"></span>LLM SPEND $${c.spent_usd.toFixed(2)} / $${c.daily_cap_usd.toFixed(0)}</div>`);
+  }
+  document.getElementById("strip").innerHTML = cells.join("");
+}
+
+/* ---------- overview ---------- */
+async function renderOverview(){
+  const f = await get("/v1/market/freshness");
+  const el = document.getElementById("freshness");
+  if(f.err) deg(el, f.err);
+  else if(!f.data.length) el.innerHTML = `<div class="quiet">no real bars yet — run the backfill</div>`;
+  else {
+    const now = new Date(), stale = d => (now - new Date(d)) > 4*864e5;
+    el.innerHTML = `<table><tr><th>MARKET</th><th>LATEST BAR</th><th>BARS</th><th>INSTRUMENTS</th><th>LATEST GATE</th></tr>` +
+      f.data.map(m=>`<tr><td>${esc(m.market)}</td>
+        <td class="${stale(m.latest_bar)?"num-neg":""}">${esc(m.latest_bar)}</td>
+        <td>${m.bars}</td><td>${m.instruments}</td>
+        <td><span class="pill ${m.latest_gate==="green"?"g":m.latest_gate==="amber"?"am":"r"}">${esc(m.latest_gate||"—").toUpperCase()}</span> <span style="color:var(--faint)">${esc(m.gate_date||"")}</span></td></tr>`).join("") + `</table>`;
+  }
+
+  const g = await get("/v1/market/quality-gates");
+  const gel = document.getElementById("gates"), alerts = document.getElementById("gates-alerts");
+  alerts.innerHTML = "";
+  if(g.err) deg(gel, g.err);
+  else if(!g.data.length) gel.innerHTML = `<div class="quiet">no gates recorded yet</div>`;
+  else {
+    g.data.filter(x=>x.status==="red").forEach(x=>{
+      alerts.innerHTML += `<div class="alert-red">■ RED GATE — ${esc(x.market)} @ ${esc(x.gate_date)} — ${esc((x.reasons||[]).join(" · "))} — downstream workflow for this market is BLOCKED</div>`;
+    });
+    gel.innerHTML = `<table><tr><th>MARKET</th><th>DATE</th><th>STATUS</th><th>REASONS</th></tr>` +
+      g.data.map(x=>`<tr><td>${esc(x.market)}</td><td>${esc(x.gate_date)}</td>
+        <td><span class="pill ${x.status==="green"?"g":x.status==="amber"?"am":"r"}">${esc(x.status).toUpperCase()}</span></td>
+        <td style="white-space:normal;color:var(--faint)">${esc((x.reasons||[]).join(" · "))||"—"}</td></tr>`).join("") + `</table>`;
+  }
+
+  const a = await get("/v1/audit/events?limit=15");
+  const ael = document.getElementById("audit");
+  if(a.err) deg(ael, a.err);
+  else if(!a.data.length) ael.innerHTML = `<div class="quiet">chain is empty</div>`;
+  else ael.innerHTML = a.data.map(e=>`<div class="ledger-row">
+      <span class="seq">#${e.seq}</span><span class="etype">${esc(e.event_type)}</span>
+      <span class="eent">${esc(e.entity_type)} · ${esc(e.entity_id)} · ${esc(e.actor_type)}</span>
+      <span class="etime">${esc(e.created_at.slice(0,19).replace("T"," "))}</span></div>`).join("");
+}
+
+/* ---------- research ---------- */
+async function renderResearch(){
+  const sym = document.getElementById("sym-filter").value.trim().toUpperCase();
+  const m = await get(`/v1/research/memos?limit=25${sym?`&symbol=${encodeURIComponent(sym)}`:""}`);
+  const el = document.getElementById("memos");
+  if(m.err) return deg(el, m.err);
+  if(!m.data.length) return el.innerHTML = `<div class="quiet">no memos yet — the desk hasn't run${sym?` for ${esc(sym)}`:""}</div>`;
+  el.innerHTML = m.data.map(x=>`
+    <article class="memo">
+      ${x.shadow?`<div class="shadow-ribbon">SHADOW — NON-ACTIONABLE</div>`:""}
+      <div class="memo-head">
+        <span class="rec ${esc(x.recommendation)}">${esc(x.recommendation)}</span>
+        <span class="sym">${esc(x.instrument_symbol||"—")}</span>
+        <span class="conv">CONVICTION ${esc(x.conviction)}</span>
+      </div>
+      <div class="memo-body">
+        <div><div class="sect-label">THESIS</div><p>${esc(x.thesis)}</p></div>
+        <div><div class="sect-label">KILL CRITERIA</div><ul class="kill">${(x.kill_criteria||[]).map(k=>`<li>${esc(k)}</li>`).join("")}</ul></div>
+        <div class="dissent-block"><div class="sect-label" style="color:rgba(255,92,92,0.7)">DISSENT — THE CASE AGAINST</div><p>${esc(x.dissent)}</p></div>
+        ${x.debate_summary?`<div class="debate-block"><div class="sect-label" style="color:rgba(90,167,255,0.7)">DEBATE — BULL v BEAR</div><p>${esc(x.debate_summary)}</p></div>`:""}
+        <div><div class="sect-label">EVIDENCE</div><div class="chips">${(x.evidence_refs||[]).map(r=>`<span class="chip">${esc(r)}</span>`).join("")||`<span class="chip">none cited</span>`}</div></div>
+      </div>
+      <div class="memo-foot"><span>${esc(x.created_at.slice(0,16).replace("T"," "))}</span><span>model ${esc(x.model||"—")}</span><span>run ${esc(x.run_status||"—")}</span></div>
+    </article>`).join("");
+}
+document.getElementById("sym-filter").addEventListener("input", ()=>renderResearch());
+
+/* ---------- quant ---------- */
+async function renderQuant(){
+  const v = await get("/v1/quant/verdicts?limit=50");
+  const vel = document.getElementById("verdicts");
+  if(v.err) deg(vel, v.err);
+  else if(!v.data.length) vel.innerHTML = `<div class="quiet">no approval verdicts recorded — the first real run sought none (ADR-0004: the one-year window is not decision-grade). Gate verdicts live in docs/reports/.</div>`;
+  else vel.innerHTML = v.data.map(x=>`
+    <div class="${x.verdict==="approve"?"fail-seal pass-seal":"fail-seal"}">
+      <span class="stamp">${x.verdict==="approve"?"PASS":"FAIL"}</span>
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${esc(x.created_at.slice(0,16).replace("T"," "))} — ${esc(x.reasons||"no reasons recorded")}</div>
+    </div>`).join("");
+
+  const t = await get("/v1/quant/trials?limit=50");
+  const tel = document.getElementById("trials");
+  if(t.err) return deg(tel, t.err);
+  if(!t.data.length) return tel.innerHTML = `<div class="quiet">registry empty</div>`;
+  document.getElementById("trial-count").textContent = `Showing ${t.data.length} most recent.`;
+  const fmt=(x,pct)=>x==null?"—":`<span class="${x<0?"num-neg":"num-pos"}">${pct?(100*x).toFixed(2)+"%":(+x).toFixed(2)}</span>`;
+  tel.innerHTML = `<table><tr><th>REGISTERED</th><th>FAMILY</th><th>RETURN</th><th>SHARPE</th><th>MAX DD</th><th>HIT</th><th>TRADES</th><th>SPEC</th></tr>` +
+    t.data.map(x=>{const m=x.metrics||{};return `<tr>
+      <td>${esc(x.created_at.slice(0,16).replace("T"," "))}</td><td>${esc(x.strategy_family)}</td>
+      <td>${fmt(m.total_return,1)}</td><td>${fmt(m.sharpe)}</td><td>${fmt(m.max_drawdown,1)}</td>
+      <td>${m.hit_rate==null?"—":(100*m.hit_rate).toFixed(0)+"%"}</td><td>${m.n_trades??"—"}</td>
+      <td style="color:var(--faint)">${esc((x.spec_hash||"").slice(0,10))}</td></tr>`;}).join("") + `</table>`;
+}
+
+/* ---------- market ---------- */
+function lineChart(el, pts, vols){
+  if(pts.length<2) return el.innerHTML=`<div class="quiet">not enough bars</div>`;
+  const W=900,H=280,PL=54,PB=34,PT=14,PR=10, cw=W-PL-PR, ch=H-PT-PB;
+  const ys=pts.map(p=>p.y), lo=Math.min(...ys), hi=Math.max(...ys), pad=(hi-lo)*0.06||1;
+  const y0=lo-pad,y1=hi+pad;
+  const X=i=>PL+cw*i/(pts.length-1), Y=v=>PT+ch*(1-(v-y0)/(y1-y0));
+  const path=pts.map((p,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join("");
+  const vmax=Math.max(...vols,1), vb=vols.map((v,i)=>
+    `<rect x="${(X(i)-1.2).toFixed(1)}" y="${(H-PB-28*(v/vmax)).toFixed(1)}" width="2.4" height="${(28*(v/vmax)).toFixed(1)}" fill="rgba(90,167,255,0.22)"/>`).join("");
+  const grid=[0,0.25,0.5,0.75,1].map(f=>{const v=y0+(y1-y0)*f,y=Y(v);
+    return `<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="rgba(150,170,210,0.08)"/><text x="${PL-8}" y="${y+3}" text-anchor="end">${v.toFixed(0)}</text>`;}).join("");
+  const xt=[0,Math.floor((pts.length-1)/2),pts.length-1].map(i=>
+    `<text x="${X(i)}" y="${H-10}" text-anchor="middle">${pts[i].d}</text>`).join("");
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${vb}
+    <path d="${path}" fill="none" stroke="var(--blue)" stroke-width="1.6"/>${xt}</svg>
+    <div class="note" style="margin-top:8px">last close ${pts[pts.length-1].y.toFixed(2)} · ${pts.length} sessions · volume strip in blue</div>`;
+}
+async function renderMarket(){
+  const sel=document.getElementById("inst");
+  if(!sel.options.length){
+    const i=await get("/v1/market/instruments");
+    if(i.data) sel.innerHTML=i.data.map(x=>`<option ${x.symbol==="AVGO"?"selected":""}>${esc(x.symbol)}</option>`).join("");
+  }
+  const sym=sel.value||"AVGO", days=document.getElementById("days").value;
+  const b=await get(`/v1/market/bars/${encodeURIComponent(sym)}?days=${days}`);
+  const cel=document.getElementById("chart");
+  if(b.err) deg(cel,b.err);
+  else if(!b.data.length) cel.innerHTML=`<div class="quiet">no bars for ${esc(sym)} — run the backfill</div>`;
+  else lineChart(cel, b.data.map(x=>({d:x.bar_date.slice(5),y:+x.close})), b.data.map(x=>+x.volume));
+
+  const f=await get("/v1/market/fx?days=60");
+  const fel=document.getElementById("fx");
+  if(f.err) deg(fel,f.err);
+  else if(!f.data.length) fel.innerHTML=`<div class="quiet">no FX rows</div>`;
+  else{
+    const last=f.data[f.data.length-1];
+    lineChart(fel, f.data.map(x=>({d:x.rate_date.slice(5),y:+x.rate})), f.data.map(()=>0));
+    fel.innerHTML += `<div class="note">latest ${esc(last.base)}→${esc(last.quote)} ${(+last.rate).toFixed(4)} @ ${esc(last.rate_date)}</div>`;
+  }
+}
+document.getElementById("inst").addEventListener("change",()=>renderMarket());
+document.getElementById("days").addEventListener("change",()=>renderMarket());
+
+/* ---------- refresh loop ---------- */
+async function refreshAll(){
+  await Promise.all([renderStrip(),renderOverview(),renderResearch(),renderQuant(),renderMarket()]);
+  document.getElementById("refresh-at").textContent="REFRESHED "+new Date().toTimeString().slice(0,8);
+}
+refreshAll();
+setInterval(refreshAll, 30000);
+</script>
+</body>
+</html>
