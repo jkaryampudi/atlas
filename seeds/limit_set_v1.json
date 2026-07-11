@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "mode": "small_aum",
+  "effective_from": "2026-07-13",
+  "created_by": "principal:jay (ADR-0001)",
+  "limits": {
+    "L1_max_stock_weight": 0.08,
+    "L2_max_etf_weight": 0.15,
+    "L3_max_sector_exposure": 0.25,
+    "L4_max_india_sleeve": 0.30,
+    "L5_min_cash_reserve": 0.20,
+    "L6_max_risk_per_trade": 0.01,
+    "L7_max_aggregate_open_risk": 0.06,
+    "L8_corr_threshold": 0.8,
+    "L8_corr_combined_weight": 0.12,
+    "L9_max_new_positions_per_day": 2,
+    "L10_max_pct_adv": 0.05,
+    "L11_max_non_aud_exposure": 0.85
+  }
+}

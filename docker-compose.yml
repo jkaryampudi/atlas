@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: atlas
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas_local_only
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U atlas"], interval: 5s, retries: 10}
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  api:
+    build: .
+    command: uvicorn atlas.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      ATLAS_DATABASE_URL: postgresql+psycopg://atlas:atlas_local_only@db:5432/atlas
+      ATLAS_REDIS_URL: redis://redis:6379/0
+      ATLAS_TRADING_MODE: paper
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+volumes:
+  pgdata:

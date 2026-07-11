@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+from fastapi import APIRouter
+from sqlalchemy import text
+
+from atlas.core.audit_repo import PostgresAuditLog
+from atlas.core.clock import SystemClock
+from atlas.core.db import session_scope
+
+router = APIRouter()
+
+
+@router.get("/events/verify")
+def verify() -> dict[str, object]:
+    with session_scope() as s:
+        n = PostgresAuditLog(s, SystemClock()).verify()
+    return {"chain": "ok", "events_verified": n}
+
+
+@router.get("/events")
+def events(limit: int = 50) -> list[dict[str, object]]:
+    with session_scope() as s:
+        rows = s.execute(text(
+            "SELECT seq, event_type, entity_type, entity_id, actor_type, created_at "
+            "FROM audit.decision_events ORDER BY seq DESC LIMIT :n"), {"n": limit}).mappings()
+        return [{**dict(r), "created_at": r["created_at"].isoformat()} for r in rows]

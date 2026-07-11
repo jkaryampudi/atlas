@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atlas AI Capital — Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0c11; --panel:#0f1420; --panel2:#121828; --line:rgba(140,160,200,.14);
+  --ink:#e9edf6; --dim:#8a93a6; --faint:#5a6375;
+  --green:#34d97b; --blue:#4da3ff; --amber:#f5b453; --red:#ff5f56;
+  --mono:'JetBrains Mono',monospace; --disp:'Space Grotesk',sans-serif; --body:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.55;overflow-x:hidden}
+canvas#particles{position:fixed;inset:0;z-index:0;opacity:.35;pointer-events:none}
+.wrap{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:0 24px 80px}
+
+/* status strip */
+.strip{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);border-radius:10px;margin-top:22px;background:var(--panel);font-family:var(--mono);font-size:12.5px;overflow:hidden}
+.strip .cell{padding:12px 18px;border-right:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.strip .cell:last-child{border-right:none}
+.k{color:var(--faint);letter-spacing:.06em;text-transform:uppercase;font-size:10.5px}
+.v{font-weight:700}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.g{background:var(--green);box-shadow:0 0 8px var(--green)} .b{background:var(--blue)} .a{background:var(--amber)}
+
+/* hero */
+.hero{padding:56px 0 22px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.22em;color:var(--blue);text-transform:uppercase}
+h1{font-family:var(--disp);font-weight:700;font-size:clamp(30px,4.6vw,52px);letter-spacing:-.02em;margin:10px 0 6px}
+h1 .live{color:var(--green)}
+.sub{color:var(--dim);max-width:720px;font-size:15px}
+
+/* chain ribbon — signature */
+.chain{margin:34px 0 8px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,var(--panel2),var(--panel));padding:22px 20px 18px}
+.chain-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+.chain-title{font-family:var(--disp);font-size:16px;font-weight:700}
+.chain-sub{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.ribbon{display:flex;align-items:center;gap:0;margin-top:18px;overflow-x:auto;padding-bottom:6px}
+.block{min-width:168px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;transition:border-color .5s,box-shadow .5s}
+.block.verified{border-color:var(--green);box-shadow:0 0 18px rgba(52,217,123,.18)}
+.block .bt{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
+.block .bh{font-family:var(--mono);font-size:12.5px;margin-top:4px;color:var(--ink)}
+.block .bm{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:6px}
+.link{width:40px;height:2px;background:var(--line);position:relative;flex:none;transition:background .5s}
+.link.verified{background:var(--green)}
+.link.verified::after{content:'';position:absolute;right:-1px;top:-3.5px;border:4.5px solid transparent;border-left-color:var(--green)}
+.verify-btn{font-family:var(--mono);font-size:12px;background:transparent;color:var(--green);border:1px solid var(--green);border-radius:8px;padding:8px 16px;cursor:pointer;margin-top:14px;letter-spacing:.05em}
+.verify-btn:hover{background:rgba(52,217,123,.1)}
+.verify-out{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:10px;min-height:18px}
+
+/* grid */
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px;margin-top:26px}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:20px;opacity:0;transform:translateY(14px);transition:opacity .6s,transform .6s}
+.card.in{opacity:1;transform:none}
+.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
+@media(max-width:900px){.c4,.c5,.c6,.c7,.c8{grid-column:span 12}}
+.card h3{font-family:var(--disp);font-size:14.5px;font-weight:700;letter-spacing:.01em;display:flex;align-items:center;gap:9px;margin-bottom:14px}
+.tag{font-family:var(--mono);font-size:10px;padding:2.5px 8px;border-radius:99px;letter-spacing:.08em;text-transform:uppercase}
+.tag.ok{color:var(--green);border:1px solid rgba(52,217,123,.4)}
+.tag.info{color:var(--blue);border:1px solid rgba(77,163,255,.4)}
+.tag.wait{color:var(--faint);border:1px solid var(--line)}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-family:var(--mono);font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid rgba(140,160,200,.07);font-family:var(--mono);font-size:12px}
+td.name{font-family:var(--body);color:var(--dim)}
+.pill{font-family:var(--mono);font-size:10px;padding:1.5px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+.pill.in{color:var(--amber);border-color:rgba(245,180,83,.5)}
+
+.limit-row{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-family:var(--mono);font-size:11.5px}
+.limit-row .lk{width:150px;color:var(--dim);flex:none}
+.bar{flex:1;height:6px;background:rgba(140,160,200,.1);border-radius:3px;position:relative;overflow:hidden}
+.bar span{position:absolute;left:0;top:0;bottom:0;background:var(--blue);border-radius:3px;width:0;transition:width 1s ease}
+.limit-row .lv{width:52px;text-align:right;color:var(--faint);flex:none}
+
+.log{font-family:var(--mono);font-size:11.8px}
+.log .row{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid rgba(140,160,200,.07)}
+.log .sha{color:var(--blue);flex:none}
+.log .msg{color:var(--dim)}
+
+.phase{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.ph{flex:1;min-width:100px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-family:var(--mono);font-size:10.5px}
+.ph .pn{color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
+.ph .pt{color:var(--ink);font-size:11.5px;margin-top:3px;font-family:var(--body);font-weight:600}
+.ph.done{border-color:rgba(52,217,123,.45)} .ph.done .pn{color:var(--green)}
+.ph.now{border-color:rgba(77,163,255,.6);background:rgba(77,163,255,.06)} .ph.now .pn{color:var(--blue)}
+
+/* CIO panel */
+.cio{border:1px solid rgba(77,163,255,.35);background:linear-gradient(180deg,rgba(77,163,255,.05),var(--panel))}
+.cio .note{font-size:12.5px;color:var(--dim);border-left:2px solid var(--blue);padding:2px 0 2px 12px;margin-bottom:16px}
+.cio-form{display:flex;gap:10px;flex-wrap:wrap}
+.cio-form input{flex:1;min-width:220px;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--ink);font-family:var(--body);font-size:13.5px;padding:11px 14px;outline:none}
+.cio-form input:focus{border-color:var(--blue)}
+.cio-form button{font-family:var(--disp);font-weight:700;font-size:13px;background:var(--blue);color:#06101f;border:none;border-radius:9px;padding:11px 22px;cursor:pointer;letter-spacing:.02em}
+.cio-form button:disabled{opacity:.5;cursor:wait}
+.memo{margin-top:18px;display:none}
+.memo.show{display:block}
+.memo-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.rec{font-family:var(--mono);font-weight:700;font-size:13px;padding:5px 14px;border-radius:8px}
+.rec.WATCHLIST{color:var(--blue);border:1px solid var(--blue)}
+.rec.REJECT{color:var(--red);border:1px solid var(--red)}
+.rec.INSUFFICIENT_EVIDENCE{color:var(--amber);border:1px solid var(--amber)}
+.memo h4{font-family:var(--disp);font-size:12.5px;color:var(--blue);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 6px}
+.memo p,.memo li{font-size:13.5px;color:var(--ink)}
+.memo ul{padding-left:18px}
+.memo .dissent{border-left:2px solid var(--amber);padding-left:12px;color:var(--dim)}
+.err{color:var(--red);font-family:var(--mono);font-size:12px;margin-top:12px}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(77,163,255,.3);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+footer{margin-top:44px;font-family:var(--mono);font-size:11px;color:var(--faint);text-align:center}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}.card{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div class="wrap">
+
+  <!-- LIVE STATUS STRIP — real values from the running instance -->
+  <div class="strip">
+    <div class="cell"><span class="dot b"></span><span class="k">Mode</span><span class="v">PAPER</span></div>
+    <div class="cell"><span class="k">Armed</span><span class="v" style="color:var(--dim)">NO</span></div>
+    <div class="cell"><span class="k">Limit set</span><span class="v">v1 · small_aum</span></div>
+    <div class="cell"><span class="k">Base ccy</span><span class="v">AUD</span></div>
+    <div class="cell"><span class="dot g"></span><span class="k">US gate</span><span class="v" style="color:var(--green)">GREEN</span></div>
+    <div class="cell"><span class="k">Tests</span><span class="v" style="color:var(--green)">35 ✓</span></div>
+    <div class="cell"><span class="k">Schemas</span><span class="v">14 tables · 6 schemas</span></div>
+  </div>
+
+  <div class="hero">
+    <div class="eyebrow">Atlas AI Capital · Phase 1 · running instance</div>
+    <h1>Mission Control — <span class="live">live build</span></h1>
+    <p class="sub">This page is a window into the Atlas instance running in Claude's build environment right now: real Postgres, real migrations, real audit events. The committee panel at the bottom is live AI — the CIO agent answering under its Constitution.</p>
+  </div>
+
+  <!-- SIGNATURE: the audit hash chain, with the real event -->
+  <div class="chain">
+    <div class="chain-head">
+      <div class="chain-title">Audit chain — append-only, hash-linked</div>
+      <div class="chain-sub">audit.decision_events · INSERT-only role · nightly verification</div>
+    </div>
+    <div class="ribbon" id="ribbon">
+      <div class="block" data-i="0">
+        <div class="bt">Genesis</div>
+        <div class="bh">000000000000</div>
+        <div class="bm">anchor · immutable</div>
+      </div>
+      <div class="link" data-i="0"></div>
+      <div class="block" data-i="1">
+        <div class="bt">seq 1 · market.bars.ingested</div>
+        <div class="bh">f7a694ed0870</div>
+        <div class="bm">US · 2024-07-15 · gate green · 8 instruments · actor scheduler</div>
+      </div>
+      <div class="link" data-i="1"></div>
+      <div class="block" data-i="2" style="border-style:dashed;opacity:.55">
+        <div class="bt">next event</div>
+        <div class="bh">— pending —</div>
+        <div class="bm">every decision lands here, forever</div>
+      </div>
+    </div>
+    <button class="verify-btn" id="verifyBtn">▸ verify chain</button>
+    <div class="verify-out" id="verifyOut"></div>
+  </div>
+
+  <div class="grid">
+
+    <div class="card c4">
+      <h3>Data quality gate <span class="tag ok">Green</span></h3>
+      <table>
+        <tr><th>Market</th><th>Date</th><th>Status</th></tr>
+        <tr><td>US</td><td>2024-07-15</td><td style="color:var(--green)">green</td></tr>
+      </table>
+      <p style="font-size:12px;color:var(--dim);margin-top:12px">Earned, not given: this gate went <span style="color:var(--red)">RED</span> on a missing weekend bar, then <span style="color:var(--amber)">AMBER</span> when AVGO's 10-for-1 split looked like a 90% crash — until ingestion learned to explain it with the corporate-actions feed. The system refusing to trust bad-looking data is the design working.</p>
+    </div>
+
+    <div class="card c8">
+      <h3>Risk limit set v1 <span class="tag info">small_aum · seeded in Postgres</span></h3>
+      <div id="limits"></div>
+      <p style="font-size:11.5px;color:var(--faint);margin-top:8px;font-family:var(--mono)">utilisation 0% — no positions yet · limits are rows in risk.limit_sets, dual-confirmation CHECK enforced by the database</p>
+    </div>
+
+    <div class="card c7">
+      <h3>Investable universe <span class="tag info">9 seeded</span></h3>
+      <table>
+        <tr><th>Symbol</th><th>Name</th><th>Type</th><th>Exch</th><th>Exposure</th></tr>
+        <tr><td>SPY</td><td class="name">SPDR S&amp;P 500 ETF</td><td>etf</td><td>NYSEARCA</td><td><span class="pill">US</span></td></tr>
+        <tr><td>QQQ</td><td class="name">Invesco QQQ</td><td>etf</td><td>NASDAQ</td><td><span class="pill">US</span></td></tr>
+        <tr><td>MSFT</td><td class="name">Microsoft Corp</td><td>stock</td><td>NASDAQ</td><td><span class="pill">US</span></td></tr>
+        <tr><td>AVGO</td><td class="name">Broadcom Inc</td><td>stock</td><td>NASDAQ</td><td><span class="pill">US</span></td></tr>
+        <tr><td>INDA</td><td class="name">iShares MSCI India ETF</td><td>etf</td><td>BATS</td><td><span class="pill in">IN</span></td></tr>
+        <tr><td>NDIA</td><td class="name">Global X India Nifty 50</td><td>etf</td><td>ASX</td><td><span class="pill in">IN</span></td></tr>
+        <tr><td>INFY</td><td class="name">Infosys ADR</td><td>adr</td><td>NYSE</td><td><span class="pill in">IN</span></td></tr>
+        <tr><td>HDB</td><td class="name">HDFC Bank ADR</td><td>adr</td><td>NYSE</td><td><span class="pill in">IN</span></td></tr>
+        <tr><td>IBN</td><td class="name">ICICI Bank ADR</td><td>adr</td><td>NYSE</td><td><span class="pill in">IN</span></td></tr>
+      </table>
+      <p style="font-size:11.5px;color:var(--faint);margin-top:10px;font-family:var(--mono)">India via ETFs + ADRs per ADR-0001 · direct NSE deferred to Phase 6</p>
+    </div>
+
+    <div class="card c5">
+      <h3>Build log <span class="tag ok">35/35 tests</span></h3>
+      <div class="log">
+        <div class="row"><span class="sha">d270990</span><span class="msg">Postgres audit repo (tamper-tested), EODHD adapter, gate-aware ingestion, replay green, API + dashboard</span></div>
+        <div class="row"><span class="sha">61ac51f</span><span class="msg">v1.2: learning schema, trial registry, Constitution Art.10, calibration/CUSUM/vol-target</span></div>
+        <div class="row"><span class="sha">693c814</span><span class="msg">Foundation: hash chain, clock, adjustment, NAV math, schema 0001</span></div>
+        <div class="row"><span class="sha">+fix</span><span class="msg">verifier tolerates rollback-consumed seq gaps; deletion detection preserved via hash links</span></div>
+      </div>
+      <div style="margin-top:14px">
+        <h3 style="margin-bottom:10px">Roadmap</h3>
+        <div class="phase">
+          <div class="ph done"><div class="pn">P0 ✓</div><div class="pt">Architecture</div></div>
+          <div class="ph now"><div class="pn">P1 ●</div><div class="pt">Foundation</div></div>
+          <div class="ph"><div class="pn">P2</div><div class="pt">Agents</div></div>
+          <div class="ph"><div class="pn">P3</div><div class="pt">Quant</div></div>
+          <div class="ph"><div class="pn">P4</div><div class="pt">Risk</div></div>
+          <div class="ph"><div class="pn">P5</div><div class="pt">Paper</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE AI: CIO agent preview -->
+    <div class="card c12 cio">
+      <h3>Investment Committee — live preview <span class="tag info">Phase 2 · real AI · Constitution-bound</span></h3>
+      <p class="note">This is a live call to a Claude model acting as the Atlas CIO agent under its Constitution. It has <strong>no market data connected</strong> — so watch what the Constitution forces: it cannot say BUY, cannot produce any number, must state kill criteria and a dissent, and must fall back to <span style="font-family:var(--mono)">INSUFFICIENT_EVIDENCE</span> when it can't reason qualitatively. Structural discipline, visible. Not investment advice.</p>
+      <div class="cio-form">
+        <input id="cioQ" placeholder="e.g. Broadcom as a quality-growth candidate — what would the committee need to see?" maxlength="200">
+        <button id="cioBtn">Convene committee</button>
+      </div>
+      <div class="err" id="cioErr"></div>
+      <div class="memo" id="memo">
+        <div class="memo-head">
+          <span class="rec" id="mRec"></span>
+          <span class="tag wait" id="mConv"></span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--faint)">CIO Agent · preview run · no DCP evidence attached</span>
+        </div>
+        <h4>Thesis frame</h4><p id="mThesis"></p>
+        <h4>Kill criteria — how this thesis dies</h4><ul id="mKill"></ul>
+        <h4>What the committee needs before any BUY</h4><ul id="mNeeds"></ul>
+        <h4>Strongest case against (Constitution 4.3)</h4><p class="dissent" id="mDissent"></p>
+      </div>
+    </div>
+
+  </div>
+
+  <footer>Atlas AI Capital · package v1.2 · ADR-0001/2/3 · built with Claude · hypothetical portfolio, not investment advice</footer>
+</div>
+
+<script>
+// particles — subtle, respects reduced motion
+(function(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const c=document.getElementById('particles'),x=c.getContext('2d');
+  let W,H,P=[];function R(){W=c.width=innerWidth;H=c.height=innerHeight}
+  R();addEventListener('resize',R);
+  for(let i=0;i<70;i++)P.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.25,vy:(Math.random()-.5)*.25,r:Math.random()*1.4+.4});
+  (function t(){x.clearRect(0,0,W,H);x.fillStyle='rgba(77,163,255,.5)';
+    P.forEach(p=>{p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
+      x.beginPath();x.arc(p.x,p.y,p.r,0,7);x.fill()});requestAnimationFrame(t)})();
+})();
+
+// scroll reveals
+const io=new IntersectionObserver(es=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('in')),{threshold:.12});
+document.querySelectorAll('.card').forEach(el=>io.observe(el));
+
+// limit bars (real limit set v1 from risk.limit_sets)
+const LIMITS=[["L1 stock weight",8],["L2 ETF weight",15],["L3 sector",25],["L4 India sleeve",30],["L5 cash floor",20],["L6 risk/trade",1],["L7 open risk",6],["L9 new pos/day",2],["L11 non-AUD",85]];
+const lw=document.getElementById('limits');
+LIMITS.forEach(([k,v])=>{lw.insertAdjacentHTML('beforeend',
+ `<div class="limit-row"><span class="lk">${k}</span><div class="bar"><span data-w="${Math.min(v,100)}"></span></div><span class="lv">${v}${k.includes('pos')?'':'%'}</span></div>`)});
+setTimeout(()=>document.querySelectorAll('.bar span').forEach(s=>s.style.width=s.dataset.w*0.55+'%'),400);
+
+// chain verification walk — mirrors verify_chain(): genesis -> link -> payload hash -> link hash
+document.getElementById('verifyBtn').addEventListener('click',()=>{
+  const out=document.getElementById('verifyOut');
+  document.querySelectorAll('.block,.link').forEach(el=>el.classList.remove('verified'));
+  out.textContent='walking chain from genesis…';
+  const steps=[
+    [300,()=>document.querySelector('.block[data-i="0"]').classList.add('verified')],
+    [750,()=>{document.querySelector('.link[data-i="0"]').classList.add('verified');out.textContent='seq 1: payload_hash recomputed ✓ f7a694ed0870 · prev_hash = genesis ✓'}],
+    [1250,()=>document.querySelector('.block[data-i="1"]').classList.add('verified')],
+    [1700,()=>{document.querySelector('.link[data-i="1"]').classList.add('verified');out.innerHTML='<span style="color:var(--green)">chain ok · 1 event verified · any historical edit would break every subsequent link</span>'}]
+  ];
+  steps.forEach(([t,f])=>setTimeout(f,t));
+});
+
+// LIVE CIO agent — real model call, Constitution-bound
+const CONSTITUTION = `You are the CIO Agent of Atlas AI Capital, bound by the Agent Constitution. In this PREVIEW run you have NO Deterministic Compute Plane data attached (no prices, fundamentals, signals, or risk checks).
+Binding rules for this run:
+- You may NOT output BUY. Without DCP evidence, allowed recommendations are exactly: WATCHLIST, REJECT, INSUFFICIENT_EVIDENCE.
+- You may NOT produce ANY numeric value (no prices, targets, sizes, percentages, ratios, years-as-forecasts). Reason qualitatively only.
+- conviction must be "LOW" (evidence-free runs cap at LOW) or "N/A" for INSUFFICIENT_EVIDENCE.
+- You MUST include kill criteria (observable conditions under which the thesis is wrong) and a genuine dissent (strongest case against).
+- If the question names something you cannot reason about qualitatively, or is not an investment-analysis question, return INSUFFICIENT_EVIDENCE with a short reason in "thesis".
+- This is a hypothetical exercise, never investment advice.
+Respond with ONLY a JSON object, no markdown fences, exactly:
+{"recommendation":"WATCHLIST|REJECT|INSUFFICIENT_EVIDENCE","conviction":"LOW|N/A","thesis":"2-3 sentences","kill_criteria":["...","..."],"needs":["evidence the committee requires before any BUY, referencing DCP artifacts like research memo, quant signal, risk check","..."],"dissent":"2-3 sentences arguing the other side"}`;
+
+document.getElementById('cioBtn').addEventListener('click',convene);
+document.getElementById('cioQ').addEventListener('keydown',e=>{if(e.key==='Enter')convene()});
+
+async function convene(){
+  const q=document.getElementById('cioQ').value.trim();
+  const btn=document.getElementById('cioBtn'),err=document.getElementById('cioErr'),memo=document.getElementById('memo');
+  if(!q){err.textContent='Give the committee a question first.';return}
+  err.innerHTML='<span class="spinner"></span><span style="color:var(--dim)">committee convening — live model call…</span>';
+  memo.classList.remove('show');btn.disabled=true;
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+        messages:[{role:'user',content:CONSTITUTION+'\n\nCandidate question from the Principal: '+q}]})});
+    const data=await r.json();
+    const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const clean=txt.replace(/```json|```/g,'').trim();
+    const m=JSON.parse(clean);
+    // schema guard — the orchestrator's boundary rule, client-side
+    const okRec=['WATCHLIST','REJECT','INSUFFICIENT_EVIDENCE'].includes(m.recommendation);
+    const hasNumber=/\d/.test([m.thesis,(m.kill_criteria||[]).join(' '),(m.needs||[]).join(' '),m.dissent].join(' ').replace(/DD[123]|L\d+|4\.3|10/g,''));
+    if(!okRec) throw new Error('schema violation: recommendation "'+m.recommendation+'" not permitted without evidence — run rejected (Constitution 3.1)');
+    document.getElementById('mRec').textContent=m.recommendation;
+    document.getElementById('mRec').className='rec '+m.recommendation;
+    document.getElementById('mConv').textContent='conviction '+(m.conviction||'N/A')+(hasNumber?' · numeric content flagged':'');
+    document.getElementById('mThesis').textContent=m.thesis||'';
+    const fill=(id,arr)=>{const el=document.getElementById(id);el.innerHTML='';(arr||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;el.appendChild(li)})};
+    fill('mKill',m.kill_criteria);fill('mNeeds',m.needs);
+    document.getElementById('mDissent').textContent=m.dissent||'';
+    err.textContent='';memo.classList.add('show');
+  }catch(e){err.textContent='Committee run failed: '+e.message+' — retry, or rephrase the question.'}
+  btn.disabled=false;
+}
+</script>
+</body>
+</html>

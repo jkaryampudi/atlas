@@ -1,0 +1,10 @@
+symbol,exchange,market,instrument_type,name,sector_gics,currency,economic_exposure
+SPY,NYSEARCA,US,etf,SPDR S&P 500 ETF,Broad,USD,US
+QQQ,NASDAQ,US,etf,Invesco QQQ,Broad,USD,US
+INDA,BATS,US,etf,iShares MSCI India ETF,Broad,USD,IN
+INFY,NYSE,US,adr,Infosys ADR,Information Technology,USD,IN
+HDB,NYSE,US,adr,HDFC Bank ADR,Financials,USD,IN
+IBN,NYSE,US,adr,ICICI Bank ADR,Financials,USD,IN
+AVGO,NASDAQ,US,stock,Broadcom Inc,Information Technology,USD,US
+MSFT,NASDAQ,US,stock,Microsoft Corp,Information Technology,USD,US
+NDIA,ASX,AU,etf,Global X India Nifty 50 ETF,Broad,AUD,IN

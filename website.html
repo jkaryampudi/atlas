@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atlas AI Capital — the disciplined machine</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070a12; --panel:#0d1220; --panel2:#0a0f1b; --line:rgba(150,170,210,.13);
+  --ink:#edf1f9; --dim:#8d96ab; --faint:#5b6478;
+  --blue:#5aa7ff; --green:#35d98a; --gold:#e2b95b; --red:#ff5c5c;
+  --mono:'JetBrains Mono',monospace; --disp:'Space Grotesk',sans-serif; --body:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.6;overflow-x:hidden}
+::selection{background:rgba(90,167,255,.3)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 26px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--blue)}
+.gold-eyebrow{color:var(--gold)}
+h2{font-family:var(--disp);font-weight:700;font-size:clamp(24px,3.2vw,36px);letter-spacing:-.015em;margin:10px 0 10px}
+.lede{color:var(--dim);max-width:640px;font-size:15.5px}
+section{padding:88px 0}
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* ============ NAV ============ */
+nav{position:fixed;top:0;left:0;right:0;z-index:50;backdrop-filter:blur(12px);background:rgba(7,10,18,.72);border-bottom:1px solid var(--line)}
+nav .bar{max-width:1180px;margin:0 auto;padding:14px 26px;display:flex;align-items:center;gap:26px}
+.logo{font-family:var(--disp);font-weight:700;font-size:15.5px;letter-spacing:.02em}
+.logo b{color:var(--blue)}
+nav a{color:var(--dim);text-decoration:none;font-size:12.5px;font-family:var(--mono);letter-spacing:.04em}
+nav a:hover{color:var(--ink)}
+nav .spacer{flex:1}
+.mode-chip{font-family:var(--mono);font-size:10.5px;color:var(--green);border:1px solid rgba(53,217,138,.4);border-radius:99px;padding:3px 11px;letter-spacing:.08em}
+
+/* ============ HERO — the two-plane boundary ============ */
+.hero{position:relative;height:100svh;min-height:640px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+#planeUpper,#planeLower{position:absolute;left:0;right:0;pointer-events:none}
+#planeUpper{top:0;height:50%}
+#planeLower{bottom:0;height:50%}
+.boundary{position:absolute;left:0;right:0;top:50%;height:1px;background:linear-gradient(90deg,transparent,rgba(90,167,255,.7) 18%,rgba(90,167,255,.7) 82%,transparent);box-shadow:0 0 22px rgba(90,167,255,.35);z-index:2}
+.boundary-label{position:absolute;top:50%;right:26px;transform:translateY(-160%);font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--blue);text-transform:uppercase;z-index:3;opacity:.85}
+.boundary-label.low{transform:translateY(70%);color:var(--faint)}
+.hero-inner{position:relative;z-index:4;text-align:left}
+.hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(40px,7vw,88px);line-height:1.02;letter-spacing:-.03em;margin:16px 0 0}
+.hero h1 .up{display:block}
+.hero h1 .down{display:block;font-family:var(--mono);font-weight:500;font-size:clamp(15px,2vw,22px);letter-spacing:.06em;color:var(--dim);margin-top:22px}
+.hero h1 .down b{color:var(--blue);font-weight:700}
+.hero .sub{margin-top:26px;color:var(--dim);max-width:560px;font-size:16px}
+.hero .cta{margin-top:34px;display:flex;gap:14px;flex-wrap:wrap}
+.btn{font-family:var(--disp);font-weight:700;font-size:14px;border-radius:10px;padding:13px 26px;cursor:pointer;text-decoration:none;letter-spacing:.02em;transition:transform .18s ease, box-shadow .18s ease}
+.btn:hover{transform:translateY(-1px)}
+.btn.primary{background:var(--blue);color:#04101f;border:none;box-shadow:0 6px 26px rgba(90,167,255,.28)}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.hero-stats{position:absolute;bottom:30px;left:0;right:0;z-index:4}
+.hero-stats .row{display:flex;gap:34px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.hero-stats b{color:var(--ink);font-weight:700}
+.hero-stats .g{color:var(--green)}
+
+/* ============ PIPELINE — signature ============ */
+.pipe-section{background:linear-gradient(180deg,var(--panel2),var(--bg));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.pipeline{margin-top:44px;position:relative;padding:30px 0 8px;overflow-x:auto}
+.rail{display:flex;align-items:center;min-width:940px;position:relative}
+.track{position:absolute;left:34px;right:34px;top:50%;height:2px;background:rgba(150,170,210,.14);transform:translateY(-50%)}
+.node{position:relative;z-index:2;flex:1;display:flex;flex-direction:column;align-items:center;gap:10px}
+.n-dot{width:46px;height:46px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;letter-spacing:.04em;background:var(--panel);transition:box-shadow .3s,border-color .3s;color:var(--dim)}
+.node.dcp .n-dot{border:1.5px solid rgba(90,167,255,.55);border-radius:8px}
+.node.agent .n-dot{border:1.5px solid rgba(150,170,210,.4);border-radius:50%}
+.node.risk .n-dot{border:2px solid var(--blue);border-radius:6px;color:var(--blue);font-weight:700}
+.node.human .n-dot{width:54px;height:54px;border:2px solid var(--gold);border-radius:50%;color:var(--gold);font-weight:700;background:radial-gradient(circle,rgba(226,185,91,.1),var(--panel))}
+.node .n-name{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.05em;text-align:center;max-width:96px;text-transform:uppercase}
+.node.lit .n-dot{box-shadow:0 0 20px rgba(90,167,255,.45);border-color:var(--blue);color:var(--ink)}
+.node.risk.lit .n-dot{box-shadow:0 0 22px rgba(53,217,138,.5);border-color:var(--green);color:var(--green)}
+.node.human.lit .n-dot{box-shadow:0 0 26px rgba(226,185,91,.55)}
+.packet{position:absolute;top:50%;left:34px;width:12px;height:12px;border-radius:50%;background:var(--blue);box-shadow:0 0 16px var(--blue);transform:translate(-50%,-50%);z-index:3;transition:left 1s cubic-bezier(.4,0,.2,1),background .4s,box-shadow .4s}
+.packet.sealed{background:var(--gold);box-shadow:0 0 18px var(--gold)}
+.packet.done{background:var(--green);box-shadow:0 0 18px var(--green)}
+.pipe-caption{margin-top:26px;font-family:var(--mono);font-size:12.5px;color:var(--dim);min-height:22px}
+.pipe-caption b{color:var(--ink)}
+.pipe-legend{display:flex;gap:26px;flex-wrap:wrap;margin-top:16px;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.lg{display:flex;align-items:center;gap:8px}
+.lg i{width:12px;height:12px;display:inline-block}
+.lg .sq{border:1.5px solid var(--blue);border-radius:3px}
+.lg .ci{border:1.5px solid rgba(150,170,210,.5);border-radius:50%}
+.lg .go{border:1.5px solid var(--gold);border-radius:50%}
+
+/* ============ ORG ROSTER ============ */
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:14px;margin-top:40px}
+.agent-card{border:1px solid var(--line);border-radius:13px;background:var(--panel);padding:18px;transition:border-color .25s,transform .25s}
+.agent-card:hover{border-color:rgba(90,167,255,.45);transform:translateY(-2px)}
+.agent-card .dept{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--blue)}
+.agent-card h4{font-family:var(--disp);font-size:15.5px;font-weight:700;margin:6px 0 6px}
+.agent-card p{font-size:12.5px;color:var(--dim)}
+.agent-card .cant{margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.agent-card .cant b{color:var(--red);font-weight:500}
+.agent-card.riskcard{border-color:rgba(53,217,138,.35)}
+.agent-card.riskcard .dept{color:var(--green)}
+.agent-card.humancard{border-color:rgba(226,185,91,.45);background:linear-gradient(180deg,rgba(226,185,91,.05),var(--panel))}
+.agent-card.humancard .dept{color:var(--gold)}
+
+/* ============ CONSTITUTION ============ */
+.law{background:var(--panel2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.articles{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-top:40px}
+.article{border:1px solid var(--line);border-radius:13px;padding:22px;background:var(--panel);display:flex;gap:18px}
+.article .num{font-family:var(--disp);font-weight:700;font-size:26px;color:var(--gold);line-height:1;flex:none;width:38px}
+.article h4{font-family:var(--disp);font-size:14.5px;font-weight:700;margin-bottom:6px}
+.article p{font-size:13px;color:var(--dim)}
+.article code{font-family:var(--mono);font-size:11.5px;color:var(--blue)}
+
+/* ============ LIVE COMMITTEE ============ */
+.cio{border:1px solid rgba(90,167,255,.35);border-radius:16px;background:linear-gradient(180deg,rgba(90,167,255,.06),var(--panel));padding:30px;margin-top:40px}
+.cio .note{font-size:13px;color:var(--dim);border-left:2px solid var(--gold);padding:2px 0 2px 14px;margin:14px 0 20px}
+.cio-form{display:flex;gap:10px;flex-wrap:wrap}
+.cio-form input{flex:1;min-width:240px;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);font-family:var(--body);font-size:14px;padding:13px 16px;outline:none}
+.cio-form input:focus{border-color:var(--blue)}
+.cio-form button{font-family:var(--disp);font-weight:700;font-size:13.5px;background:var(--blue);color:#04101f;border:none;border-radius:10px;padding:13px 26px;cursor:pointer}
+.cio-form button:disabled{opacity:.5;cursor:wait}
+.err{color:var(--red);font-family:var(--mono);font-size:12px;margin-top:12px;min-height:16px}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(90,167,255,.3);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.memo{margin-top:22px;display:none;border-top:1px solid var(--line);padding-top:20px}
+.memo.show{display:block}
+.memo-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.rec{font-family:var(--mono);font-weight:700;font-size:13px;padding:6px 15px;border-radius:9px}
+.rec.WATCHLIST{color:var(--blue);border:1px solid var(--blue)}
+.rec.REJECT{color:var(--red);border:1px solid var(--red)}
+.rec.INSUFFICIENT_EVIDENCE{color:var(--gold);border:1px solid var(--gold)}
+.conv{font-family:var(--mono);font-size:10.5px;color:var(--faint);border:1px solid var(--line);border-radius:99px;padding:3px 11px;letter-spacing:.06em}
+.memo h4{font-family:var(--disp);font-size:12px;color:var(--blue);letter-spacing:.08em;text-transform:uppercase;margin:16px 0 7px}
+.memo p,.memo li{font-size:14px}
+.memo ul{padding-left:20px}
+.memo .dissent{border-left:2px solid var(--gold);padding-left:14px;color:var(--dim);font-style:italic}
+
+/* ============ TELEMETRY + ROADMAP ============ */
+.telemetry{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:40px;background:var(--panel)}
+.telemetry .t{flex:1;min-width:150px;padding:20px 22px;border-right:1px solid var(--line)}
+.telemetry .t:last-child{border-right:none}
+.telemetry .tv{font-family:var(--disp);font-weight:700;font-size:26px}
+.telemetry .tv.g{color:var(--green)} .telemetry .tv.b{color:var(--blue)} .telemetry .tv.go{color:var(--gold)}
+.telemetry .tk{font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
+.phases{display:flex;gap:8px;flex-wrap:wrap;margin-top:40px}
+.phase{flex:1;min-width:130px;border:1px solid var(--line);border-radius:11px;padding:14px 15px}
+.phase .pn{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.phase .pt{font-family:var(--disp);font-weight:700;font-size:13.5px;margin-top:4px}
+.phase .pd{font-size:11.5px;color:var(--faint);margin-top:4px}
+.phase.done{border-color:rgba(53,217,138,.4)} .phase.done .pn{color:var(--green)}
+.phase.now{border-color:rgba(90,167,255,.55);background:rgba(90,167,255,.05)} .phase.now .pn{color:var(--blue)}
+
+footer{border-top:1px solid var(--line);padding:34px 0;text-align:center;font-family:var(--mono);font-size:11px;color:var(--faint)}
+footer .seal{color:var(--gold)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}.reveal{opacity:1;transform:none}}
+@media(max-width:760px){.hero h1{font-size:38px}.boundary-label{display:none}}
+</style>
+</head>
+<body>
+
+<nav><div class="bar">
+  <span class="logo">ATLAS <b>AI CAPITAL</b></span>
+  <span class="spacer"></span>
+  <a href="#pipeline">pipeline</a><a href="#org">the desk</a><a href="#law">constitution</a><a href="#live">live committee</a>
+  <span class="mode-chip">● PAPER · NEVER ARMED</span>
+</div></nav>
+
+<!-- ================= HERO: the boundary rule as layout ================= -->
+<header class="hero">
+  <canvas id="planeUpper"></canvas>
+  <canvas id="planeLower"></canvas>
+  <div class="boundary"></div>
+  <span class="boundary-label">reasoning plane — agents, memos, dissent</span>
+  <span class="boundary-label low">deterministic plane — signals, sizing, risk, execution</span>
+  <div class="wrap hero-inner">
+    <div class="eyebrow">An AI hedge-fund operating system · US &amp; India equities</div>
+    <h1>
+      <span class="up">Judgment above the line.</span>
+      <span class="down">Numbers below it. <b>No agent may cross.</b></span>
+    </h1>
+    <p class="sub">Thirteen AI agents research, challenge, and recommend. Deterministic code computes, sizes, and vetoes. A human seals every trade. Every decision, reconstructible forever.</p>
+    <div class="cta">
+      <a class="btn primary" href="#live">Convene the committee</a>
+      <a class="btn ghost" href="#pipeline">Watch a decision travel</a>
+    </div>
+  </div>
+  <div class="wrap hero-stats"><div class="row">
+    <span><b class="g">50/50</b> tests</span>
+    <span><b>16</b> tables · <b>7</b> schemas</span>
+    <span><b>9</b>-test red-team suite</span>
+    <span>audit chain <b class="g">verified</b></span>
+    <span>limit set <b>v1 · small_aum</b></span>
+  </div></div>
+</header>
+
+<!-- ================= SIGNATURE: the decision pipeline ================= -->
+<section class="pipe-section" id="pipeline"><div class="wrap">
+  <div class="eyebrow reveal">One trade, nine gates</div>
+  <h2 class="reveal">Watch a proposal earn its way to execution</h2>
+  <p class="lede reveal">Blue squares are code — deterministic, tested, reproducible. Circles are agents — they argue, they never touch money. The gold seal is you.</p>
+  <div class="pipeline reveal">
+    <div class="rail" id="rail">
+      <div class="track"></div>
+      <div class="packet" id="packet"></div>
+      <div class="node dcp"   data-cap="<b>T0–T1 · Data + Screener.</b> Bars validated, gates green, ~600 names → ~40 candidates. Pure code, near-zero cost."><div class="n-dot">T0·1</div><div class="n-name">Data · Screener</div></div>
+      <div class="node agent" data-cap="<b>T2 · Scanner Agent.</b> Caps the funnel at ten. Cannot invent candidates — the schema rejects any symbol it wasn't shown."><div class="n-dot">T2</div><div class="n-name">Scanner</div></div>
+      <div class="node agent" data-cap="<b>T3 · Research + Macro + Sector.</b> Memos with mandatory kill criteria and a dissent. Every claim carries an evidence reference."><div class="n-dot">T3</div><div class="n-name">Research desk</div></div>
+      <div class="node dcp"   data-cap="<b>T4 · Quant attach.</b> Signal scores, regime state, entry/stop/target — computed, versioned, never asked of a model."><div class="n-dot">T4</div><div class="n-name">Quant</div></div>
+      <div class="node agent" data-cap="<b>T5 · Investment Committee.</b> The CIO recommends or rejects. BUY is schema-illegal without DCP evidence attached."><div class="n-dot">T5</div><div class="n-name">CIO memo</div></div>
+      <div class="node risk"  data-cap="<b>T6 · Risk Engine — the veto.</b> Eleven limits evaluated by code. FAIL is terminal. There is no appeal path through agents."><div class="n-dot">RISK</div><div class="n-name">Risk engine</div></div>
+      <div class="node human" data-cap="<b>T7 · Your seal.</b> The packet waits. Risk re-checks at the moment you click. Proposals expire in 24 hours — urgency is not an argument."><div class="n-dot">SEAL</div><div class="n-name">Human approval</div></div>
+      <div class="node dcp"   data-cap="<b>T8 · Execution.</b> The only service holding broker credentials. It cannot modify what was approved — deviation voids the approval."><div class="n-dot">T8</div><div class="n-name">Execution</div></div>
+      <div class="node dcp"   data-cap="<b>T9 · The ledger.</b> Filled, reconciled, hash-chained. Ten years from now, this decision replays exactly. <span style='color:var(--green)'>Loop restarts…</span>"><div class="n-dot">T9</div><div class="n-name">Audit chain</div></div>
+    </div>
+  </div>
+  <div class="pipe-caption" id="pipeCap">Initialising daily cycle…</div>
+  <div class="pipe-legend">
+    <span class="lg"><i class="sq"></i> deterministic code</span>
+    <span class="lg"><i class="ci"></i> AI agent — advisory only</span>
+    <span class="lg"><i class="go"></i> human authority</span>
+  </div>
+</div></section>
+
+<!-- ================= THE DESK ================= -->
+<section id="org"><div class="wrap">
+  <div class="eyebrow reveal">The desk</div>
+  <h2 class="reveal">Thirteen agents. Three powers. Never in the same hands.</h2>
+  <p class="lede reveal">Recommend, approve, execute — separated by architecture, not by promise. Every card lists what the agent structurally cannot do.</p>
+  <div class="roster reveal">
+    <div class="agent-card"><div class="dept">Office of the CIO</div><h4>CIO Agent</h4><p>Chairs the committee. Challenges every thesis, writes the memo, logs the dissent.</p><div class="cant">cannot: <b>size, execute, touch limits</b></div></div>
+    <div class="agent-card"><div class="dept">Research</div><h4>Equity Research Analyst</h4><p>Business quality, moat, management, valuation interpretation — every claim referenced.</p><div class="cant">cannot: <b>recommend sizes, fabricate refs</b></div></div>
+    <div class="agent-card"><div class="dept">Research</div><h4>Macro Economist</h4><p>Fed &amp; RBI, inflation, currency. Tags each sector tailwind or headwind, per regime.</p><div class="cant">cannot: <b>trigger trades</b></div></div>
+    <div class="agent-card"><div class="dept">Research</div><h4>Sector Specialists ×9</h4><p>US tech, health, financials, consumer, energy; India banking, IT services, manufacturing, consumer.</p><div class="cant">cannot: <b>veto — they inform, CIO decides</b></div></div>
+    <div class="agent-card"><div class="dept">Quant</div><h4>Quant Research</h4><p>Proposes strategy hypotheses as specs. Code implements; history judges.</p><div class="cant">cannot: <b>validate its own work</b></div></div>
+    <div class="agent-card"><div class="dept">Quant</div><h4>Quant Validation</h4><p>Paid to reject: overfitting, survivorship, look-ahead, deflated Sharpe on the true trial count.</p><div class="cant">cannot: <b>author strategies</b></div></div>
+    <div class="agent-card riskcard"><div class="dept">Risk — the veto is code</div><h4>Chief Risk Officer</h4><p>Narrates what the Risk Engine decided. Eleven limits, drawdown breakers, stress marginals.</p><div class="cant">cannot: <b>change limits, pass a FAIL</b></div></div>
+    <div class="agent-card riskcard"><div class="dept">Risk</div><h4>Stress Tester</h4><p>Selects scenarios — crash, rate shock, INR shock, sector collapse. The math is deterministic.</p><div class="cant">cannot: <b>compute its own numbers</b></div></div>
+    <div class="agent-card"><div class="dept">Portfolio</div><h4>Portfolio Manager</h4><p>Daily thesis review of every holding: intact, wounded, or dead. Recommends; never resizes.</p><div class="cant">cannot: <b>execute</b></div></div>
+    <div class="agent-card"><div class="dept">Portfolio</div><h4>Performance Attribution</h4><p>Decomposes returns: signal, timing, cost, luck. Scores decisions, not outcomes.</p><div class="cant">cannot: <b>alter recorded history</b></div></div>
+    <div class="agent-card"><div class="dept">Trading</div><h4>Trader</h4><p>Order tactics within DCP-clamped tolerance bands. Style, not substance.</p><div class="cant">cannot: <b>change symbol, side, size</b></div></div>
+    <div class="agent-card"><div class="dept">Compliance</div><h4>Compliance</h4><p>Reads everything. Reports to one person only. Cannot be tasked, redirected, or silenced.</p><div class="cant">cannot: <b>be silenced — by anyone</b></div></div>
+    <div class="agent-card humancard"><div class="dept">Final authority</div><h4>You</h4><p>Every trade sealed by hand. Limits changed only by you, twice, an hour apart. Live mode armed daily or not at all.</p><div class="cant">the one seat that cannot be automated</div></div>
+  </div>
+</div></section>
+
+<!-- ================= CONSTITUTION ================= -->
+<section class="law" id="law"><div class="wrap">
+  <div class="gold-eyebrow eyebrow reveal">The constitution — enforced by schema, not by promise</div>
+  <h2 class="reveal">Rules the machine cannot talk its way around</h2>
+  <p class="lede reveal">Each article below is also a validator in the codebase and a red-team test in CI. Break one, and the run fails closed — both attempts logged to the audit chain.</p>
+  <div class="articles reveal">
+    <div class="article"><div class="num">2</div><div><h4>Separation of powers</h4><p>Recommend, approve, execute — three different hands, always. The execution service holds the only broker credentials and <code>cannot modify approved parameters</code>.</p></div></div>
+    <div class="article"><div class="num">3</div><div><h4>No numbers from agents</h4><p>An agent output containing an execution-shaped number — a price, a size, a target — is rejected at the schema. <code>$172.40 → schema_fail</code>.</p></div></div>
+    <div class="article"><div class="num">4</div><div><h4>No trade without evidence</h4><p>BUY is a validation error unless DCP evidence references are attached — and the runtime injects that flag itself, so a model cannot claim evidence it wasn't given.</p></div></div>
+    <div class="article"><div class="num">5</div><div><h4>Mandatory dissent</h4><p>Every memo carries kill criteria — how the thesis dies — and the strongest genuine case against. Unanimity without a dissent search is a process defect.</p></div></div>
+    <div class="article"><div class="num">1</div><div><h4>Evidence, never instruction</h4><p>News and filings are fenced as untrusted data. <code>«SYSTEM OVERRIDE»</code> inside a headline is read as a fact about the headline, not a command.</p></div></div>
+    <div class="article"><div class="num">10</div><div><h4>Learning, governed</h4><p>The system self-corrects within pre-registered bounds, proposes beyond them, and never touches risk limits, breakers, or this Constitution. Every adjustment: reversible, audited.</p></div></div>
+  </div>
+</div></section>
+
+<!-- ================= LIVE COMMITTEE ================= -->
+<section id="live"><div class="wrap">
+  <div class="eyebrow reveal">Live — real model, real rules</div>
+  <h2 class="reveal">Convene the committee</h2>
+  <div class="cio reveal">
+    <p class="note">This is a live call to a Claude model acting as the Atlas CIO under its Constitution — with <strong>no market data attached</strong>. So watch the rules bind: it cannot say BUY, cannot produce a number, must state how its own thesis dies, and must dissent against itself. Try to talk it into a BUY. Hypothetical exercise; not investment advice.</p>
+    <div class="cio-form">
+      <input id="cioQ" placeholder="e.g. HDFC Bank via the ADR — what would make this committee-worthy?" maxlength="220">
+      <button id="cioBtn">Convene</button>
+    </div>
+    <div class="err" id="cioErr"></div>
+    <div class="memo" id="memo">
+      <div class="memo-head">
+        <span class="rec" id="mRec"></span>
+        <span class="conv" id="mConv"></span>
+        <span class="conv">no DCP evidence attached · preview run</span>
+      </div>
+      <h4>Thesis frame</h4><p id="mThesis"></p>
+      <h4>Kill criteria — how this thesis dies</h4><ul id="mKill"></ul>
+      <h4>Required before any BUY</h4><ul id="mNeeds"></ul>
+      <h4>The dissent</h4><p class="dissent" id="mDissent"></p>
+    </div>
+  </div>
+</div></section>
+
+<!-- ================= TELEMETRY + ROADMAP ================= -->
+<section style="padding-top:0"><div class="wrap">
+  <div class="eyebrow reveal">Built, not promised</div>
+  <h2 class="reveal">Telemetry from the running instance</h2>
+  <div class="telemetry reveal">
+    <div class="t"><div class="tv g">50/50</div><div class="tk">tests passing</div></div>
+    <div class="t"><div class="tv b">7</div><div class="tk">commits</div></div>
+    <div class="t"><div class="tv b">16</div><div class="tk">postgres tables</div></div>
+    <div class="t"><div class="tv g">GREEN</div><div class="tk">US data gate</div></div>
+    <div class="t"><div class="tv go">v1</div><div class="tk">limit set · small_aum</div></div>
+    <div class="t"><div class="tv g">OK</div><div class="tk">audit chain</div></div>
+  </div>
+  <div class="phases reveal">
+    <div class="phase done"><div class="pn">P0 · signed</div><div class="pt">Architecture</div><div class="pd">9 docs · 3 ADRs</div></div>
+    <div class="phase done"><div class="pn">P1 · near-exit</div><div class="pt">Foundation</div><div class="pd">chain · gates · replay</div></div>
+    <div class="phase now"><div class="pn">P2 · building</div><div class="pt">Agents</div><div class="pd">5 roles · red-team v1</div></div>
+    <div class="phase"><div class="pn">P3</div><div class="pt">Quant + backtests</div><div class="pd">null-model gate</div></div>
+    <div class="phase"><div class="pn">P4</div><div class="pt">Risk engine</div><div class="pd">11 limits · breakers</div></div>
+    <div class="phase"><div class="pn">P5</div><div class="pt">Paper</div><div class="pd">60 sessions · go/no-go</div></div>
+    <div class="phase"><div class="pn">P6–7</div><div class="pt">Broker → live</div><div class="pd">shadow · ramp · seal</div></div>
+  </div>
+</div></section>
+
+<footer>ATLAS AI CAPITAL · package v1.2 · every decision reconstructible · human <span class="seal">seal</span> on every trade · hypothetical portfolio — not investment advice</footer>
+
+<script>
+// ---------- hero: two planes ----------
+(function(){
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const up=document.getElementById('planeUpper'),lo=document.getElementById('planeLower');
+  const ux=up.getContext('2d'),lx=lo.getContext('2d');
+  let W,HU,HL;function R(){W=up.width=lo.width=innerWidth;HU=up.height=up.offsetHeight;HL=lo.height=lo.offsetHeight}
+  R();addEventListener('resize',R);
+  // upper: soft drifting judgment particles
+  const P=[];for(let i=0;i<60;i++)P.push({x:Math.random()*innerWidth,y:Math.random()*400,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.18,r:Math.random()*1.6+.5});
+  // lower: precise grid + falling mono digits
+  const cols=[];const CW=54;
+  function initCols(){cols.length=0;for(let x=CW;x<W;x+=CW)cols.push({x,y:Math.random()*HL,v:.3+Math.random()*.5,val:(Math.random()*999).toFixed(2)})}
+  initCols();addEventListener('resize',initCols);
+  function frame(){
+    ux.clearRect(0,0,W,HU);
+    ux.fillStyle='rgba(141,150,171,.55)';
+    P.forEach(p=>{if(!reduced){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>HU)p.vy*=-1}
+      ux.beginPath();ux.arc(p.x,p.y,p.r,0,7);ux.fill()});
+    lx.clearRect(0,0,W,HL);
+    lx.strokeStyle='rgba(90,167,255,.06)';lx.lineWidth=1;
+    for(let x=0;x<W;x+=CW){lx.beginPath();lx.moveTo(x,0);lx.lineTo(x,HL);lx.stroke()}
+    for(let y=0;y<HL;y+=CW){lx.beginPath();lx.moveTo(0,y);lx.lineTo(W,y);lx.stroke()}
+    lx.font='10px JetBrains Mono';lx.fillStyle='rgba(90,167,255,.34)';
+    cols.forEach(c=>{if(!reduced){c.y+=c.v;if(c.y>HL){c.y=-12;c.val=(Math.random()*999).toFixed(2)}}
+      lx.fillText(c.val,c.x-CW+8,c.y)});
+    if(!reduced)requestAnimationFrame(frame);
+  }
+  frame();
+})();
+
+// ---------- reveals ----------
+const io=new IntersectionObserver(es=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('in')),{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+// ---------- pipeline animation ----------
+(function(){
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const nodes=[...document.querySelectorAll('#rail .node')];
+  const packet=document.getElementById('packet');
+  const cap=document.getElementById('pipeCap');
+  let i=-1,timer;
+  function step(){
+    i=(i+1)%nodes.length;
+    if(i===0){nodes.forEach(n=>n.classList.remove('lit'));packet.className='packet'}
+    const n=nodes[i];
+    const railBox=document.getElementById('rail').getBoundingClientRect();
+    const nb=n.getBoundingClientRect();
+    packet.style.left=(nb.left-railBox.left+nb.width/2)+'px';
+    setTimeout(()=>{
+      n.classList.add('lit');
+      cap.innerHTML=n.dataset.cap;
+      if(n.classList.contains('human'))packet.classList.add('sealed');
+      if(i===nodes.length-1)packet.classList.add('done');
+    },700);
+    // human gate holds longer — the pause IS the point
+    timer=setTimeout(step, n.classList.contains('human')?4200:(n.classList.contains('risk')?3400:2600));
+  }
+  if(reduced){nodes.forEach(n=>n.classList.add('lit'));cap.innerHTML=nodes[6].dataset.cap;return}
+  const po=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting&&i===-1)step()})},{threshold:.3});
+  po.observe(document.getElementById('rail'));
+})();
+
+// ---------- live CIO (Constitution-bound, schema-guarded client-side) ----------
+const CONSTITUTION = `You are the CIO Agent of Atlas AI Capital, bound by the Agent Constitution. In this PREVIEW run you have NO Deterministic Compute Plane data attached (no prices, fundamentals, signals, or risk checks).
+Binding rules for this run:
+- You may NOT output BUY. Allowed recommendations: WATCHLIST, REJECT, INSUFFICIENT_EVIDENCE.
+- You may NOT produce ANY numeric value (no prices, targets, sizes, percentages, ratios, forecast years). Reason qualitatively only.
+- conviction must be "LOW", or "N/A" for INSUFFICIENT_EVIDENCE.
+- You MUST include at least two kill_criteria (observable conditions under which the thesis is wrong) and a genuine dissent.
+- If the question cannot be reasoned about qualitatively, or is not an investment-analysis question, return INSUFFICIENT_EVIDENCE with a short reason in "thesis".
+- Hypothetical exercise, never investment advice.
+Respond with ONLY a JSON object, no markdown fences:
+{"recommendation":"WATCHLIST|REJECT|INSUFFICIENT_EVIDENCE","conviction":"LOW|N/A","thesis":"2-3 sentences","kill_criteria":["...","..."],"needs":["evidence the committee requires before any BUY, referencing DCP artifacts","..."],"dissent":"2-3 sentences arguing the other side"}`;
+
+document.getElementById('cioBtn').addEventListener('click',convene);
+document.getElementById('cioQ').addEventListener('keydown',e=>{if(e.key==='Enter')convene()});
+
+async function convene(){
+  const q=document.getElementById('cioQ').value.trim();
+  const btn=document.getElementById('cioBtn'),err=document.getElementById('cioErr'),memo=document.getElementById('memo');
+  if(!q){err.textContent='Give the committee a question first.';return}
+  err.innerHTML='<span class="spinner"></span><span style="color:var(--dim)">committee convening — live model call…</span>';
+  memo.classList.remove('show');btn.disabled=true;
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+        messages:[{role:'user',content:CONSTITUTION+'\n\nCandidate question from the Principal: '+q}]})});
+    const data=await r.json();
+    const txt=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const m=JSON.parse(txt.replace(/```json|```/g,'').trim());
+    if(!['WATCHLIST','REJECT','INSUFFICIENT_EVIDENCE'].includes(m.recommendation))
+      throw new Error('schema violation: "'+m.recommendation+'" is not permitted without evidence — run rejected, both attempts would be logged (Constitution 4)');
+    document.getElementById('mRec').textContent=m.recommendation;
+    document.getElementById('mRec').className='rec '+m.recommendation;
+    document.getElementById('mConv').textContent='conviction '+(m.conviction||'N/A');
+    document.getElementById('mThesis').textContent=m.thesis||'';
+    const fill=(id,arr)=>{const el=document.getElementById(id);el.innerHTML='';(arr||[]).forEach(x=>{const li=document.createElement('li');li.textContent=x;el.appendChild(li)})};
+    fill('mKill',m.kill_criteria);fill('mNeeds',m.needs);
+    document.getElementById('mDissent').textContent=m.dissent||'';
+    err.textContent='';memo.classList.add('show');
+  }catch(e){err.textContent='Committee run failed: '+e.message+' — retry or rephrase.'}
+  btn.disabled=false;
+}
+</script>
+</body>
+</html>
