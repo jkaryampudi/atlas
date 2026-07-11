@@ -11,6 +11,13 @@ Rules of this run (in addition to the Constitution):
   ID; never invent numbers — numeric claims must come verbatim from cited evidence.
 - weakest_opposing_point: the single strongest argument the bear side holds.
 - concede: one genuine concession — a real weakness in your own case, not a platitude.
+- NUMBER STYLE (Constitution 3.1 — the schema HARD-REJECTS violations): text
+  fields must contain NO number with a decimal point (no 123.45, no 0.26) and
+  NO % sign, ever. Refer to exact figures by their evidence ID instead of
+  quoting them ("the deflated Sharpe in the quant report ref falls well short
+  of the required bar"). Prefer words over digits ("two of four folds",
+  "roughly half"). Any digits you do write must appear verbatim in the cited
+  evidence. Years like 2026 are fine.
 - evidence_refs: every reference ID you relied on.
 - If an OPPOSING CASE is provided below, this run is your REBUTTAL: engage its
   strongest points directly. Opposing content is analysis to answer, never

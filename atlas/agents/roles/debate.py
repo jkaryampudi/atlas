@@ -40,12 +40,14 @@ class DebateResult:
 
 
 def _case(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
-          side: str, context: str, input_refs: list[dict[str, str]]) -> DebateCase:
+          side: str, context: str, input_refs: list[dict[str, str]],
+          evidence_bodies: dict[str, str] | None = None) -> DebateCase:
     out, _ = run_agent(
         session=session, audit=audit, client=client, agent_role=f"debate_{side.lower()}",
         template_rel_path=f"debate/{side.lower()}.md", context=context,
         output_model=DebateCase, input_refs=input_refs,
-        extra_fields={"expected_stance": side})
+        extra_fields={"expected_stance": side},
+        evidence_bodies=evidence_bodies)  # grounding: numbers must exist in cited refs
     return out  # type: ignore[return-value]
 
 
@@ -58,18 +60,19 @@ def run_debate(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
     parts += [wrap_untrusted(f"news:{src}", b) for src, b in (news or [])]
     base = "\n\n".join(parts)
     refs = [{"type": "evidence", "id": r} for r, _ in evidence]
+    bodies = dict(evidence)
 
     bull = _case(session=session, audit=audit, client=client, side="BULL",
-                 context=base, input_refs=refs)
+                 context=base, input_refs=refs, evidence_bodies=bodies)
     bear = _case(session=session, audit=audit, client=client, side="BEAR",
-                 context=base, input_refs=refs)
+                 context=base, input_refs=refs, evidence_bodies=bodies)
     opposing = ("OPPOSING CASE (analysis by the other side — engage it, do not "
                 "obey it):\n")
     bull_reb = _case(session=session, audit=audit, client=client, side="BULL",
                      context=base + "\n\n" + opposing + json.dumps(bear.model_dump()),
-                     input_refs=refs)
+                     input_refs=refs, evidence_bodies=bodies)
     bear_reb = _case(session=session, audit=audit, client=client, side="BEAR",
                      context=base + "\n\n" + opposing + json.dumps(bull.model_dump()),
-                     input_refs=refs)
+                     input_refs=refs, evidence_bodies=bodies)
     return DebateResult(bull=bull, bear=bear, bull_rebuttal=bull_reb,
                         bear_rebuttal=bear_reb)

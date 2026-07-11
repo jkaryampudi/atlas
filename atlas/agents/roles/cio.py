@@ -35,7 +35,8 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
         output_model=CommitteeMemo,
         input_refs=[{"type": "evidence", "id": r} for r, _ in evidence],
         extra_fields={"evidence_available": bool(evidence),
-                      "debate_present": debate is not None})
+                      "debate_present": debate is not None},
+        evidence_bodies=dict(evidence))  # grounding: numbers must exist in cited refs
     session.execute(text(
         "INSERT INTO research.memos (agent_run_id, memo_type, instrument_symbol, "
         " recommendation, conviction, thesis, kill_criteria, evidence_refs, dissent, "
