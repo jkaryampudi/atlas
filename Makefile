@@ -22,3 +22,7 @@ verify-chain:  ## nightly audit hash-chain verification (alert on non-zero exit)
 	python -m atlas.tools.verify_chain
 cov-risk:  ## Phase 4 exit criterion: 100% branch coverage on dcp/risk
 	pytest --cov=atlas.dcp.risk --cov-branch --cov-fail-under=100 -q
+api:       ## run the read-only API locally (port 8001; 8000 is taken on this machine)
+	uvicorn atlas.api.main:app --port 8001
+dashboard: ## ops console (pure API client); needs `pip install -e ".[dashboard]"`
+	ATLAS_API_URL=http://localhost:8001 streamlit run atlas/dashboard/overview.py
