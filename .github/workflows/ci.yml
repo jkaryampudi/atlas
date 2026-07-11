@@ -3,6 +3,10 @@ on: [push, pull_request]
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      # job-level so pytest sees it too: integration tests must RUN in CI, not
+      # silently skip (conftest auto-creates the isolated atlas_test database)
+      ATLAS_DATABASE_URL: "postgresql+psycopg://atlas:atlas@localhost:5432/atlas"
     services:
       postgres:
         image: postgres:16
