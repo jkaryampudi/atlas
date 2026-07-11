@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 74 passing
+pytest             # currently 125 passing (isolated to the atlas_test database)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
@@ -38,11 +38,12 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 - **P4 Risk Engine**: not started (next major build — design in docs 04).
 
 ## Task queue (priority order)
-1. **P1 exit — real data**: EODHD key in `.env` as `ATLAS_EODHD_API_KEY`. Build, tests-first: (a) exchange trading calendars via `exchange_calendars` lib replacing naive weekend-skip in `replay.py` + proper `expected_days` in `ingest_day`; (b) daily FX job writing `market.fx_rates_daily` via `EodhdAdapter.fetch_fx`; (c) backfill CLI `python -m atlas.dcp.market_data.backfill --years 2` for `seeds/instruments_seed.csv` with corporate actions + per-day gates. Exit: 2y history, zero red gates on a clean day.
-2. **Nightly chain verification**: scheduled job calling audit verify; alert on failure.
-3. **First real backtest**: momentum v1 over backfilled SPY/AVGO via the existing engine + null-model gate + walk-forward; register trials; produce a written report of the gate verdicts. Do NOT tune the strategy to pass — a failure is a valid, reportable result.
-4. **P4 Risk Engine** (`atlas/dcp/risk/engine.py`): implement L1–L11 from `docs/architecture/04` §3 against `risk.limit_sets` v1 (already seeded via `dcp/risk/seed_limits.py`), sizing per §4, drawdown breakers per §5, pro-forma portfolio math. Requirement: 100% branch coverage on `dcp/risk`, property tests proving no input produces a size violating any cap. `vol_target.py` already exists — wire breaker-state dominance.
-5. GitHub push + CI green (workflow ships in `.github/workflows/ci.yml`).
+1. ~~**P1 exit — real data**~~ DONE (calendars XNYS/XASX, FX job, backfill CLI; 1y history per ADR-0004, zero red gates under per-instrument coverage rules).
+2. ~~**Nightly chain verification**~~ DONE (`make verify-chain` / `atlas/tools/verify_chain.py`; tamper + deletion tested; schedule via cron and alert on non-zero exit).
+3. ~~**First real backtest**~~ DONE — momentum v1 **failed the gates on real data** (both SPY and AVGO; see `docs/reports/first-real-backtest-momentum-v1.md`). Gates were not touched; verdicts recorded verbatim per the working-style rule below. Not decision-grade per ADR-0004 (1y window).
+4. **TradingAgents adoption** (ADR-0005): debate roles, grounding verifier, workflow checkpoints, per-role model registry — under Atlas governance; see the ADR for adopted/rejected/deferred patterns.
+5. **P4 Risk Engine** (`atlas/dcp/risk/engine.py`): implement L1–L11 from `docs/architecture/04` §3 against `risk.limit_sets` v1 (already seeded via `dcp/risk/seed_limits.py`), sizing per §4, drawdown breakers per §5, pro-forma portfolio math. Requirement: 100% branch coverage on `dcp/risk`, property tests proving no input produces a size violating any cap. `vol_target.py` already exists — wire breaker-state dominance.
+6. GitHub push + CI green (workflow ships in `.github/workflows/ci.yml`).
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.

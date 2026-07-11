@@ -32,7 +32,7 @@ alembic upgrade head
 - [x] FX rates ingestion (`fx_rates_daily`): daily job `python -m atlas.dcp.market_data.fx --date …` + range backfill
 - [x] History backfill for seed universe; zero red gates on a clean day — **1 year accepted per ADR-0004** (EODHD tier caps history at 1y): 2025-07-11→2026-07-10 backfilled, 2,262 bars + 313 FX rows, 505/505 gates green. 2-year re-run pending plan upgrade.
 - [x] Golden ingestion regression tests (fixture backfill week incl. split-explained move; honest-RED market test)
-- [ ] Audit repository (Postgres-backed chain) + nightly verification job
+- [x] Audit repository (Postgres-backed chain) + nightly verification job (`make verify-chain`, exits non-zero on any tamper/deletion; cron: `0 3 * * * cd <repo> && make verify-chain || <alert>`)
 - [x] `make replay DATE=…` end-to-end on fixtures (gate=green, chain verified)
 - [ ] `/v1/market/*`, `/v1/portfolio/snapshot` read endpoints
 - [ ] Streamlit Overview page (pure API client)

@@ -1,4 +1,4 @@
-.PHONY: up down test lint type migrate replay doctor
+.PHONY: up down test lint type migrate replay doctor verify-chain
 # load local env (.env is gitignored) so doctor/test/replay see ATLAS_* vars
 -include .env
 export
@@ -18,3 +18,5 @@ replay:    ## deterministic daily-cycle replay on fixtures: make replay DATE=202
 	python -m atlas.dcp.market_data.replay --date $(DATE)
 doctor:    ## diagnose local environment
 	python -m atlas.tools.doctor
+verify-chain:  ## nightly audit hash-chain verification (alert on non-zero exit)
+	python -m atlas.tools.verify_chain
