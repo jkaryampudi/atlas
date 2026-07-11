@@ -36,7 +36,11 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
               output_model: type[BaseModel], input_refs: list[dict[str, str]],
               extra_fields: dict[str, object] | None = None,
               evidence_bodies: dict[str, str] | None = None,
+              shadow_mode: bool = False,
               max_tokens: int = 1200) -> tuple[BaseModel, str]:
+    """shadow_mode (Constitution 7.2): the run executes and is fully logged but
+    is marked non-actionable — for model-upgrade shadow periods. Callers must
+    not persist memos or act on shadow outputs."""
     template, t_hash = load_template(template_rel_path)
     prompt = template + "\n\n" + context
     last_err = ""
@@ -82,18 +86,19 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
         run_id = session.execute(text(
             "INSERT INTO research.agent_runs "
             "(agent_role, prompt_template_hash, model, input_refs, output_hash, status, "
-            " tokens_in, tokens_out, cost_usd) "
-            "VALUES (:r, :h, :m, CAST(:i AS jsonb), :oh, :s, :ti, :to, :c) RETURNING id"),
+            " tokens_in, tokens_out, cost_usd, shadow) "
+            "VALUES (:r, :h, :m, CAST(:i AS jsonb), :oh, :s, :ti, :to, :c, :sh) "
+            "RETURNING id"),
             {"r": agent_role, "h": t_hash, "m": result.model,
              "i": json.dumps(input_refs),
              "oh": hashlib.sha256(raw.encode()).hexdigest(), "s": status,
              "ti": result.tokens_in, "to": result.tokens_out,
-             "c": cost}
+             "c": cost, "sh": shadow_mode}
         ).scalar_one()
         audit.append(event_type="agent.run.completed", entity_type="agent_run",
                      entity_id=str(run_id), actor_type="agent", actor_id=agent_role,
                      payload={"status": status, "template_hash": t_hash[:12],
-                              "attempt": attempt})
+                              "attempt": attempt, "shadow": shadow_mode})
         if validated is not None:
             return validated, str(run_id)
     raise AgentRunFailed(f"{agent_role}: two consecutive schema failures — {last_err[:300]}")

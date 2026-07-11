@@ -41,6 +41,33 @@ class AnthropicClient:
                          tokens_out=u.get("output_tokens", 0), model=d.get("model", self._model))
 
 
+class OpenAICompatClient:
+    """OpenAI-compatible /v1/chat/completions client (local models on the LAN,
+    e.g. a 3090 box; ADR-0005 pattern 4). Transport-injectable for tests."""
+
+    def __init__(self, base_url: str, model: str, api_key: str = "local",
+                 client: httpx.Client | None = None) -> None:
+        self._base = base_url.rstrip("/")
+        self._model = model
+        self._key = api_key
+        self._client = client or httpx.Client(timeout=120)
+
+    def complete(self, prompt: str, *, max_tokens: int) -> LlmResult:
+        r = self._client.post(
+            f"{self._base}/v1/chat/completions",
+            headers={"authorization": f"Bearer {self._key}",
+                     "content-type": "application/json"},
+            json={"model": self._model, "max_tokens": max_tokens,
+                  "messages": [{"role": "user", "content": prompt}]})
+        r.raise_for_status()
+        d = r.json()
+        u = d.get("usage", {})
+        return LlmResult(text=d["choices"][0]["message"]["content"],
+                         tokens_in=u.get("prompt_tokens", 0),
+                         tokens_out=u.get("completion_tokens", 0),
+                         model=d.get("model", self._model))
+
+
 class StubClient:
     """Deterministic client for tests and red-teaming: returns scripted outputs."""
 

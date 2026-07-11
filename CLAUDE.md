@@ -41,7 +41,7 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 1. ~~**P1 exit — real data**~~ DONE (calendars XNYS/XASX, FX job, backfill CLI; 1y history per ADR-0004, zero red gates under per-instrument coverage rules).
 2. ~~**Nightly chain verification**~~ DONE (`make verify-chain` / `atlas/tools/verify_chain.py`; tamper + deletion tested; schedule via cron and alert on non-zero exit).
 3. ~~**First real backtest**~~ DONE — momentum v1 **failed the gates on real data** (both SPY and AVGO; see `docs/reports/first-real-backtest-momentum-v1.md`). Gates were not touched; verdicts recorded verbatim per the working-style rule below. Not decision-grade per ADR-0004 (1y window).
-4. **TradingAgents adoption** (ADR-0005): debate roles, grounding verifier, workflow checkpoints, per-role model registry — under Atlas governance; see the ADR for adopted/rejected/deferred patterns.
+4. ~~**TradingAgents adoption**~~ DONE (ADR-0005): debate roles + CIO debate_summary, grounding verifier in run_agent, resumable workflow checkpoints (migrations 0007/0008), per-role model registry + OpenAICompatClient + shadow_mode. Deferred: sentiment analyst (needs social-media injection corpus).
 5. **P4 Risk Engine** (`atlas/dcp/risk/engine.py`): implement L1–L11 from `docs/architecture/04` §3 against `risk.limit_sets` v1 (already seeded via `dcp/risk/seed_limits.py`), sizing per §4, drawdown breakers per §5, pro-forma portfolio math. Requirement: 100% branch coverage on `dcp/risk`, property tests proving no input produces a size violating any cap. `vol_target.py` already exists — wire breaker-state dominance.
 6. GitHub push + CI green (workflow ships in `.github/workflows/ci.yml`).
 

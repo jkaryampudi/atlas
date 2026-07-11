@@ -2,7 +2,15 @@
 
 AI investment operating system. Architecture package in `docs/architecture/` (approved per ADR-0001).
 
-## Status: Phase 1 in progress — package v1.2 (ADR-0002 quant rigour, ADR-0003 learning loop)
+## Status: Phase 1 exit criteria met per ADR-0004 — package v1.3 (ADR-0002 quant rigour, ADR-0003 learning loop, ADR-0004 1y-history amendment, ADR-0005 TradingAgents patterns)
+
+ADR-0005 additions (TradingAgents patterns under Atlas governance):
+- **Bull/bear debate** (`agents/roles/debate.py`): 1 case + 1 rebuttal per side, forced concessions, stance integrity, exec-number guards; CIO memo gains `debate_summary`. Advisory only — red-team proves a unanimous debate cannot open a BUY without DCP evidence
+- **Grounded-number verification** (`agents/runtime/grounding.py`): every numeric token in narrative output must appear verbatim in cited evidence (whitelist: L/DD rule IDs, years); fail-closed with `agent.grounding.failed` audit events
+- **Resumable workflow checkpoints** (`core/workflow.py`, migration 0007): nodes persist results before the next runs; same run_id resumes without re-executing completed nodes; replay daily cycle wired
+- **Per-role model registry** (`agents/runtime/registry.py`): `ATLAS_MODEL_<ROLE>` → `ATLAS_MODEL_DEFAULT` resolution; `local/` prefix routes to `OpenAICompatClient` at `ATLAS_LOCAL_LLM_URL`; `shadow_mode` runs logged non-actionable (Constitution 7.2, migration 0008)
+
+**First real backtest (task 3): momentum v1 FAILED the gates on real data** — see `docs/reports/first-real-backtest-momentum-v1.md` (verbatim verdicts, ADR-0004 small-sample warning). Gates unmodified; failure recorded as a valid result.
 
 v1.2 additions built and tested:
 - **Agent calibration** (`dcp/learning/calibration.py`): Brier-scored conviction weights with shrinkage, clipped [0.5, 1.5]
@@ -22,7 +30,7 @@ Built and tested in this drop:
 ## Quick start
 ```bash
 pip install -e ".[dev]"
-pytest                    # 17 tests
+pytest                    # 146 tests (PG tests isolated to atlas_test, auto-created)
 docker compose up -d      # postgres + redis + api
 alembic upgrade head
 ```
