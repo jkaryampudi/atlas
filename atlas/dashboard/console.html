@@ -130,6 +130,7 @@
     <div class="wordmark">ATLAS AI CAPITAL</div>
     <div class="badge-paper">◉ PAPER MODE</div>
     <div class="nav-item" data-view="overview">OVERVIEW</div>
+    <div class="nav-item" data-view="trading">TRADING</div>
     <div class="nav-item" data-view="research">RESEARCH</div>
     <div class="nav-item" data-view="quant">QUANT</div>
     <div class="nav-item" data-view="risk">RISK</div>
@@ -199,6 +200,27 @@
       </div>
     </section>
 
+    <!-- TRADING — the approval desk -->
+    <section class="view" id="view-trading">
+      <h1>Trading — Approval Desk</h1>
+      <div class="sub">Every trade needs your seal. The machine proposes; deterministic code sizes and vetoes; you decide.</div>
+      <div class="card" style="border-left:2px solid var(--gold);font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--dim)">
+        THE FRESH CHECK IS AUTHORITATIVE — the risk check you see below is proposal-time history.
+        Clicking APPROVE re-runs all of L1–L11 against the live book at that instant; a now-FAIL
+        voids the action permanently. There is no override, and this desk is not a rubber stamp.
+      </div>
+      <div id="trade-action-banner"></div>
+      <h2>Awaiting Your Approval</h2>
+      <div id="approval-queue"><div class="quiet">awaiting data</div></div>
+      <h2 style="display:flex;align-items:center;gap:14px">Orders
+        <button id="settle-btn" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer;letter-spacing:0.1em">RUN SETTLEMENT</button>
+      </h2>
+      <div class="note">Paper fills happen at the NEXT session's open, priced from real vendor bars — never before the session opens, never without the fill date's own FX rate.</div>
+      <div class="card" style="overflow-x:auto" id="orders-table"><div class="quiet">awaiting data</div></div>
+      <h2>Decided</h2>
+      <div class="card" style="overflow-x:auto" id="decided-list"><div class="quiet">awaiting data</div></div>
+    </section>
+
     <!-- MARKET -->
     <section class="view" id="view-market">
       <h1>Market</h1>
@@ -235,6 +257,16 @@ async function post(path, body){
       headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
     if(!r.ok) return {err:`${r.status} from ${path}`};
     return {data: await r.json()};
+  }catch(e){ return {err:`${path}: unreachable`}; }
+}
+/* like post(), but a non-2xx still yields the body — the trading API answers
+   409 with a structured verdict (RISK_RECHECK_FAILED etc.) that must be SHOWN,
+   not swallowed as a generic error */
+async function postFull(path, body){
+  try{
+    const r = await fetch(API + path, {method:"POST", cache:"no-store",
+      headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+    return {status: r.status, data: await r.json()};
   }catch(e){ return {err:`${path}: unreachable`}; }
 }
 /* keep-last-good: never destroy a rendered panel on a transient failure —
@@ -616,12 +648,185 @@ async function renderMarket(){
 document.getElementById("inst").addEventListener("change",()=>renderMarket());
 document.getElementById("days").addEventListener("change",()=>renderMarket());
 
+/* ---------- trading: the approval desk ---------- */
+const bannerEl = () => document.getElementById("trade-action-banner");
+function actionBanner(kind, html){
+  const c = kind==="ok" ? "var(--green)" : kind==="warn" ? "var(--gold)" : "var(--red)";
+  bannerEl().innerHTML = `<div class="card" style="border-left:2px solid ${c};font-family:var(--mono);font-size:11.5px;color:${c}">${html}</div>`;
+}
+const ttl = s => {
+  const m = (new Date(s) - Date.now())/6e4;
+  if(m <= 0) return `<span style="color:var(--red)">EXPIRED</span>`;
+  const t = m<60 ? `${m|0}m` : `${(m/60)|0}h ${(m%60)|0}m`;
+  return m < 240 ? `<span style="color:var(--gold)">EXPIRES IN ${t}</span>` : `EXPIRES IN ${t}`;
+};
+const num = v => v==null ? "—" : (+v).toFixed(4).replace(/\.?0+$/,"");
+
+function checkGrid(check){
+  if(!check) return `<div class="quiet">no check recorded</div>`;
+  const rows = (check.results||[]).map(r=>{
+    const pct = (r.value!=null && r.limit) ? Math.min(100, Math.abs(r.value/r.limit)*100) : null;
+    return `<div style="display:grid;grid-template-columns:44px 14px 1fr 130px;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid var(--line)">
+      <span style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">${esc(r.rule)}</span>
+      <span class="dot ${r.pass?"g":"r"}" style="margin:0"></span>
+      <span style="font-family:var(--mono);font-size:10.5px;color:${r.pass?"var(--dim)":"var(--red)"}">${esc(r.detail||"")}</span>
+      ${pct==null ? "<span></span>" : `<span style="display:flex;align-items:center;gap:6px">
+        <span style="flex:1;height:3px;background:var(--line);position:relative"><span style="position:absolute;left:0;top:0;bottom:0;width:${pct.toFixed(0)}%;background:${r.pass?"var(--green)":"var(--red)"}"></span></span>
+        <span style="font-family:var(--mono);font-size:9.5px;color:var(--dim)">${num(r.value)}/${num(r.limit)}</span></span>`}
+    </div>`;}).join("");
+  return `<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;color:var(--dim);margin-bottom:6px">
+    ${esc(check.check_kind||"").toUpperCase()} CHECK · ${check.verdict==="PASS"
+      ? `<span style="color:var(--green)">PASS</span>` : `<span style="color:var(--red)">FAIL</span>`}
+    · LIMIT SET v${esc(check.limit_set_version)} · ${esc(ts(check.created_at))} — ADVISORY; the fresh check at click decides</div>${rows}`;
+}
+
+async function renderTrading(force){
+  const qel = document.getElementById("approval-queue");
+  /* mid-decision guard: the 30s refresh must never wipe half-ticked
+     acknowledgments or a typed reject reason; action handlers pass force */
+  if(!force && (qel.querySelector("input.ack:checked") ||
+                qel.querySelector("input.tr-reason") && qel.querySelector("input.tr-reason").value ||
+                qel.contains(document.activeElement))) return;
+  const pending = await get("/v1/trading/proposals?state=pending_approval");
+  if(pending.err) deg(qel, pending.err);
+  else if(!pending.data.length){
+    qel.innerHTML = `<div class="quiet">no proposals awaiting approval — nothing reaches this desk without a committee memo and a PASS risk check</div>`;
+    good(qel);
+  } else {
+    const details = await Promise.all(pending.data.map(p=>get(`/v1/trading/proposals/${p.id}`)));
+    qel.innerHTML = details.map(d=>{
+      if(d.err) return "";
+      const x = d.data, checks = x.risk_checks||[];
+      const proposalCheck = checks.filter(c=>c.check_kind==="proposal").pop();
+      const kills = x.kill_criteria||[];
+      return `<article class="memo" data-pid="${esc(x.id)}">
+        <div class="memo-head">
+          <span class="rec BUY">${esc((x.action||"buy").toUpperCase())}</span>
+          <span class="sym">${esc(x.symbol||"—")}</span>
+          <span class="conv">${esc(x.position_size)} sh · A$${(+x.position_value_aud).toFixed(2)}</span>
+          <span class="conv" style="margin-left:auto">${ttl(x.expires_at)}</span>
+        </div>
+        <div class="memo-body">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--dim)">
+            entry ${num(x.entry_price)} · stop ${num(x.stop_loss)} · target ${num(x.target_price)}
+            · memo ${esc((x.committee_memo_id||"").slice(0,8))} · signals ${(x.signal_ids||[]).length}</div>
+          <div><div class="sect-label">THESIS (committee memo)</div><p>${esc(x.investment_thesis||"—")}</p></div>
+          ${x.dissent?`<div class="dissent-block"><div class="sect-label" style="color:rgba(255,92,92,0.7)">DISSENT — THE CASE AGAINST</div><p>${esc(x.dissent)}</p></div>`:""}
+          <div><div class="sect-label">RISK CHECK — L1–L11, ITEMISED</div>${checkGrid(proposalCheck)}</div>
+          <div><div class="sect-label">ACKNOWLEDGE EVERY KILL CRITERION TO UNLOCK APPROVAL</div>
+            ${kills.length ? kills.map((k,i)=>`<label style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dim);padding:2px 0;cursor:pointer">
+              <input type="checkbox" class="ack" data-pid="${esc(x.id)}"> ${esc(typeof k==="string"?k:JSON.stringify(k))}</label>`).join("")
+            : `<label style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dim);cursor:pointer">
+              <input type="checkbox" class="ack" data-pid="${esc(x.id)}"> memo lists NO kill criteria — I acknowledge approving a thesis with no stated exit condition</label>`}
+            <label style="display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dim);padding:2px 0;cursor:pointer">
+              <input type="checkbox" class="ack" data-pid="${esc(x.id)}"> I acknowledge the itemised risks and that the fresh check at approval is final</label>
+          </div>
+        </div>
+        <div style="padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="tr-approve" data-pid="${esc(x.id)}" disabled
+            style="border:1px solid rgba(53,217,138,0.5);background:none;color:var(--green);font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;padding:6px 16px;cursor:pointer;opacity:0.35">APPROVE — RE-RUNS RISK NOW</button>
+          <button class="tr-reject" data-pid="${esc(x.id)}"
+            style="border:1px solid rgba(255,92,92,0.5);background:none;color:var(--red);font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;padding:6px 16px;cursor:pointer">REJECT</button>
+          <input class="tr-reason" data-pid="${esc(x.id)}" placeholder="reject reason (required)" size="34" style="font-size:11px;padding:5px 9px">
+        </div>
+      </article>`;}).join("") || `<div class="quiet">detail fetch failed</div>`;
+
+    qel.querySelectorAll("input.ack").forEach(cb=>cb.onchange=()=>{
+      const pid = cb.dataset.pid;
+      const all = [...qel.querySelectorAll(`input.ack[data-pid="${pid}"]`)];
+      const btn = qel.querySelector(`button.tr-approve[data-pid="${pid}"]`);
+      const ok = all.every(c=>c.checked);
+      btn.disabled = !ok; btn.style.opacity = ok ? "1" : "0.35";
+    });
+    qel.querySelectorAll("button.tr-approve").forEach(b=>b.onclick=async()=>{
+      b.disabled = true; b.textContent = "RE-RUNNING RISK…";
+      const r = await postFull(`/v1/trading/proposals/${b.dataset.pid}/approve`,
+                               {acknowledged_risks: true});
+      if(r.err) actionBanner("fail", esc(r.err));
+      else if(r.status===200)
+        actionBanner("ok", `✓ APPROVED — fresh check PASSED · order ${esc((r.data.order_id||"").slice(0,8))} is pending_submit; it fills at the next session's open`);
+      else if(r.data && r.data.error && r.data.error.code==="RISK_RECHECK_FAILED")
+        actionBanner("fail", `■ VOIDED — THE FRESH CHECK FAILED: ${esc((r.data.error.details.failures||[]).join(", "))}. The proposal is terminally dead; this is the system working.`);
+      else if(r.data && r.data.error && r.data.error.code==="PROPOSAL_EXPIRED")
+        actionBanner("warn", `◌ EXPIRED — the 24h TTL passed before your decision. Recorded as expired, not approved.`);
+      else actionBanner("fail", esc((r.data && r.data.error && r.data.error.message) || `unexpected ${r.status}`));
+      renderTrading(true);
+    });
+    qel.querySelectorAll("button.tr-reject").forEach(b=>b.onclick=async()=>{
+      const inp = qel.querySelector(`input.tr-reason[data-pid="${b.dataset.pid}"]`);
+      if(!inp.value.trim()){ inp.style.borderColor = "var(--red)"; inp.focus(); return; }
+      const r = await postFull(`/v1/trading/proposals/${b.dataset.pid}/reject`,
+                               {reason: inp.value.trim()});
+      if(r.err) actionBanner("fail", esc(r.err));
+      else if(r.status===200) actionBanner("ok", `REJECTED — your reason is on the audit chain`);
+      else actionBanner("warn", esc((r.data && r.data.error && r.data.error.message) || `status ${r.status}`));
+      renderTrading(true);
+    });
+    good(qel);
+  }
+
+  const oel = document.getElementById("orders-table");
+  const ords = await get("/v1/trading/orders?limit=30");
+  if(ords.err) deg(oel, ords.err);
+  else if(!ords.data.length) oel.innerHTML = `<div class="quiet">no orders yet — approvals create them</div>`;
+  else{
+    oel.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px">
+      <tr style="color:var(--dim);text-align:left">${["SYMBOL","SIDE","QTY","STATE","CREATED","FILL","SHORTFALL",""].map(h=>`<th style="padding:6px 10px;border-bottom:1px solid var(--line-strong);font-weight:400;letter-spacing:0.1em;font-size:9.5px">${h}</th>`).join("")}</tr>
+      ${ords.data.map(o=>`<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.symbol||"—")}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.side||"—")}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.qty)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line);color:${o.state==="filled"?"var(--green)":o.state==="cancelled"?"var(--dim)":"var(--gold)"}">${esc(o.state)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--dim)">${esc(ts(o.created_at))}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${o.fill_price!=null?num(o.fill_price):"—"}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${o.shortfall_bps!=null?num(o.shortfall_bps)+" bps":"—"}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${o.state==="pending_submit"
+          ? `<button class="tr-cancel" data-oid="${esc(o.id)}" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;padding:2px 8px;cursor:pointer">CANCEL</button>`:""}</td>
+      </tr>`).join("")}</table>`;
+    oel.querySelectorAll("button.tr-cancel").forEach(b=>b.onclick=async()=>{
+      const reason = prompt("Cancel reason (audited):"); if(!reason) return;
+      const r = await postFull(`/v1/trading/orders/${b.dataset.oid}/cancel`, {reason});
+      actionBanner(r.status===200?"ok":"warn", r.status===200
+        ? "ORDER CANCELLED — its proposal is voided and the reserved capital is released"
+        : esc((r.data && r.data.error && r.data.error.message) || r.err || "failed"));
+      renderTrading(true);
+    });
+    good(oel);
+  }
+
+  const del = document.getElementById("decided-list");
+  const all = await get("/v1/trading/proposals?limit=30");
+  if(all.err) deg(del, all.err);
+  else{
+    const done = all.data.filter(p=>p.state!=="pending_approval");
+    if(!done.length) del.innerHTML = `<div class="quiet">no decisions yet</div>`;
+    else{
+      const col = s => ({approved:"var(--green)",executed:"var(--green)",rejected:"var(--red)",
+                         voided:"var(--red)",expired:"var(--gold)"}[s]||"var(--dim)");
+      del.innerHTML = done.map(p=>`<div style="display:flex;gap:14px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px">
+        <span style="color:${col(p.state)};letter-spacing:0.1em">${esc(p.state.toUpperCase())}</span>
+        <span>${esc(p.symbol||"—")}</span>
+        <span style="color:var(--dim)">${esc(p.position_size)} sh · A$${(+p.position_value_aud||0).toFixed(2)}</span>
+        <span style="color:var(--dim);margin-left:auto">${esc(ts(p.created_at))}</span></div>`).join("");
+      good(del);
+    }
+  }
+}
+document.getElementById("settle-btn").onclick = async()=>{
+  const r = await postFull("/v1/trading/settle", {});
+  if(r.err || r.status!==200)
+    actionBanner("fail", esc(r.err || `settlement error ${r.status} — a lineage-verification failure is an integrity incident; check the audit log`));
+  else actionBanner(r.data.fills.length ? "ok" : "warn",
+    `SETTLEMENT RUN — ${r.data.fills.length} fill(s), ${r.data.expired.length} proposal(s) expired${r.data.fills.length?": "+r.data.fills.map(f=>`${num(f.fill_price)} (${num(f.shortfall_bps)} bps)`).join(", "):""}`);
+  renderTrading(true);
+};
+
 /* ---------- refresh loop ---------- */
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
-                   renderResearch, renderProgress, renderRuns, renderQuant,
-                   renderRisk, renderMarket];
+                   renderTrading, renderResearch, renderProgress, renderRuns,
+                   renderQuant, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")
