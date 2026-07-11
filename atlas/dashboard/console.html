@@ -102,6 +102,26 @@
   .unreachable{color:var(--faint);font-family:var(--mono);font-size:11px;padding:10px 0}
   .view{display:none} .view.active{display:block}
   .note{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-bottom:10px}
+
+  /* ---------- live pipeline ---------- */
+  .pipe{display:flex;align-items:flex-start;gap:0;margin:26px 0 8px;overflow-x:auto;padding:26px 4px 10px}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:96px;flex:none;cursor:pointer;position:relative}
+  .stage.noop{cursor:default}
+  .shape{width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;color:var(--dim);border:1.5px solid var(--line-strong);background:var(--card);position:relative;z-index:1}
+  .stage.reason .shape{border-radius:50%}
+  .stage.seal .shape{border-radius:50%;border-color:var(--gold);color:var(--gold);box-shadow:0 0 0 5px rgba(226,185,91,0.07),0 0 18px rgba(226,185,91,0.15)}
+  .stage.live .shape{border-color:var(--green);color:var(--green);box-shadow:0 0 12px rgba(53,217,138,0.25)}
+  .stage.alert .shape{border-color:var(--red);color:var(--red);box-shadow:0 0 12px rgba(255,92,92,0.3)}
+  .stage.p5 .shape{border-style:dashed;color:var(--faint);border-color:var(--line)}
+  .slabel{font-family:var(--mono);font-size:9.5px;letter-spacing:0.16em;color:var(--dim);white-space:nowrap}
+  .sstat{font-family:var(--mono);font-size:9px;color:var(--faint);white-space:nowrap;text-align:center;line-height:1.5}
+  .stage.live .sstat{color:rgba(53,217,138,0.75)}
+  .stage.alert .sstat{color:var(--red)}
+  .stage.seal .sstat{color:rgba(226,185,91,0.75)}
+  .link{height:1px;background:var(--line-strong);flex:1;min-width:14px;margin-top:22px}
+  .plane-tags{display:flex;justify-content:flex-end;gap:22px;font-family:var(--mono);font-size:9.5px;letter-spacing:0.16em;color:var(--faint);margin-top:-2px}
+  .plane-tags .r::before{content:'○ ';color:var(--blue)}
+  .plane-tags .d::before{content:'■ ';color:var(--dim)}
 </style>
 </head>
 <body>
@@ -123,7 +143,9 @@
     <section class="view" id="view-overview">
       <h1>Overview</h1>
       <div class="sub">The machine tells the truth. The human holds the seal.</div>
-      <div id="gates-alerts"></div>
+      <div class="pipe" id="pipe"></div>
+      <div class="plane-tags"><span class="r">REASONING</span><span class="d">DETERMINISTIC</span></div>
+      <div id="gates-alerts" style="margin-top:18px"></div>
       <h2>Data Freshness</h2>
       <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
       <h2>Quality Gates — Latest Per Market</h2>
@@ -213,6 +235,58 @@ async function renderStrip(){
     cells.push(`<div class="cell"><span class="dot ${warn?"r":"g"}"></span>LLM SPEND $${c.spent_usd.toFixed(2)} / $${c.daily_cap_usd.toFixed(0)}</div>`);
   }
   document.getElementById("strip").innerHTML = cells.join("");
+}
+
+/* ---------- live pipeline ---------- */
+async function renderPipeline(){
+  const el = document.getElementById("pipe");
+  const today = new Date().toISOString().slice(0,10);
+  const [g, runs, memos, trials, chain] = await Promise.all([
+    get("/v1/market/quality-gates"), get("/v1/research/runs?limit=40"),
+    get("/v1/research/memos?limit=25"), get("/v1/quant/trials?limit=50"),
+    get("/v1/audit/events/verify")]);
+
+  const gatesOk = g.data && g.data.length && g.data.every(x=>x.status==="green");
+  const gatesRed = g.data && g.data.some(x=>x.status==="red");
+  const nRuns = role => (runs.data||[]).filter(r=>r.created_at.startsWith(today) && r.agent_role.startsWith(role)).length;
+  const memosToday = (memos.data||[]).filter(m=>m.created_at.startsWith(today)).length;
+  const nTrials = (trials.data||[]).length;
+
+  // status: live | ready | alert | p5 ; shape: reason | det | seal
+  const stages = [
+    {n:"01",l:"DATA",shape:"det",view:"overview",
+     st:gatesRed?"alert":gatesOk?"live":"ready",
+     cap:g.data?(gatesRed?"RED GATE — BLOCKED":"GATES GREEN"):"—"},
+    {n:"02",l:"SCANNER",shape:"reason",view:"research",
+     st:nRuns("scanner")?"live":"ready",
+     cap:nRuns("scanner")?`${nRuns("scanner")} RUNS TODAY`:"BUILT · IDLE"},
+    {n:"03",l:"RESEARCH",shape:"reason",view:"research",
+     st:nRuns("debate")?"live":"ready",
+     cap:nRuns("debate")?`${nRuns("debate")} DEBATE CALLS`:"BUILT · IDLE"},
+    {n:"04",l:"QUANT",shape:"reason",view:"quant",
+     st:nTrials?"live":"ready",
+     cap:nTrials?`${nTrials} TRIALS REGISTERED`:"REGISTRY EMPTY"},
+    {n:"05",l:"CIO MEMO",shape:"reason",view:"research",
+     st:memosToday?"live":"ready",
+     cap:memosToday?`${memosToday} MEMOS TODAY`:"NO MEMOS TODAY"},
+    {n:"06",l:"RISK ENGINE",shape:"det",view:null,
+     st:"ready",cap:"L1–L11 ARMED<br>AWAITING PROPOSALS"},
+    {n:"07",l:"HUMAN SEAL",shape:"seal",view:null,
+     st:"seal",cap:"QUEUE EMPTY<br>NOTHING NEEDS YOU"},
+    {n:"08",l:"EXECUTION",shape:"det",view:null,
+     st:"p5",cap:"PHASE 5<br>PAPER BROKER"},
+    {n:"09",l:"AUDIT CHAIN",shape:"det",view:"overview",
+     st:chain.data?"live":"alert",
+     cap:chain.data?`${chain.data.events_verified} EVENTS · INTACT`:"UNVERIFIED"},
+  ];
+  el.innerHTML = stages.map((s,i)=>
+    (i?`<div class="link"></div>`:"") +
+    `<div class="stage ${s.shape==="reason"?"reason":s.shape==="seal"?"seal":""} ${s.st==="live"?"live":s.st==="alert"?"alert":s.st==="p5"?"p5":""} ${s.view?"":"noop"}" ${s.view?`data-goto="${s.view}"`:""}>
+       <div class="shape">${s.n}</div>
+       <div class="slabel">${s.l}</div>
+       <div class="sstat">${s.cap}</div>
+     </div>`).join("");
+  el.querySelectorAll("[data-goto]").forEach(n=>n.onclick=()=>show(n.dataset.goto));
 }
 
 /* ---------- overview ---------- */
@@ -370,7 +444,7 @@ document.getElementById("days").addEventListener("change",()=>renderMarket());
 
 /* ---------- refresh loop ---------- */
 async function refreshAll(){
-  await Promise.all([renderStrip(),renderOverview(),renderResearch(),renderRuns(),renderQuant(),renderMarket()]);
+  await Promise.all([renderStrip(),renderPipeline(),renderOverview(),renderResearch(),renderRuns(),renderQuant(),renderMarket()]);
   document.getElementById("refresh-at").textContent="REFRESHED "+new Date().toTimeString().slice(0,8);
 }
 refreshAll();
