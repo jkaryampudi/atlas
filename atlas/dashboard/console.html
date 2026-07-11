@@ -138,6 +138,9 @@
       <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
       <div style="margin-bottom:18px"><input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34"></div>
       <div class="grid" id="memos"><div class="quiet">awaiting data</div></div>
+      <h2>Agent Activity — The Flight Recorder</h2>
+      <div class="note">Every model call, pass or fail. schema_fail = the cage killed a violation and retried or failed closed. Prompt hashes pin the exact template version per run.</div>
+      <div class="card" style="overflow-x:auto" id="agent-runs"><div class="quiet">awaiting data</div></div>
     </section>
 
     <!-- QUANT -->
@@ -279,6 +282,22 @@ async function renderResearch(){
 }
 document.getElementById("sym-filter").addEventListener("input", ()=>renderResearch());
 
+async function renderRuns(){
+  const r = await get("/v1/research/runs?limit=40");
+  const el = document.getElementById("agent-runs");
+  if(r.err) return deg(el, r.err);
+  if(!r.data.length) return el.innerHTML = `<div class="quiet">no runs yet</div>`;
+  el.innerHTML = `<table><tr><th>WHEN</th><th>ROLE</th><th>STATUS</th><th>MODEL</th><th>TOKENS IN/OUT</th><th>COST</th><th>TEMPLATE</th></tr>` +
+    r.data.map(x=>`<tr>
+      <td>${esc(x.created_at.slice(5,19).replace("T"," "))}</td>
+      <td>${esc(x.agent_role)}</td>
+      <td><span class="pill ${x.status==="ok"?"g":x.status==="budget_kill"?"am":"r"}">${esc(x.status).toUpperCase()}</span>${x.shadow?` <span class="pill au">SHADOW</span>`:""}</td>
+      <td style="color:var(--faint)">${esc(x.model)}</td>
+      <td>${x.tokens_in??"—"} / ${x.tokens_out??"—"}</td>
+      <td>$${(x.cost_usd).toFixed(4)}</td>
+      <td style="color:var(--faint)">${esc(x.template||"—")}</td></tr>`).join("") + `</table>`;
+}
+
 /* ---------- quant ---------- */
 async function renderQuant(){
   const v = await get("/v1/quant/verdicts?limit=50");
@@ -351,7 +370,7 @@ document.getElementById("days").addEventListener("change",()=>renderMarket());
 
 /* ---------- refresh loop ---------- */
 async function refreshAll(){
-  await Promise.all([renderStrip(),renderOverview(),renderResearch(),renderQuant(),renderMarket()]);
+  await Promise.all([renderStrip(),renderOverview(),renderResearch(),renderRuns(),renderQuant(),renderMarket()]);
   document.getElementById("refresh-at").textContent="REFRESHED "+new Date().toTimeString().slice(0,8);
 }
 refreshAll();

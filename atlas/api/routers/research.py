@@ -28,6 +28,19 @@ def memos(symbol: str | None = None, limit: int = 25) -> list[dict[str, object]]
                  "created_at": r["created_at"].isoformat()} for r in rows]
 
 
+@router.get("/runs")
+def runs(limit: int = 40) -> list[dict[str, object]]:
+    """The flight recorder: every model call, pass or fail, with its cost."""
+    with session_scope() as s:
+        rows = s.execute(text(
+            "SELECT id, agent_role, status, model, tokens_in, tokens_out, cost_usd, "
+            " shadow, left(prompt_template_hash, 10) AS template, created_at "
+            "FROM research.agent_runs ORDER BY created_at DESC LIMIT :n"),
+            {"n": limit}).mappings()
+        return [{**dict(r), "id": str(r["id"]), "cost_usd": float(r["cost_usd"] or 0),
+                 "created_at": r["created_at"].isoformat()} for r in rows]
+
+
 @router.get("/cost")
 def cost_today() -> dict[str, object]:
     from atlas.core.config import get_settings
