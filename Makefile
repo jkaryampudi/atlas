@@ -20,3 +20,5 @@ doctor:    ## diagnose local environment
 	python -m atlas.tools.doctor
 verify-chain:  ## nightly audit hash-chain verification (alert on non-zero exit)
 	python -m atlas.tools.verify_chain
+cov-risk:  ## Phase 4 exit criterion: 100% branch coverage on dcp/risk
+	pytest --cov=atlas.dcp.risk --cov-branch --cov-fail-under=100 -q
