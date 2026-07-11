@@ -55,8 +55,16 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
               f"{closes[-1]:.2f}.")
 
     # The written gate-verdict artifact, quoted verbatim for the symbol's section
-    # (checkpoint 3's report) — the strongest honest evidence we hold.
-    ev_quant = f"No quant validation section found for {symbol}."
+    # (checkpoint 3's report) — the strongest honest evidence we hold. Symbols
+    # without a section get the honest family-level statement instead: a
+    # digit-free fallback starves the debate of grounded numbers and guarantees
+    # grounding kills (observed live on IBN).
+    ev_quant = (f"No symbol-specific quant validation exists for {symbol}. "
+                f"Family-level fact: momentum v1 was validated on real data for "
+                f"SPY and AVGO only and FAILED every gate on both (null-model, "
+                f"buy-and-hold, deflated Sharpe). No validated strategy covers "
+                f"{symbol}; any momentum thesis on it is untested, not merely "
+                f"unproven.")
     if REPORT.exists():
         m = re.search(rf"## {symbol} — (.*?)(?=\n## |\Z)", REPORT.read_text(), re.S)
         if m:
