@@ -1,4 +1,9 @@
 """Research page — committee memos with their full evidence trail (pure API client)."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))  # repo root — venv-independent
+
 import streamlit as st
 
 from atlas.dashboard._client import get_json

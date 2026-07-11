@@ -1,5 +1,10 @@
 """Atlas Overview — pure API client (Doc 06 §6). Never crashes on a failed endpoint;
 every panel degrades independently. Run: make dashboard"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root — venv-independent
+
 import streamlit as st
 
 from atlas.dashboard._client import API, get_json
