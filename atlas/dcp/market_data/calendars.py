@@ -6,7 +6,7 @@ non-trading days, and gates must never demand bars for them.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -51,6 +51,23 @@ def previous_trading_day(market: str, day: date) -> date:
         (day - timedelta(days=1)).isoformat(), direction="previous")
     prev: date = ts.date()
     return prev
+
+
+def next_trading_day(market: str, day: date) -> date:
+    """Earliest session strictly after `day` (skips weekends AND holidays).
+    The paper broker fills at THIS session's open (Phase 5)."""
+    _check_bounds(day)
+    ts = _calendar(market).date_to_session(
+        (day + timedelta(days=1)).isoformat(), direction="next")
+    nxt: date = ts.date()
+    return nxt
+
+
+def session_open_utc(market: str, day: date) -> datetime:
+    """UTC open timestamp of `day`'s session; raises if `day` is not a session."""
+    _check_bounds(day)
+    opened: datetime = _calendar(market).session_open(day.isoformat()).to_pydatetime()
+    return opened
 
 
 def trading_days_between(market: str, start: date, end: date) -> list[date]:

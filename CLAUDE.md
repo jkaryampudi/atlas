@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 125 passing (isolated to the atlas_test database)
+pytest             # currently 244 passing (isolated to the atlas_test database)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
@@ -35,15 +35,25 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 - **P0 Architecture**: signed. **P1 Foundation**: near-exit — see remaining below.
 - **P2 Agents**: runtime + 5 roles + 9-test red-team suite done; live-model evals pending (needs Anthropic API key).
 - **P3 Quant**: engine, momentum v1, null-model gate, walk-forward, regime classifier, artifact approval — all done on synthetic fixtures; overfit canary criterion PASSED. Real-data runs pending backfill.
-- **P4 Risk Engine**: not started (next major build — design in docs 04).
+- **P4 Risk Engine**: DONE — L1–L11 `validate()`, sizing §4, DD1–DD3 breakers, stress §7,
+  factor overlap §12, approval re-check §2.2; `make cov-risk` enforces 100% branch coverage.
+- **P5 Paper Trading**: core DONE on `phase-5-paper` (migration 0010 lifecycle schema,
+  PaperBroker next-session-open fills, build→approve-with-recheck→settle→snapshot in
+  `atlas/dcp/trading/proposals.py`), hardened by adversarial review (settle-time §2.3
+  lineage verification, advisory-lock serialisation, unique-index backstops vs double
+  fills/split positions, latched DD2/DD3 breaker fold, tighten-only stop merge,
+  FX + session-open fill gates). Next: `/v1/trading` API + console Approval Queue,
+  then sell/exit settlement and the T0–T9 daily pipeline.
 
 ## Task queue (priority order)
 1. ~~**P1 exit — real data**~~ DONE (calendars XNYS/XASX, FX job, backfill CLI; 1y history per ADR-0004, zero red gates under per-instrument coverage rules).
 2. ~~**Nightly chain verification**~~ DONE (`make verify-chain` / `atlas/tools/verify_chain.py`; tamper + deletion tested; schedule via cron and alert on non-zero exit).
 3. ~~**First real backtest**~~ DONE — momentum v1 **failed the gates on real data** (both SPY and AVGO; see `docs/reports/first-real-backtest-momentum-v1.md`). Gates were not touched; verdicts recorded verbatim per the working-style rule below. Not decision-grade per ADR-0004 (1y window).
 4. ~~**TradingAgents adoption**~~ DONE (ADR-0005): debate roles + CIO debate_summary, grounding verifier in run_agent, resumable workflow checkpoints (migrations 0007/0008), per-role model registry + OpenAICompatClient + shadow_mode. Deferred: sentiment analyst (needs social-media injection corpus).
-5. **P4 Risk Engine** (`atlas/dcp/risk/engine.py`): implement L1–L11 from `docs/architecture/04` §3 against `risk.limit_sets` v1 (already seeded via `dcp/risk/seed_limits.py`), sizing per §4, drawdown breakers per §5, pro-forma portfolio math. Requirement: 100% branch coverage on `dcp/risk`, property tests proving no input produces a size violating any cap. `vol_target.py` already exists — wire breaker-state dominance.
-6. GitHub push + CI green (workflow ships in `.github/workflows/ci.yml`).
+5. ~~**P4 Risk Engine**~~ DONE (`atlas/dcp/risk/engine.py` + stress/factor_overlap/correlations/approval_recheck; 100% branch coverage via `make cov-risk`; property tests prove no input sizes past a cap).
+6. ~~GitHub push + CI green~~ DONE (https://github.com/jkaryampudi/atlas).
+7. **P5 trading API + console**: `/v1/trading` per Doc 06 §3 (list proposals, approve → fresh re-check → 409 RISK_RECHECK_FAILED, reject, cancel) and the console Approval Queue (fresh check authoritative, kill criteria acknowledged — never a rubber stamp).
+8. **P5 exits + daily pipeline**: sell/exit settlement (stop hits, kill criteria), T0–T9 daily cycle via WorkflowRunner, reconciliation job. DD2/DD3 human clearing action (breaker currently latches forever by design — fail closed).
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.

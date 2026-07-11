@@ -170,9 +170,13 @@ class PortfolioState:
 
 @dataclass(frozen=True)
 class RuleResult:
+    """Doc 05 §4: results are itemised as {rule, value, limit, pass, detail}.
+    value/limit stay None for qualitative rules (DD gate, n/a branches)."""
     rule: str
     passed: bool
     detail: str
+    value: Decimal | None = None
+    limit: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -218,11 +222,13 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
         cap = limits.l2_max_etf_weight
         results.append(RuleResult("L1", True, "n/a (ETF -> L2)"))
         results.append(RuleResult("L2", cand_weight <= cap,
-                                  f"etf weight {cand_weight:.4f} vs cap {cap}"))
+                                  f"etf weight {cand_weight:.4f} vs cap {cap}",
+                                  value=cand_weight, limit=cap))
     else:
         cap = limits.l1_max_stock_weight
         results.append(RuleResult("L1", cand_weight <= cap,
-                                  f"stock weight {cand_weight:.4f} vs cap {cap}"))
+                                  f"stock weight {cand_weight:.4f} vs cap {cap}",
+                                  value=cand_weight, limit=cap))
         results.append(RuleResult("L2", True, "n/a (stock/ADR -> L1)"))
 
     # L3 sector exposure (diversified 'Broad' ETFs are not a sector bet)
@@ -232,7 +238,9 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
         sector_after = _weight(sector_value + proposal.cost_aud, nav)
         results.append(RuleResult("L3", sector_after <= limits.l3_max_sector_exposure,
                                   f"{proposal.sector_gics} {sector_after:.4f} vs cap "
-                                  f"{limits.l3_max_sector_exposure}"))
+                                  f"{limits.l3_max_sector_exposure}",
+                                  value=sector_after,
+                                  limit=limits.l3_max_sector_exposure))
     else:
         results.append(RuleResult("L3", True, "n/a (Broad ETF)"))
 
@@ -243,29 +251,35 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
                                          else Decimal(0)), nav)
     results.append(RuleResult("L4", india_after <= limits.l4_max_india_sleeve,
                               f"india sleeve {india_after:.4f} vs cap "
-                              f"{limits.l4_max_india_sleeve}"))
+                              f"{limits.l4_max_india_sleeve}",
+                              value=india_after, limit=limits.l4_max_india_sleeve))
 
     # L5 cash floor
     cash_after = _weight(state.cash_aud - proposal.cost_aud, nav)
     results.append(RuleResult("L5", cash_after >= limits.l5_min_cash_reserve,
                               f"cash after {cash_after:.4f} vs floor "
-                              f"{limits.l5_min_cash_reserve}"))
+                              f"{limits.l5_min_cash_reserve}",
+                              value=cash_after, limit=limits.l5_min_cash_reserve))
 
     # L6 risk per trade (DD1 halves the budget)
     l6_cap = limits.risk_per_trade(breaker)
     trade_risk_pct = _weight(proposal.risk_aud, nav)
     results.append(RuleResult("L6", trade_risk_pct <= l6_cap,
-                              f"trade risk {trade_risk_pct:.4f} vs cap {l6_cap}"))
+                              f"trade risk {trade_risk_pct:.4f} vs cap {l6_cap}",
+                              value=trade_risk_pct, limit=l6_cap))
 
     # L7 aggregate open risk
     open_risk = sum((h.risk_to_stop_aud for h in state.holdings), Decimal(0))
     agg_after = _weight(open_risk + proposal.risk_aud, nav)
     results.append(RuleResult("L7", agg_after <= limits.l7_max_aggregate_open_risk,
                               f"aggregate open risk {agg_after:.4f} vs cap "
-                              f"{limits.l7_max_aggregate_open_risk}"))
+                              f"{limits.l7_max_aggregate_open_risk}",
+                              value=agg_after,
+                              limit=limits.l7_max_aggregate_open_risk))
 
     # L8 pairwise correlation concentration
     l8_pass, l8_detail = True, "no correlated concentration"
+    l8_value: Decimal | None = None
     for h in state.holdings:
         corr = proposal.corr_with_existing.get(h.symbol)
         if corr is None or corr <= limits.l8_corr_threshold:
@@ -273,17 +287,21 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
         combined = _weight(h.value_aud, nav) + cand_weight
         if combined > limits.l8_corr_combined_weight:
             l8_pass = False
+            l8_value = combined
             l8_detail = (f"corr {corr} with {h.symbol} and combined weight "
                          f"{combined:.4f} > {limits.l8_corr_combined_weight}")
             break
-    results.append(RuleResult("L8", l8_pass, l8_detail))
+    results.append(RuleResult("L8", l8_pass, l8_detail, value=l8_value,
+                              limit=limits.l8_corr_combined_weight))
 
     # L9 new positions per day
     if is_new_position:
         l9_ok = state.new_positions_today + 1 <= limits.l9_max_new_positions_per_day
         results.append(RuleResult(
             "L9", l9_ok, f"{state.new_positions_today} opened today, cap "
-                         f"{limits.l9_max_new_positions_per_day}"))
+                         f"{limits.l9_max_new_positions_per_day}",
+            value=Decimal(state.new_positions_today + 1),
+            limit=Decimal(limits.l9_max_new_positions_per_day)))
     else:
         results.append(RuleResult("L9", True, "n/a (existing position)"))
 
@@ -294,7 +312,8 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
         adv_cap = limits.l10_max_pct_adv * Decimal(proposal.adv_20d)
         results.append(RuleResult("L10", Decimal(proposal.qty) <= adv_cap,
                                   f"qty {proposal.qty} vs {limits.l10_max_pct_adv} "
-                                  f"of ADV {proposal.adv_20d}"))
+                                  f"of ADV {proposal.adv_20d}",
+                                  value=Decimal(proposal.qty), limit=adv_cap))
 
     # L11 unhedged FX exposure
     non_aud = sum((h.value_aud for h in state.holdings if h.currency != "AUD"),
@@ -304,7 +323,9 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
                             nav)
     results.append(RuleResult("L11", non_aud_after <= limits.l11_max_non_aud_exposure,
                               f"non-AUD {non_aud_after:.4f} vs cap "
-                              f"{limits.l11_max_non_aud_exposure}"))
+                              f"{limits.l11_max_non_aud_exposure}",
+                              value=non_aud_after,
+                              limit=limits.l11_max_non_aud_exposure))
 
     return RiskCheck(passed=all(r.passed for r in results), breaker=breaker,
                      results=tuple(results))
