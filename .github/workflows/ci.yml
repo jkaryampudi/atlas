@@ -23,5 +23,8 @@ jobs:
       - run: mypy
       - run: pytest
       - name: migration check
-        env: {ATLAS_DATABASE_URL: "postgresql+psycopg://atlas:atlas@localhost:5432/atlas"}
-        run: alembic upgrade head && alembic check
+        # raw-SQL migrations (no ORM metadata), so `alembic check` cannot apply;
+        # the meaningful assertion is: apply cleanly from zero and land on head
+        run: |
+          alembic upgrade head
+          alembic current | grep -q "(head)"
