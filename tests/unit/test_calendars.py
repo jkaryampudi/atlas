@@ -4,14 +4,17 @@ Golden pins against known holidays/weekends — these replace the naive
 weekend-skip, so the pins deliberately include a holiday a weekend-skip
 would get wrong.
 """
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
 from atlas.dcp.market_data.calendars import (
     is_trading_day,
+    last_completed_session,
+    local_date,
     previous_trading_day,
     recent_sessions,
+    session_close_utc,
     trading_days_between,
 )
 
@@ -94,3 +97,57 @@ def test_early_bound_is_deterministic():
     # run date — the default (today-20y) window would eventually break this.
     days = trading_days_between("US", date(2007, 1, 3), date(2007, 1, 5))
     assert days == [date(2007, 1, 3), date(2007, 1, 4), date(2007, 1, 5)]
+
+
+def test_session_close_utc_golden_pins():
+    # XNYS regular day: 16:00 ET = 20:00 UTC in July (EDT).
+    assert session_close_utc("US", date(2024, 7, 15)) == datetime(2024, 7, 15, 20, 0,
+                                                                  tzinfo=UTC)
+    # XASX: 16:00 Sydney = 06:00 UTC in July (AEST).
+    assert session_close_utc("AU", date(2024, 7, 15)) == datetime(2024, 7, 15, 6, 0,
+                                                                  tzinfo=UTC)
+
+
+def test_session_close_utc_half_day_comes_from_calendar():
+    # Black Friday 2024: XNYS closes early at 13:00 EST = 18:00 UTC — a
+    # hardcoded 20:00 would call the afternoon a data hole.
+    assert session_close_utc("US", date(2024, 11, 29)) == datetime(2024, 11, 29, 18, 0,
+                                                                   tzinfo=UTC)
+
+
+def test_last_completed_session_mid_session_is_previous():
+    # Monday 15:00 UTC = 11:00 ET, XNYS open: Monday has not completed.
+    at = datetime(2024, 7, 15, 15, 0, tzinfo=UTC)
+    assert last_completed_session("US", at) == date(2024, 7, 12)
+
+
+def test_last_completed_session_at_close_is_completed():
+    at = datetime(2024, 7, 15, 20, 0, tzinfo=UTC)
+    assert last_completed_session("US", at) == date(2024, 7, 15)
+
+
+def test_last_completed_session_weekend():
+    at = datetime(2024, 7, 13, 4, 0, tzinfo=UTC)  # Saturday
+    assert last_completed_session("US", at) == date(2024, 7, 12)
+
+
+def test_last_completed_session_au_east_of_utc():
+    # At Sunday 22:00 UTC Sydney is already Monday 08:00 (pre-open): Friday is
+    # still the last completed session; Monday completes at its 06:00 UTC close.
+    assert last_completed_session(
+        "AU", datetime(2024, 7, 14, 22, 0, tzinfo=UTC)) == date(2024, 7, 12)
+    assert last_completed_session(
+        "AU", datetime(2024, 7, 15, 6, 0, tzinfo=UTC)) == date(2024, 7, 15)
+
+
+def test_last_completed_session_requires_aware_datetime():
+    with pytest.raises(ValueError, match="aware"):
+        last_completed_session("US", datetime(2024, 7, 15, 15, 0))
+
+
+def test_local_date_uses_exchange_timezone():
+    at = datetime(2024, 7, 14, 22, 0, tzinfo=UTC)
+    assert local_date("AU", at) == date(2024, 7, 15)  # Sydney is past midnight
+    assert local_date("US", at) == date(2024, 7, 14)  # New York is not
+    with pytest.raises(ValueError, match="aware"):
+        local_date("US", datetime(2024, 7, 14, 22, 0))

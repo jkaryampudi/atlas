@@ -1,0 +1,92 @@
+[
+  {
+    "symbol": "SPY",
+    "exchange": "NYSEARCA",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "SPDR S&P 500 ETF",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": ["US"]
+  },
+  {
+    "symbol": "QQQ",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "Invesco QQQ",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": ["US"]
+  },
+  {
+    "symbol": "INDA",
+    "exchange": "BATS",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "iShares MSCI India ETF",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": ["IN"]
+  },
+  {
+    "symbol": "INFY",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "Infosys ADR",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": ["IN"]
+  },
+  {
+    "symbol": "HDB",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "HDFC Bank ADR",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": ["IN"]
+  },
+  {
+    "symbol": "IBN",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "ICICI Bank ADR",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": ["IN"]
+  },
+  {
+    "symbol": "AVGO",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Broadcom Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": ["US"]
+  },
+  {
+    "symbol": "MSFT",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Microsoft Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": ["US"]
+  },
+  {
+    "symbol": "NDIA",
+    "exchange": "ASX",
+    "market": "AU",
+    "instrument_type": "etf",
+    "name": "Global X India Nifty 50 ETF",
+    "sector_gics": "Broad",
+    "currency": "AUD",
+    "economic_exposure": ["IN"]
+  }
+]

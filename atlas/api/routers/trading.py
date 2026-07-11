@@ -27,6 +27,7 @@ from sqlalchemy import text
 
 from atlas.core.clock import Clock, SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.trading import exits
 from atlas.dcp.trading import proposals as lifecycle
 
 router = APIRouter()
@@ -217,6 +218,47 @@ def orders(state: str | None = None, limit: int = 50) -> list[dict[str, object]]
                  "closed_at": r["closed_at"].isoformat() if r["closed_at"] else None,
                  "executed_at": r["executed_at"].isoformat() if r["executed_at"] else None}
                 for r in s.execute(text(q), params).mappings()]
+
+
+class CloseBody(BaseModel):
+    reason: str
+
+
+@router.post("/positions/{position_id}/close")
+def close_position(position_id: str, body: CloseBody) -> Any:
+    """Discretionary exit ahead of the stop: creates an EXIT proposal that
+    still needs the human seal on the approval desk — only stops are
+    pre-authorized. Refuses while another exit is in flight (409)."""
+    try:
+        with session_scope() as s:
+            res = exits.close_position(s, _clock(), position_id=position_id,
+                                       reason=body.reason)
+    except ValueError as e:
+        return _value_error_response(e)
+    return {"status": "pending_approval", "proposal_id": res.proposal_id,
+            "qty": res.qty}
+
+
+@router.get("/positions")
+def positions(include_closed: bool = False, limit: int = 50) -> list[dict[str, object]]:
+    """The book, marked at the latest ingested close (display only — risk
+    marks fail closed in the engine; here a missing close shows as null)."""
+    q = ("SELECT p.id, p.qty, p.avg_cost, p.currency, p.opened_at, p.closed_at, "
+         " p.current_stop, p.thesis_memo_id, i.symbol, i.market, "
+         " (SELECT close FROM market.price_bars_daily b "
+         "  WHERE b.instrument_id = p.instrument_id AND b.source = 'EodhdAdapter' "
+         "    AND b.close IS NOT NULL ORDER BY b.bar_date DESC LIMIT 1) AS last_close "
+         "FROM trading.positions p "
+         "LEFT JOIN market.instruments i ON i.id = p.instrument_id ")
+    if not include_closed:
+        q += "WHERE p.closed_at IS NULL "
+    q += "ORDER BY p.opened_at DESC NULLS LAST LIMIT :n"
+    with session_scope() as s:
+        return [{**dict(r), "id": str(r["id"]),
+                 "thesis_memo_id": str(r["thesis_memo_id"]) if r["thesis_memo_id"] else None,
+                 "opened_at": r["opened_at"].isoformat() if r["opened_at"] else None,
+                 "closed_at": r["closed_at"].isoformat() if r["closed_at"] else None}
+                for r in s.execute(text(q), {"n": limit}).mappings()]
 
 
 @router.post("/settle")

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atlas.api</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jayakrishnakaryampudi/Documents/atlas/ops/run_api.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-api.log</string>
+  <key>StandardErrorPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-api.log</string>
+</dict>
+</plist>

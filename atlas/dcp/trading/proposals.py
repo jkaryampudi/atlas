@@ -53,12 +53,48 @@ Documented resolutions (Doc ambiguities, resolved conservatively):
 - Stuck orders (fill-date bar permanently missing) never fill at a later
   session's price — cancel_order() is the human escape hatch (order ->
   'cancelled', proposal -> 'voided').
+
+Documented resolutions — sell settlement (Phase 5 exits, Doc 04 §5/§14):
+- Reducing a position leaves avg_cost untouched (realised P&L lives in the
+  tax lots: proceeds vs cost per lot); a reduction to zero closes the
+  position with closed_at = the fill's executed_at.
+- Lots dispose FIFO by acquired_at (created_at, id as tiebreaks). A partial
+  disposal SPLITS the lot: the ORIGINAL row becomes the disposed slice (qty
+  taken, cost pro-rated by qty and quantized to cents, disposed_at +
+  proceeds_aud set) and a NEW row carries the residual qty with the residual
+  cost = original minus disposed, so cents are conserved exactly.
+- Per-lot proceeds are qty x fill price x fill FX, quantized to cents PER
+  LOT; the position.closed/position.reduced payloads carry the lot-booked
+  total, which may differ from the unquantized execution value by sub-cent
+  rounding — the cash ledger reads executions, never lots.
+- approve() branches on the proposal's action: action='exit' skips
+  engine.validate entirely — L1-L11 gate risk ADDED to the book and an exit
+  only releases risk; blocking it under DD2/DD3 would invert Doc 04 §5 (DD3
+  is exit-ONLY, never exit-blocking). The fresh approval-time check instead
+  re-verifies the EXIT premise (position still open at the approved qty) and
+  records the breaker statement; a closed/resized position voids the
+  approval with the same RISK_RECHECK_FAILED shape as the buy path.
+- Pending SELL orders are excluded from the worst-case pro-forma pending
+  block in _build_book: the worst case for a sell is that it does NOT fill,
+  and the still-open position is already counted as a holding.
+- settle_orders lineage rule: the referenced check must be a PASS and either
+  (check_kind='approval_time' AND proposal 'approved') — the human-approved
+  buy/exit path — or (check_kind='order_time' AND proposal 'executed') — a
+  stop-exit order, whose proposal is the already-executed ENTRY proposal.
+  Stop-exit orders are created and filled in one transaction by
+  atlas.dcp.trading.exits, so one arriving at settle unfilled is unreachable
+  through the lifecycle; if one exists anyway it is NOT an integrity breach
+  (its lineage is genuine) and it fills as a plain sell at the next session
+  open — cancel_order stays the human escape hatch if that is unwanted.
+- _record_fill transitions the proposal to 'executed' (and emits
+  proposal.executed) only when it is not already there: a stop-exit fill
+  references the entry proposal, which the entry fill already executed.
 """
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, Sequence
 from uuid import UUID
@@ -303,6 +339,10 @@ def _build_book(session: Session, clock: Clock) -> _Book:
     cash = _ledger_cash(session)
     nav = compute_snapshot(cash_aud=cash, holdings=marks, fx_to_aud=rates).nav_aud
 
+    # Worst case is one-sided: pending BUYS count as if they all fill (adds
+    # exposure + reserves cash); pending SELLS count as if they do NOT fill —
+    # the still-open position is already in `holdings` above, so including the
+    # sell would double-count or, worse, pre-release risk it has not released.
     pending_cost = Decimal(0)
     pending = session.execute(text(
         "SELECT o.qty, o.created_at, tp.entry_price, tp.stop_loss, i.id AS iid, "
@@ -310,7 +350,7 @@ def _build_book(session: Session, clock: Clock) -> _Book:
         "FROM trading.orders o "
         "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
         "JOIN market.instruments i ON i.id = tp.instrument_id "
-        "WHERE o.state IN ('pending_submit','submitted')")).all()
+        "WHERE o.state IN ('pending_submit','submitted') AND o.side = 'buy'")).all()
     for o in pending:
         rates.setdefault(o.currency, fx_to_aud(session, o.currency, on))
         fx = rates[o.currency]
@@ -331,7 +371,7 @@ def _build_book(session: Session, clock: Clock) -> _Book:
     pending_new_today = session.execute(text(
         "SELECT count(*) FROM trading.orders o "
         "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
-        "WHERE o.state IN ('pending_submit','submitted') "
+        "WHERE o.state IN ('pending_submit','submitted') AND o.side = 'buy' "
         "  AND (o.created_at AT TIME ZONE 'UTC')::date = :d "
         "  AND NOT EXISTS (SELECT 1 FROM trading.positions p "
         "                  WHERE p.instrument_id = tp.instrument_id "
@@ -376,6 +416,31 @@ def _persist_check(session: Session, clock: Clock, *, proposal_id: UUID,
         payload={"risk_check_id": str(check_id), "proposal_id": str(proposal_id),
                  "check_kind": kind, "verdict": "PASS" if check.passed else "FAIL",
                  "failures": [r.rule for r in check.failures()]})
+    return str(check_id)
+
+
+def _persist_static_check(session: Session, clock: Clock, *, proposal_id: UUID,
+                          kind: str, verdict: str, results: list[dict[str, Any]],
+                          price_snapshot: dict[str, Any]) -> str:
+    """risk.risk_checks row for a check that did NOT run engine.validate —
+    the EXIT/STOP rules of the exit path (Doc 04 §5: exits release risk, so
+    L1-L11 buy-side validation does not apply). limit_set_version stays NULL:
+    no limit set was consulted, and the row must not claim otherwise. Same
+    itemised result shape and audit event as _persist_check."""
+    check_id = session.execute(text(
+        "INSERT INTO risk.risk_checks (proposal_id, price_snapshot, results, "
+        " verdict, check_kind, created_at) "
+        "VALUES (:p, CAST(:pj AS jsonb), CAST(:r AS jsonb), :verdict, :k, :ca) "
+        "RETURNING id"),
+        {"p": proposal_id, "pj": json.dumps(price_snapshot),
+         "r": json.dumps(results), "verdict": verdict, "k": kind,
+         "ca": clock.now()}).scalar_one()
+    _audit(session, clock).append(
+        event_type="risk.check.completed", entity_type="risk_check",
+        entity_id=str(check_id), actor_type="dcp", actor_id="risk_engine",
+        payload={"risk_check_id": str(check_id), "proposal_id": str(proposal_id),
+                 "check_kind": kind, "verdict": verdict,
+                 "failures": [r["rule"] for r in results if not r["pass"]]})
     return str(check_id)
 
 
@@ -500,6 +565,91 @@ def _original_check(session: Session, check_id: UUID) -> RiskCheck:
                       for d in row.results))
 
 
+def _approve_exit(session: Session, clock: Clock, *, row: Any,
+                  now: datetime) -> ApprovalOutcome:
+    """Approval branch for action='exit' (discretionary close, Doc 04 §5).
+
+    The fresh approval-time check does NOT run engine.validate: L1-L11 gate
+    risk ADDED to the book and an exit only releases risk — under DD2/DD3 the
+    breaker is exit-only, never exit-blocking, so the check records a breaker
+    STATEMENT instead of a gate. What IS re-verified is the exit premise: the
+    position must still be open at exactly the approved quantity (a stop exit
+    may have closed it between proposal and click — that voids this approval
+    with the same RISK_RECHECK_FAILED shape as the buy path). The breaker is
+    folded from the persisted NAV history only: approving an exit must never
+    depend on being able to mark every holding (fail-closed marks elsewhere
+    in the book must not trap the principal in a position)."""
+    pid = row.id
+    proposal_id = str(pid)
+    audit = _audit(session, clock)
+    inst = _load_instrument_by_id(session, row.instrument_id)
+    pos = session.execute(text(
+        "SELECT id, qty FROM trading.positions "
+        "WHERE instrument_id = :iid AND closed_at IS NULL AND qty > 0 FOR UPDATE"),
+        {"iid": row.instrument_id}).first()
+    breaker = _breaker_fold(_snapshot_navs(session))
+    if pos is None:
+        exit_ok, exit_detail = False, "position already closed — nothing to exit"
+    elif int(pos.qty) != int(row.position_size):
+        exit_ok = False
+        exit_detail = (f"position qty {int(pos.qty)} != approved exit qty "
+                       f"{int(row.position_size)} — stale exit proposal")
+    else:
+        exit_ok = True
+        exit_detail = f"risk-reducing: closes {int(row.position_size)} {inst.symbol}"
+    results: list[dict[str, Any]] = [
+        {"rule": "DD", "pass": True, "value": None, "limit": None,
+         "detail": f"breaker {breaker.value}: exits remain allowed "
+                   "(DD3 is exit-only, not exit-blocking — Doc 04 §5)"},
+        {"rule": "EXIT", "pass": exit_ok, "value": None, "limit": None,
+         "detail": exit_detail}]
+    fresh_id = _persist_static_check(
+        session, clock, proposal_id=pid, kind="approval_time",
+        verdict="PASS" if exit_ok else "FAIL", results=results,
+        price_snapshot={"breaker": breaker.value,
+                        # Doc 04 §14: the approval-time market price
+                        "approval_price": str(
+                            _latest_close(session, row.instrument_id, now.date()))})
+
+    if not exit_ok:  # same terminal shape as the buy path's voided re-check
+        session.execute(text(
+            "UPDATE trading.trade_proposals SET state = 'voided' WHERE id = :p"),
+            {"p": pid})
+        audit.append(event_type="proposal.voided", entity_type="proposal",
+                     entity_id=proposal_id, actor_type="dcp", actor_id="risk_engine",
+                     payload={"proposal_id": proposal_id, "risk_check_id": fresh_id,
+                              "failures": ["EXIT"]})
+        return ApprovalOutcome(status="RISK_RECHECK_FAILED", proposal_id=proposal_id,
+                               order_id=None, risk_check_id=fresh_id,
+                               failures=("EXIT",))
+
+    approval_id = session.execute(text(
+        "INSERT INTO trading.approvals (proposal_id, decision, approver, auth_method, "
+        " approval_time_risk_check_id, decided_at, created_at) "
+        "VALUES (:p, 'approve', 'principal', 'console', :c, :t, :t) RETURNING id"),
+        {"p": pid, "c": UUID(fresh_id), "t": now}).scalar_one()
+    session.execute(text(
+        "UPDATE trading.trade_proposals SET state = 'approved' WHERE id = :p"),
+        {"p": pid})
+    order_id = session.execute(text(
+        "INSERT INTO trading.orders (proposal_id, approval_id, risk_check_id, broker, "
+        " side, qty, order_type, state, created_at) "
+        "VALUES (:p, :a, :c, 'paper', 'sell', :q, 'market', 'pending_submit', :t) "
+        "RETURNING id"),
+        {"p": pid, "a": approval_id, "c": UUID(fresh_id),
+         "q": int(row.position_size), "t": now}).scalar_one()
+    audit.append(event_type="proposal.approved", entity_type="proposal",
+                 entity_id=proposal_id, actor_type="human", actor_id="principal",
+                 payload={"proposal_id": proposal_id, "approval_id": str(approval_id),
+                          "order_id": str(order_id), "risk_check_id": fresh_id})
+    audit.append(event_type="order.state_changed", entity_type="order",
+                 entity_id=str(order_id), actor_type="dcp", actor_id="trading_lifecycle",
+                 payload={"order_id": str(order_id), "from": None,
+                          "to": "pending_submit"})
+    return ApprovalOutcome(status="approved", proposal_id=proposal_id,
+                           order_id=str(order_id), risk_check_id=fresh_id)
+
+
 def approve(session: Session, clock: Clock, *, proposal_id: str,
             acknowledged_risks: bool) -> ApprovalOutcome:
     """Doc 06 §3.2 server sequence, minus HTTP: verify pending_approval and not
@@ -512,7 +662,7 @@ def approve(session: Session, clock: Clock, *, proposal_id: str,
     pid = UUID(proposal_id)
     row = session.execute(text(
         "SELECT id, instrument_id, position_size, entry_price, stop_loss, state, "
-        "       expires_at, risk_check_id FROM trading.trade_proposals "
+        "       expires_at, risk_check_id, action FROM trading.trade_proposals "
         "WHERE id = :p FOR UPDATE"), {"p": pid}).first()
     if row is None:
         raise ValueError(f"unknown proposal {proposal_id}")
@@ -532,6 +682,9 @@ def approve(session: Session, clock: Clock, *, proposal_id: str,
                               "expires_at": row.expires_at.isoformat()})
         return ApprovalOutcome(status="PROPOSAL_EXPIRED", proposal_id=proposal_id,
                                order_id=None, risk_check_id=None)
+
+    if row.action == "exit":  # exits skip buy-side validation (module docstring)
+        return _approve_exit(session, clock, row=row, now=now)
 
     # fresh state, fresh prices, fresh limits — no grandfathering (Doc 04 §2.2)
     limits = load_active_limit_set(session, now.date())
@@ -683,10 +836,16 @@ def settle_orders(session: Session, clock: Clock,
     re-running is idempotent: a filled order is never pending again.
 
     Doc 04 §2 item 3: the Execution service VERIFIES the risk-check reference
-    before submission — a pending order whose proposal is not 'approved' or
-    whose referenced check is not a PASS approval_time check is an integrity
-    breach (only writable by tampering, the lifecycle cannot produce it) and
-    raises instead of filling."""
+    before submission. The exact rule: the referenced check must be a PASS,
+    and either (check_kind='approval_time' AND proposal 'approved') — the
+    human-approved buy/exit path — or (check_kind='order_time' AND proposal
+    'executed') — a pre-authorized stop-exit order, whose proposal is the
+    already-executed ENTRY proposal (atlas.dcp.trading.exits). Anything else
+    is an integrity breach (only writable by tampering, the lifecycle cannot
+    produce it) and raises instead of filling. Stop-exit orders are created
+    and filled in one transaction, so one arriving here unfilled is itself
+    unreachable through the lifecycle; if one exists anyway its lineage is
+    genuine, and it fills as a plain sell at the next session open."""
     _lifecycle_lock(session)
     b: Broker = broker if broker is not None else PaperBroker()
     as_of = clock.now()
@@ -703,18 +862,20 @@ def settle_orders(session: Session, clock: Clock,
         "FOR UPDATE OF o")).all()
     reports: list[FillReport] = []
     for r in rows:
-        if (r.proposal_state != "approved" or r.check_verdict != "PASS"
-                or r.check_kind != "approval_time"):
+        lineage_ok = r.check_verdict == "PASS" and (
+            (r.check_kind == "approval_time" and r.proposal_state == "approved")
+            or (r.check_kind == "order_time" and r.proposal_state == "executed"))
+        if not lineage_ok:
             raise RuntimeError(
                 f"REFUSING to fill order {r.id}: proposal state "
                 f"{r.proposal_state!r}, referenced check verdict "
                 f"{r.check_verdict!r}/{r.check_kind!r} — an order must "
-                "reference the PASS approval-time check (Doc 04 §2.3)")
-        if r.side != "buy":
-            raise NotImplementedError("long-only v1: sell settlement is Phase 5 exits")
+                "reference a PASS approval-time check on an approved proposal, "
+                "or a PASS order-time check on an executed entry proposal "
+                "(stop exit) (Doc 04 §2.3)")
         fill = b.submit(session, OrderTicket(
             order_id=str(r.id), instrument_id=r.iid, market=r.market,
-            currency=r.currency, side="buy", qty=int(r.qty),
+            currency=r.currency, side=r.side, qty=int(r.qty),
             decision_price=Decimal(r.entry_price),
             decision_date=r.created_at.astimezone(UTC).date()), as_of=as_of)
         if fill is None:
@@ -723,9 +884,62 @@ def settle_orders(session: Session, clock: Clock,
     return tuple(reports)
 
 
+def _dispose_lots_fifo(session: Session, *, position_id: UUID, qty: int,
+                       per_share_aud: Decimal, disposed_at: datetime,
+                       now: datetime) -> Decimal:
+    """FIFO tax-lot disposal (module docstring resolutions): oldest open lots
+    first (acquired_at, then created_at, id). A partial disposal splits the
+    lot — the original row becomes the DISPOSED slice (pro-rata cost,
+    quantized to cents) and a new row keeps the residual qty with the exact
+    residual cost, so no cent is created or destroyed. Returns the lot-booked
+    proceeds total. Raises if the open lots cannot cover the disposal — a
+    lot ledger that disagrees with the position is corruption, never rounded
+    over (fail closed)."""
+    lots = session.execute(text(
+        "SELECT id, execution_id, qty, cost_aud, acquired_at FROM trading.tax_lots "
+        "WHERE position_id = :p AND disposed_at IS NULL "
+        "ORDER BY acquired_at, created_at, id FOR UPDATE"), {"p": position_id}).all()
+    remaining = qty
+    proceeds_total = Decimal("0.00")
+    for lot in lots:
+        if remaining == 0:
+            break
+        take = min(int(lot.qty), remaining)
+        proceeds = (Decimal(take) * per_share_aud).quantize(_CENT)
+        if take == int(lot.qty):
+            session.execute(text(
+                "UPDATE trading.tax_lots SET disposed_at = :at, proceeds_aud = :pr "
+                "WHERE id = :i"), {"at": disposed_at, "pr": proceeds, "i": lot.id})
+        else:
+            disposed_cost = (Decimal(lot.cost_aud) * take / int(lot.qty)).quantize(_CENT)
+            session.execute(text(  # original row becomes the disposed slice
+                "UPDATE trading.tax_lots SET qty = :q, cost_aud = :c, "
+                "disposed_at = :at, proceeds_aud = :pr WHERE id = :i"),
+                {"q": take, "c": disposed_cost, "at": disposed_at, "pr": proceeds,
+                 "i": lot.id})
+            session.execute(text(  # residual keeps its acquisition identity
+                "INSERT INTO trading.tax_lots (position_id, execution_id, qty, "
+                " cost_aud, acquired_at, created_at) "
+                "VALUES (:p, :e, :q, :c, :at, :ca)"),
+                {"p": position_id, "e": lot.execution_id, "q": int(lot.qty) - take,
+                 "c": Decimal(lot.cost_aud) - disposed_cost,
+                 "at": lot.acquired_at, "ca": now})
+        proceeds_total += proceeds
+        remaining -= take
+    if remaining != 0:
+        raise RuntimeError(
+            f"open tax lots cover only {qty - remaining} of a {qty}-share "
+            f"disposal for position {position_id} — the lot ledger does not "
+            "match the position; refusing to fill")
+    return proceeds_total
+
+
 def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> FillReport:
-    """Execution + shortfall fields (Doc 04 §14), position upsert at average
-    cost, tax lot, order 'filled', proposal 'executed' — all audited. The
+    """Execution + shortfall fields (Doc 04 §14), book mutation, order
+    'filled', proposal 'executed' — all audited. Buys upsert the position at
+    average cost and open a tax lot; sells reduce the position (avg_cost
+    untouched — realised P&L lives in the lots), dispose lots FIFO, and close
+    the position at the fill's executed_at when qty reaches zero. The
     UNIQUE(executions.order_id) index and the state-guarded order UPDATE are
     the schema backstops against a double fill."""
     now = clock.now()
@@ -750,7 +964,42 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
         "SELECT id, qty, avg_cost, current_stop FROM trading.positions "
         "WHERE instrument_id = :iid AND closed_at IS NULL FOR UPDATE"),
         {"iid": order.iid}).first()
-    if pos is None:
+    if order.side == "sell":
+        if pos is None:
+            raise RuntimeError(f"sell order {order.id} has no open position in "
+                               f"{order.symbol} — integrity breach, refusing to fill")
+        if fill.fill_qty > int(pos.qty):
+            raise RuntimeError(f"sell order {order.id} for {fill.fill_qty} exceeds "
+                               f"open qty {int(pos.qty)} in {order.symbol} — "
+                               "refusing to fill (long-only: no shorts, ever)")
+        position_id = pos.id
+        proceeds = _dispose_lots_fifo(
+            session, position_id=pos.id, qty=fill.fill_qty,
+            per_share_aud=fill.fill_price * fill.fx_to_aud,
+            disposed_at=fill.executed_at, now=now)
+        new_qty = int(pos.qty) - fill.fill_qty
+        if new_qty == 0:
+            session.execute(text(
+                "UPDATE trading.positions SET qty = 0, closed_at = :at "
+                "WHERE id = :i"), {"at": fill.executed_at, "i": pos.id})
+            audit.append(event_type="position.closed", entity_type="position",
+                         entity_id=str(pos.id), actor_type="dcp",
+                         actor_id="trading_lifecycle",
+                         payload={"position_id": str(pos.id),
+                                  "symbol": order.symbol, "qty": fill.fill_qty,
+                                  "proceeds_aud": str(proceeds)})
+        else:  # reduce: avg_cost unchanged — realised P&L lives in the lots
+            session.execute(text(
+                "UPDATE trading.positions SET qty = :q WHERE id = :i"),
+                {"q": new_qty, "i": pos.id})
+            audit.append(event_type="position.reduced", entity_type="position",
+                         entity_id=str(pos.id), actor_type="dcp",
+                         actor_id="trading_lifecycle",
+                         payload={"position_id": str(pos.id),
+                                  "symbol": order.symbol, "qty": fill.fill_qty,
+                                  "remaining_qty": new_qty,
+                                  "proceeds_aud": str(proceeds)})
+    elif pos is None:
         position_id = session.execute(text(
             "INSERT INTO trading.positions (instrument_id, qty, avg_cost, currency, "
             " opened_at, current_stop, thesis_memo_id, created_at) "
@@ -787,16 +1036,14 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
                               "symbol": order.symbol, "qty": new_qty,
                               "added_qty": fill.fill_qty,
                               "stop_old": str(old_stop), "stop_new": str(new_stop)})
-    session.execute(text(
-        "INSERT INTO trading.tax_lots (position_id, execution_id, qty, cost_aud, "
-        " acquired_at, created_at) VALUES (:p, :e, :q, :c, :at, :ca)"),
-        {"p": position_id, "e": execution_id, "q": fill.fill_qty,
-         "c": (Decimal(fill.fill_qty) * fill.fill_price * fill.fx_to_aud
-               ).quantize(_CENT),
-         "at": fill.executed_at, "ca": now})
-    session.execute(text(
-        "UPDATE trading.trade_proposals SET state = 'executed' WHERE id = :p"),
-        {"p": order.proposal_id})
+    if order.side != "sell":  # buys ACQUIRE a lot; sells disposed theirs above
+        session.execute(text(
+            "INSERT INTO trading.tax_lots (position_id, execution_id, qty, cost_aud, "
+            " acquired_at, created_at) VALUES (:p, :e, :q, :c, :at, :ca)"),
+            {"p": position_id, "e": execution_id, "q": fill.fill_qty,
+             "c": (Decimal(fill.fill_qty) * fill.fill_price * fill.fx_to_aud
+                   ).quantize(_CENT),
+             "at": fill.executed_at, "ca": now})
 
     audit.append(event_type="execution.recorded", entity_type="execution",
                  entity_id=str(execution_id), actor_type="broker", actor_id="paper",
@@ -809,11 +1056,17 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
                  entity_id=str(order.id), actor_type="dcp", actor_id="trading_lifecycle",
                  payload={"order_id": str(order.id), "from": "pending_submit",
                           "to": "filled"})
-    audit.append(event_type="proposal.executed", entity_type="proposal",
-                 entity_id=str(order.proposal_id), actor_type="dcp",
-                 actor_id="trading_lifecycle",
-                 payload={"proposal_id": str(order.proposal_id),
-                          "order_id": str(order.id)})
+    # A stop-exit fill references the ENTRY proposal, already 'executed' by the
+    # entry fill — transition (and the event) only happen once per proposal.
+    if order.proposal_state != "executed":
+        session.execute(text(
+            "UPDATE trading.trade_proposals SET state = 'executed' WHERE id = :p"),
+            {"p": order.proposal_id})
+        audit.append(event_type="proposal.executed", entity_type="proposal",
+                     entity_id=str(order.proposal_id), actor_type="dcp",
+                     actor_id="trading_lifecycle",
+                     payload={"proposal_id": str(order.proposal_id),
+                              "order_id": str(order.id)})
     return FillReport(order_id=str(order.id), execution_id=str(execution_id),
                       fill_date=fill.fill_date, fill_price=fill.fill_price,
                       shortfall_bps=fill.shortfall_bps)

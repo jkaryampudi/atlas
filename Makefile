@@ -26,3 +26,17 @@ api:       ## run the read-only API locally (port 8001; 8000 is taken on this ma
 	uvicorn atlas.api.main:app --port 8001
 dashboard: ## ops console (pure API client); needs `pip install -e ".[dashboard]"`
 	ATLAS_API_URL=http://localhost:8001 streamlit run atlas/dashboard/overview.py
+daily:     ## run the T0-T9 daily pipeline once, now (same entry launchd uses)
+	python -m atlas.ops.daily
+backup:    ## pg_dump the atlas DB to ~/AtlasBackups (or ATLAS_BACKUP_DIR)
+	./ops/backup.sh
+install-ops:  ## install launchd jobs: API (KeepAlive), daily 09:30, backup 10:30
+	mkdir -p ~/Library/Logs
+	cp ops/launchd/com.atlas.*.plist ~/Library/LaunchAgents/
+	launchctl unload ~/Library/LaunchAgents/com.atlas.api.plist 2>/dev/null || true
+	launchctl unload ~/Library/LaunchAgents/com.atlas.daily.plist 2>/dev/null || true
+	launchctl unload ~/Library/LaunchAgents/com.atlas.backup.plist 2>/dev/null || true
+	launchctl load ~/Library/LaunchAgents/com.atlas.api.plist
+	launchctl load ~/Library/LaunchAgents/com.atlas.daily.plist
+	launchctl load ~/Library/LaunchAgents/com.atlas.backup.plist
+	@echo "installed — logs in ~/Library/Logs/atlas-*.log"

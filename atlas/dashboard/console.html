@@ -212,6 +212,8 @@
       <div id="trade-action-banner"></div>
       <h2>Awaiting Your Approval</h2>
       <div id="approval-queue"><div class="quiet">awaiting data</div></div>
+      <h2>Open Positions</h2>
+      <div class="card" style="overflow-x:auto" id="positions-table"><div class="quiet">awaiting data</div></div>
       <h2 style="display:flex;align-items:center;gap:14px">Orders
         <button id="settle-btn" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer;letter-spacing:0.1em">RUN SETTLEMENT</button>
       </h2>
@@ -763,6 +765,37 @@ async function renderTrading(force){
       renderTrading(true);
     });
     good(qel);
+  }
+
+  const pel = document.getElementById("positions-table");
+  const poss = await get("/v1/trading/positions");
+  if(poss.err) deg(pel, poss.err);
+  else if(!poss.data.length) pel.innerHTML = `<div class="quiet">no open positions — the book is flat</div>`;
+  else{
+    pel.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px">
+      <tr style="color:var(--dim);text-align:left">${["SYMBOL","QTY","AVG COST","LAST","STOP","UNREALISED","OPENED",""].map(h=>`<th style="padding:6px 10px;border-bottom:1px solid var(--line-strong);font-weight:400;letter-spacing:0.1em;font-size:9.5px">${h}</th>`).join("")}</tr>
+      ${poss.data.map(p=>{
+        const upl = (p.last_close!=null && p.avg_cost!=null) ? (p.last_close/p.avg_cost-1)*100 : null;
+        return `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(p.symbol||"—")}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(p.qty)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${num(p.avg_cost)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${p.last_close!=null?num(p.last_close):"—"}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${p.current_stop!=null?num(p.current_stop):`<span style="color:var(--red)">NONE</span>`}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line);color:${upl==null?"var(--dim)":upl>=0?"var(--green)":"var(--red)"}">${upl==null?"—":(upl>=0?"+":"")+upl.toFixed(2)+"%"}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line);color:var(--dim)">${esc(ts(p.opened_at))}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)"><button class="tr-close" data-pid="${esc(p.id)}" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;padding:2px 8px;cursor:pointer">CLOSE</button></td>
+      </tr>`;}).join("")}</table>`;
+    pel.querySelectorAll("button.tr-close").forEach(b=>b.onclick=async()=>{
+      const reason = prompt("Close reason (audited — this creates an EXIT proposal you still approve):");
+      if(!reason) return;
+      const r = await postFull(`/v1/trading/positions/${b.dataset.pid}/close`, {reason});
+      actionBanner(r.status===200?"ok":"warn", r.status===200
+        ? "EXIT PROPOSAL CREATED — it is now in the approval queue above; the stop stays live until you approve"
+        : esc((r.data && r.data.error && r.data.error.message) || r.err || "failed"));
+      renderTrading(true);
+    });
+    good(pel);
   }
 
   const oel = document.getElementById("orders-table");

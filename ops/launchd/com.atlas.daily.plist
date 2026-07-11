@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atlas.daily</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jayakrishnakaryampudi/Documents/atlas/ops/run_daily.sh</string>
+  </array>
+  <!-- 09:30 local (AEST) = 23:30 UTC: after the US close and EODHD publish,
+       and after yesterday's ASX close. Weekends run too — the pipeline is
+       calendar-aware and a non-session day is a cheap no-op that still
+       verifies the chain and the book. -->
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-daily.log</string>
+  <key>StandardErrorPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-daily.log</string>
+</dict>
+</plist>

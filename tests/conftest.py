@@ -75,6 +75,11 @@ def pg_session():
     yield s
     s.rollback()
     s.close()
+    # dispose the pool, not just the session: an abandoned engine keeps its
+    # pooled connections open until GC, and a long run (or a concurrent one)
+    # exhausts Postgres max_connections mid-suite — same failure mode
+    # reset_app_engine() guards against for the API fixtures.
+    engine.dispose()
 
 
 @pytest.fixture

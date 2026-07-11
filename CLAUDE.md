@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 244 passing (isolated to the atlas_test database)
+pytest             # currently 300 passing (isolated to the atlas_test database)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
@@ -52,8 +52,9 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 4. ~~**TradingAgents adoption**~~ DONE (ADR-0005): debate roles + CIO debate_summary, grounding verifier in run_agent, resumable workflow checkpoints (migrations 0007/0008), per-role model registry + OpenAICompatClient + shadow_mode. Deferred: sentiment analyst (needs social-media injection corpus).
 5. ~~**P4 Risk Engine**~~ DONE (`atlas/dcp/risk/engine.py` + stress/factor_overlap/correlations/approval_recheck; 100% branch coverage via `make cov-risk`; property tests prove no input sizes past a cap).
 6. ~~GitHub push + CI green~~ DONE (https://github.com/jkaryampudi/atlas).
-7. **P5 trading API + console**: `/v1/trading` per Doc 06 §3 (list proposals, approve → fresh re-check → 409 RISK_RECHECK_FAILED, reject, cancel) and the console Approval Queue (fresh check authoritative, kill criteria acknowledged — never a rubber stamp).
-8. **P5 exits + daily pipeline**: sell/exit settlement (stop hits, kill criteria), T0–T9 daily cycle via WorkflowRunner, reconciliation job. DD2/DD3 human clearing action (breaker currently latches forever by design — fail closed).
+7. ~~**P5 trading API + console**~~ DONE (`atlas/api/routers/trading.py`, console TRADING page).
+8. ~~**P5 exits + daily pipeline**~~ DONE — GO-LIVE stack: exit engine (`atlas/dcp/trading/exits.py`: pre-authorized stop exits, discretionary close), sell settlement + FIFO lots, nightly incremental ingest (`atlas/dcp/market_data/daily.py` + `seeds/universe.json`), T0–T9 cycle (`atlas/ops/daily.py`, one atomic checkpointed transaction/day, settle-before-stops ordering), paper reconciliation (break = kill), alerts (`atlas/ops/alerts.py`, set `ATLAS_ALERT_URL`), launchd supervision + nightly `pg_dump` (`make install-ops`).
+9. **Next**: memo→proposal bridge (needs a deterministic stop-derivation policy — Principal decision; agents never produce prices, invariant 2); EODHD fundamentals into the evidence corpus; DD2/DD3 dual-confirm human clearing; monthly §14 attribution job.
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.

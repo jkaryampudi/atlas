@@ -113,6 +113,25 @@ def fx_on_date(session: Session, currency: str, on: date) -> Decimal | None:
     return Decimal(rate) if rate is not None else None
 
 
+def effective_price(px: Decimal, side: str, costs: CostModel) -> Decimal:
+    """Raw price with commission+slippage bps applied, side-signed: buys pay
+    up, sells receive less. Module-level (not a PaperBroker detail) so the
+    stop-exit engine's intraday stop fills carry the SAME cost convention as
+    next-open fills — one cost model per Doc 04 §9/§14."""
+    bps = (Decimal(str(costs.commission_bps))
+           + Decimal(str(costs.slippage_bps))) / Decimal(10_000)
+    factor = (Decimal(1) + bps) if side == "buy" else (Decimal(1) - bps)
+    return (px * factor).quantize(_PRICE_QUANT)
+
+
+def shortfall_bps(fill_price: Decimal, decision_price: Decimal, side: str) -> Decimal:
+    """Signed §14 implementation shortfall: positive = worse than the decision
+    price on either side (buys filled higher, sells filled lower)."""
+    sign = 1 if side == "buy" else -1
+    return (sign * (fill_price - decision_price) * Decimal(10_000)
+            / decision_price).quantize(_BPS_QUANT)
+
+
 class PaperBroker:
     """Fills at the next session's open. The CostModel supplies the bps; the
     arithmetic is Decimal (CLAUDE.md invariant: Decimal for money — the
@@ -120,12 +139,6 @@ class PaperBroker:
 
     def __init__(self, costs: CostModel | None = None) -> None:
         self._costs = costs if costs is not None else CostModel()
-
-    def _effective_price(self, open_px: Decimal, side: str) -> Decimal:
-        bps = (Decimal(str(self._costs.commission_bps))
-               + Decimal(str(self._costs.slippage_bps))) / Decimal(10_000)
-        factor = (Decimal(1) + bps) if side == "buy" else (Decimal(1) - bps)
-        return (open_px * factor).quantize(_PRICE_QUANT)
 
     def submit(self, session: Session, ticket: OrderTicket, *,
                as_of: datetime) -> Fill | None:
@@ -145,10 +158,8 @@ class PaperBroker:
         fx = fx_on_date(session, ticket.currency, fill_date)
         if fx is None:
             return None  # fill-date FX not ingested yet — same gate as the bar
-        price = self._effective_price(Decimal(open_px), ticket.side)
-        sign = 1 if ticket.side == "buy" else -1
-        shortfall = (sign * (price - ticket.decision_price) * Decimal(10_000)
-                     / ticket.decision_price).quantize(_BPS_QUANT)
+        price = effective_price(Decimal(open_px), ticket.side, self._costs)
+        shortfall = shortfall_bps(price, ticket.decision_price, ticket.side)
         return Fill(
             fill_date=fill_date,
             fill_qty=ticket.qty,

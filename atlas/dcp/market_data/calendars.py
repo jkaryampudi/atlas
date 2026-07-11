@@ -70,6 +70,45 @@ def session_open_utc(market: str, day: date) -> datetime:
     return opened
 
 
+def session_close_utc(market: str, day: date) -> datetime:
+    """UTC close timestamp of `day`'s session; raises if `day` is not a session.
+    Early closes (e.g. XNYS half-days) come from the calendar, not from us."""
+    _check_bounds(day)
+    closed: datetime = _calendar(market).session_close(day.isoformat()).to_pydatetime()
+    return closed
+
+
+def last_completed_session(market: str, at: datetime) -> date:
+    """Latest session whose UTC close is at or before aware datetime `at`.
+
+    This is the newest session a nightly ingest may request or store: a session
+    still in progress (or not yet opened) would yield a partial bar, and partial
+    bars are look-ahead poison for anything replaying "as of" that day. Closes
+    come from the exchange calendar in UTC, so DST shifts and exchanges east of
+    UTC (XASX labels sessions ahead of the UTC date) are the calendar's problem,
+    never naive date arithmetic here."""
+    if at.tzinfo is None:
+        raise ValueError("last_completed_session requires an aware datetime")
+    # Start two calendar days past the UTC date — safely ahead of any exchange's
+    # local "today" — then walk back to the first close at or before `at`.
+    d = at.date() + timedelta(days=2)
+    _check_bounds(d)
+    if not is_trading_day(market, d):
+        d = previous_trading_day(market, d)
+    while session_close_utc(market, d) > at:
+        d = previous_trading_day(market, d)
+    return d
+
+
+def local_date(market: str, at: datetime) -> date:
+    """Calendar date at the exchange's home timezone for aware datetime `at`.
+    XASX (UTC+10/+11) reaches a given date up to ~11h before UTC does; gates for
+    non-trading days must never be stamped for a local date that hasn't arrived."""
+    if at.tzinfo is None:
+        raise ValueError("local_date requires an aware datetime")
+    return at.astimezone(_calendar(market).tz).date()
+
+
 def trading_days_between(market: str, start: date, end: date) -> list[date]:
     """All sessions in [start, end] inclusive, ascending. Empty if start > end."""
     if start > end:
