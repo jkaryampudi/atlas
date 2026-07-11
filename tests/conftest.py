@@ -85,3 +85,14 @@ def clean_audit(pg_session):
         "RESTART IDENTITY CASCADE"))
     pg_session.commit()
     yield pg_session
+
+
+def reset_app_engine() -> None:
+    """Drop the app's cached engine AND dispose its connection pool. Every
+    API-test fixture must use this instead of nulling db._session_factory
+    directly: an abandoned engine keeps its pooled connections open, and
+    enough of them exhausts Postgres max_connections mid-suite."""
+    import atlas.core.db as db
+    if db._session_factory is not None:
+        db._session_factory.kw["bind"].dispose()
+    db._session_factory = None

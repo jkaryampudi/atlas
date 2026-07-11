@@ -11,7 +11,16 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 
-from atlas.api.routers import audit, market, portfolio, quant, research, risk, system
+from atlas.api.routers import (
+    audit,
+    market,
+    portfolio,
+    quant,
+    research,
+    risk,
+    system,
+    trading,
+)
 
 _CONSOLE = Path(__file__).resolve().parents[1] / "dashboard" / "console.html"
 
@@ -33,3 +42,4 @@ app.include_router(audit.router, prefix="/v1/audit", tags=["audit"])
 app.include_router(quant.router, prefix="/v1/quant", tags=["quant"])
 app.include_router(research.router, prefix="/v1/research", tags=["research"])
 app.include_router(risk.router, prefix="/v1/risk", tags=["risk"])
+app.include_router(trading.router, prefix="/v1/trading", tags=["trading"])

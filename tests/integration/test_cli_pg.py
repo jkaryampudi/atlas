@@ -6,10 +6,9 @@ import sys
 
 import pytest
 
-import atlas.core.db as db
 from atlas.dcp.market_data.backfill import main as backfill_main
 from atlas.dcp.market_data.fx import main as fx_main
-from tests.conftest import URL, requires_pg
+from tests.conftest import URL, requires_pg, reset_app_engine
 
 pytestmark = requires_pg
 
@@ -19,9 +18,9 @@ def cli_env(monkeypatch, pg_session):
     """Point session_scope at atlas_test and force the fixture adapter."""
     monkeypatch.setenv("ATLAS_DATABASE_URL", URL)
     monkeypatch.setenv("ATLAS_EODHD_API_KEY", "")  # never hit the real vendor here
-    monkeypatch.setattr(db, "_session_factory", None)  # drop any cached engine
+    reset_app_engine()  # drop the cached engine AND dispose its pool
     yield monkeypatch
-    monkeypatch.setattr(db, "_session_factory", None)
+    reset_app_engine()
 
 
 def test_backfill_cli_clean_week_exits_zero(cli_env, capsys):

@@ -6,9 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-import atlas.core.db as db
 from atlas.api.main import app
-from tests.conftest import URL, requires_pg
+from tests.conftest import URL, requires_pg, reset_app_engine
 
 pytestmark = requires_pg
 
@@ -16,7 +15,7 @@ pytestmark = requires_pg
 @pytest.fixture
 def client(monkeypatch, clean_audit):
     monkeypatch.setenv("ATLAS_DATABASE_URL", URL)
-    monkeypatch.setattr(db, "_session_factory", None)
+    reset_app_engine()
     s = clean_audit
     # seed a dedicated instrument + bar; REMOVED at teardown — a lingering
     # active instrument with no bars would (correctly) RED every US gate in
@@ -36,7 +35,7 @@ def client(monkeypatch, clean_audit):
                    "(SELECT id FROM market.instruments WHERE symbol='TAPI')"))
     s.execute(text("DELETE FROM market.instruments WHERE symbol='TAPI'"))
     s.commit()
-    monkeypatch.setattr(db, "_session_factory", None)
+    reset_app_engine()
 
 
 def test_freshness_reports_markets_and_gates(client):

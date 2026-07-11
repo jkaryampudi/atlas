@@ -47,7 +47,9 @@ FX_USD_AUD = Decimal("1.5")
 
 def _clean_trading(s) -> None:
     """Remove any committed debris from crashed runs (FK-safe order)."""
-    s.execute(text("UPDATE trading.trade_proposals SET risk_check_id = NULL"))
+    # leave pending_approval too: the §2.1 CHECK forbids it without a check ref
+    s.execute(text("UPDATE trading.trade_proposals "
+                   "SET risk_check_id = NULL, state = 'draft'"))
     for t in ("trading.tax_lots", "trading.executions", "trading.orders",
               "trading.approvals", "risk.risk_checks", "trading.trade_proposals",
               "trading.positions", "trading.portfolio_snapshots"):
@@ -559,8 +561,8 @@ def test_reject_expired_lands_expired_not_rejected(clean_audit):
     clock = FrozenClock(T0)
     res = _build(s, clock, memo_id)
     clock.advance_to(T0 + timedelta(hours=25))
-    with pytest.raises(ValueError, match="PROPOSAL_EXPIRED"):
-        reject(s, clock, proposal_id=res.proposal_id, reason="too late anyway")
+    outcome = reject(s, clock, proposal_id=res.proposal_id, reason="too late anyway")
+    assert outcome.status == "PROPOSAL_EXPIRED"   # structured, so the commit holds
     state = s.execute(text("SELECT state FROM trading.trade_proposals WHERE id = :p"),
                       {"p": res.proposal_id}).scalar()
     assert state == "expired"

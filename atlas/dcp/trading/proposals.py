@@ -596,11 +596,13 @@ def approve(session: Session, clock: Clock, *, proposal_id: str,
                            order_id=str(order_id), risk_check_id=fresh_id)
 
 
-def reject(session: Session, clock: Clock, *, proposal_id: str, reason: str) -> None:
+def reject(session: Session, clock: Clock, *, proposal_id: str,
+           reason: str) -> ApprovalOutcome:
     """Human reject (Doc 06 resource map): record the decision, transition,
     audit. The reason is audited (approvals has no reason column). A proposal
     past its TTL lands in 'expired', not 'rejected' — the states must not lie
-    about why a proposal died."""
+    about why a proposal died — returned as a structured PROPOSAL_EXPIRED
+    outcome (not an exception) so the transition COMMITS."""
     _lifecycle_lock(session)
     pid = UUID(proposal_id)
     row = session.execute(text(
@@ -620,8 +622,8 @@ def reject(session: Session, clock: Clock, *, proposal_id: str, reason: str) -> 
             entity_id=proposal_id, actor_type="dcp", actor_id="trading_lifecycle",
             payload={"proposal_id": proposal_id,
                      "expires_at": row.expires_at.isoformat()})
-        raise ValueError("PROPOSAL_EXPIRED: past its TTL — recorded as expired, "
-                         "not rejected")
+        return ApprovalOutcome(status="PROPOSAL_EXPIRED", proposal_id=proposal_id,
+                               order_id=None, risk_check_id=None)
     session.execute(text(
         "INSERT INTO trading.approvals (proposal_id, decision, approver, auth_method, "
         " approval_time_risk_check_id, decided_at, created_at) "
@@ -634,6 +636,8 @@ def reject(session: Session, clock: Clock, *, proposal_id: str, reason: str) -> 
         event_type="proposal.rejected", entity_type="proposal",
         entity_id=proposal_id, actor_type="human", actor_id="principal",
         payload={"proposal_id": proposal_id, "reason": reason})
+    return ApprovalOutcome(status="rejected", proposal_id=proposal_id,
+                           order_id=None, risk_check_id=str(row.risk_check_id))
 
 
 def cancel_order(session: Session, clock: Clock, *, order_id: str,
