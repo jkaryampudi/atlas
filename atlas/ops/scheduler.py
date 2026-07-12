@@ -45,15 +45,43 @@ def next_fire(now: datetime, at: time) -> datetime:
 def _run_cycle() -> None:
     """One full cycle via the CLI entrypoint in a subprocess: crash isolation
     (a segfaulting cycle must not take the API down) and an honest exit code.
-    The pipeline does its own alerting; this reports only the envelope."""
+    The subprocess prints one @@CYCLE json line per node transition (the run
+    is a single uncommitted transaction, so this stream is the ONLY live
+    window into it); each line lands in _last['progress'] for the console's
+    animated pipeline. The pipeline does its own alerting; this reports only
+    the envelope."""
+    import json as _json
+
     _last.update(started_at=datetime.now(UTC).isoformat(), finished_at=None,
-                 ok=None, detail="running")
+                 ok=None, detail="running", progress=[])
+    progress: list[dict[str, object]] = _last["progress"]  # type: ignore[assignment]
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "atlas.ops.daily"], cwd=_REPO,
-            capture_output=True, text=True, timeout=3600)
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1)
+        tail: list[str] = []
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if line.startswith("@@CYCLE "):
+                try:
+                    ev = _json.loads(line[8:])
+                except ValueError:
+                    continue
+                # one entry per node: 'running' appends, 'done'/'failed' updates
+                for entry in progress:
+                    if entry.get("node") == ev.get("node"):
+                        entry.update(ev)
+                        break
+                else:
+                    progress.append(ev)
+            else:
+                tail.append(line)
+                del tail[:-30]
+        proc.wait(timeout=3600)
         ok = proc.returncode == 0
-        detail = (proc.stdout or proc.stderr or "").strip()[-500:]
+        detail = "\n".join(tail)[-500:]
         if not ok:
             notify("Atlas daily cycle FAILED",
                    f"exit {proc.returncode} — console jobs board has the step",
@@ -82,10 +110,12 @@ def start_cycle() -> bool:
 
 def status() -> dict[str, object]:
     now = datetime.now(UTC)
+    last = dict(_last)
+    last["progress"] = [dict(e) for e in _last.get("progress", [])]  # type: ignore[union-attr]
     return {"cycle_running": _cycle_lock.locked(),
             "next_cycle_utc": next_fire(now, CYCLE_UTC).isoformat(),
             "next_backup_utc": next_fire(now, BACKUP_UTC).isoformat(),
-            "last": dict(_last)}
+            "last": last}
 
 
 def _run_backup() -> None:

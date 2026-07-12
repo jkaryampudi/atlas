@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Callable
@@ -73,6 +74,13 @@ from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
 from atlas.ops.alerts import notify
 from atlas.tools.verify_chain import run as verify_chain
+
+
+def _emit(node: str, status: str, result: str | None = None) -> None:
+    """One machine-readable progress line per node transition."""
+    print("@@CYCLE " + json.dumps(
+        {"node": node, "status": status, "result": result,
+         "at": datetime.now(UTC).isoformat()}), flush=True, file=sys.stdout)
 
 
 def _reconcile(session: Session, clock: Clock) -> str:
@@ -216,8 +224,24 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                priority="high" if failed else "default")
         return summary
 
+    def _live(name, fn):
+        """Wrap a node with @@CYCLE progress lines on stdout: the run is ONE
+        uncommitted transaction, so the DB shows nothing mid-run — this stream
+        is how the console animates the cycle in real time (the scheduler
+        captures it; a plain CLI run just prints it)."""
+        def wrapped():
+            _emit(name, "running")
+            try:
+                result = fn()
+            except Exception as e:
+                _emit(name, "failed", str(e)[:200])
+                raise
+            _emit(name, "done", result)
+            return result
+        return wrapped
+
     runner = WorkflowRunner(session, PostgresAuditLog(session, clock), clock)
-    return runner.run(f"daily-{day}", [
+    nodes = [
         Node("t0_ingest", t0_ingest),
         Node("t1_verify_chain", t1_verify_chain),
         Node("t2_expire", t2_expire),
@@ -228,7 +252,9 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
         Node("t9_report", t9_report),
-    ])
+    ]
+    return runner.run(f"daily-{day}", [Node(n.name, _live(n.name, n.fn))
+                                       for n in nodes])
 
 
 def main() -> None:

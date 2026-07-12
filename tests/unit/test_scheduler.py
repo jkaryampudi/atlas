@@ -72,3 +72,23 @@ def test_run_daily_endpoint_reports_started_and_busy(monkeypatch):
         assert c.post("/v1/system/run-daily").json()["started"] is False
         st = c.get("/v1/system/scheduler").json()
         assert "next_cycle_utc" in st and "cycle_running" in st
+
+
+def test_emit_line_format(capsys):
+    from atlas.ops.daily import _emit
+
+    _emit("t3_settle", "done", "fills=1")
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("@@CYCLE ")
+    import json
+
+    ev = json.loads(out[8:])
+    assert (ev["node"], ev["status"], ev["result"]) == ("t3_settle", "done", "fills=1")
+    assert "at" in ev
+
+
+def test_status_progress_is_a_snapshot_copy():
+    scheduler._last["progress"] = [{"node": "t0_ingest", "status": "running"}]
+    snap = scheduler.status()["last"]["progress"]
+    snap[0]["status"] = "mutated"
+    assert scheduler._last["progress"][0]["status"] == "running"

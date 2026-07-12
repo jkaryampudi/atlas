@@ -156,6 +156,20 @@
         <span id="sched-status" class="note" style="margin:0"></span>
       </h2>
       <div class="note">One row per pipeline run (T0 ingest → T9 report). Green = the machine ran itself; red names the step that stopped it. The cycle also fires itself daily at 09:30 — the button is for whenever you don't want to wait.</div>
+      <style>
+        @keyframes liveSpin{0%{opacity:1}50%{opacity:0.25}100%{opacity:1}}
+        @keyframes liveFlow{0%{background-position:0 0}100%{background-position:24px 0}}
+        .lc-chip{font-family:var(--mono);font-size:10px;letter-spacing:0.08em;padding:7px 10px;border:1px solid var(--line-strong);color:var(--dim);min-width:86px}
+        .lc-chip .lc-name{font-size:9px;letter-spacing:0.14em;display:block;margin-bottom:3px}
+        .lc-chip.run{border-color:var(--blue);color:var(--blue);animation:liveSpin 1.2s ease-in-out infinite}
+        .lc-chip.done{border-color:rgba(53,217,138,0.55);color:var(--txt)}
+        .lc-chip.done .lc-name{color:var(--green)}
+        .lc-chip.fail{border-color:var(--red);color:var(--red)}
+        .lc-link{flex:1 0 12px;height:2px;background:var(--line);margin-top:16px;min-width:8px}
+        .lc-link.flow{background:repeating-linear-gradient(90deg,var(--blue) 0 8px,transparent 8px 16px);background-size:24px 2px;animation:liveFlow 0.8s linear infinite}
+        .lc-link.done{background:rgba(53,217,138,0.5)}
+      </style>
+      <div class="card" id="live-cycle" style="display:none"></div>
       <div class="card" id="jobs-board"><div class="quiet">awaiting data</div></div>
       <h2>Performance — Monthly Attribution</h2>
       <div class="note" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
@@ -995,13 +1009,68 @@ document.getElementById("settle-btn").onclick = async()=>{
   renderTrading(true);
 };
 
+/* ---------- live cycle: real-time animated pipeline ---------- */
+const LC_STAGES = [["t0_ingest","T0 INGEST"],["t1_verify_chain","T1 CHAIN"],
+  ["t2_expire","T2 EXPIRE"],["t3_settle","T3 SETTLE"],["t4_stops","T4 STOPS"],
+  ["t5_snapshot","T5 SNAPSHOT"],["t6_reconcile","T6 RECONCILE"],
+  ["t7_desk","T7 DESK"],["t8_bridge","T8 BRIDGE"],["t9_report","T9 REPORT"]];
+let lcTimer = null;
+
+function renderLiveCycle(s){
+  const el = document.getElementById("live-cycle");
+  const last = (s && s.last) || {};
+  const prog = last.progress || [];
+  if(!s || (!s.cycle_running && !prog.length)){ el.style.display = "none"; return; }
+  el.style.display = "";
+  const by = {}; prog.forEach(e=>{ by[e.node] = e; });
+  const chips = [];
+  LC_STAGES.forEach(([key,label],i)=>{
+    const ev = by[key];
+    const st = !ev ? "pend" : ev.status === "running" ? "run" : ev.status === "done" ? "done" : "fail";
+    const icon = st==="run" ? "◌" : st==="done" ? "✓" : st==="fail" ? "■" : "·";
+    const detail = ev && ev.result ? esc(String(ev.result).slice(0,26)) : (st==="run" ? "working…" : "");
+    if(i>0){
+      const prev = by[LC_STAGES[i-1][0]];
+      const linkCls = prev && prev.status === "done" ? (st==="run" ? "flow" : st==="pend" ? "" : "done") : "";
+      chips.push(`<span class="lc-link ${linkCls}"></span>`);
+    }
+    chips.push(`<span class="lc-chip ${st==="pend"?"":st}"><span class="lc-name">${icon} ${esc(label)}</span>${detail}</span>`);
+  });
+  const started = last.started_at ? new Date(last.started_at) : null;
+  const ended = last.finished_at ? new Date(last.finished_at) : null;
+  const secs = started ? Math.max(0, Math.round(((ended||new Date()) - started)/1000)) : 0;
+  const head = s.cycle_running
+    ? `<span style="color:var(--blue)">◌ CYCLE RUNNING — ${secs}s</span>`
+    : last.ok === false
+      ? `<span style="color:var(--red)">■ CYCLE FAILED after ${secs}s — the red stage below stopped it</span>`
+      : `<span style="color:var(--green)">✓ CYCLE COMPLETED in ${secs}s</span>`;
+  const lastEv = prog.length ? prog[prog.length-1] : null;
+  el.innerHTML = `
+    <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.1em;margin-bottom:12px">${head}</div>
+    <div style="display:flex;align-items:flex-start;gap:0;flex-wrap:wrap;row-gap:10px">${chips.join("")}</div>
+    ${lastEv && lastEv.result ? `<div class="note" style="margin:12px 0 0">latest: ${esc(lastEv.node.replace(/^t\d+_/,""))} — ${esc(String(lastEv.result).slice(0,160))}</div>` : ""}`;
+}
+
+async function pollLiveCycle(){
+  const r = await get("/v1/system/scheduler");
+  if(r.err) return;
+  renderLiveCycle(r.data);
+  if(r.data.cycle_running){
+    if(!lcTimer) lcTimer = setInterval(pollLiveCycle, 2000);
+  } else if(lcTimer){
+    clearInterval(lcTimer); lcTimer = null;
+    renderJobs();            // the committed run row appears on the board
+  }
+}
+
 /* ---------- jobs board: pipeline runs + the one-click cycle ---------- */
 document.getElementById("run-cycle-btn").onclick = async()=>{
   const b = document.getElementById("run-cycle-btn");
   b.disabled = true; b.textContent = "STARTING…";
   const r = await postFull("/v1/system/run-daily", {});
   b.textContent = r.data && r.data.started ? "CYCLE RUNNING…" : "ALREADY RUNNING";
-  setTimeout(()=>{ b.disabled = false; b.textContent = "RUN CYCLE NOW"; renderJobs(); }, 4000);
+  setTimeout(pollLiveCycle, 600);
+  setTimeout(()=>{ b.disabled = false; b.textContent = "RUN CYCLE NOW"; }, 4000);
 };
 
 async function renderJobs(){
@@ -1009,6 +1078,8 @@ async function renderJobs(){
   const sel = document.getElementById("sched-status");
   if(st.data){
     const s = st.data, last = s.last || {};
+    renderLiveCycle(s);
+    if(s.cycle_running && !lcTimer) lcTimer = setInterval(pollLiveCycle, 2000);
     sel.textContent = s.cycle_running
       ? "cycle running now…"
       : `next auto-run ${ts(s.next_cycle_utc)} UTC` +
