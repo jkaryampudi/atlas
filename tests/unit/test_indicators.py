@@ -1,6 +1,13 @@
 import pytest
 
-from atlas.dcp.indicators.core import atr, rolling_return, sma, wilder_atr
+from atlas.dcp.indicators.core import (
+    atr,
+    rolling_return,
+    rsi,
+    sma,
+    wilder_atr,
+    wilder_avg_gain_loss,
+)
 
 
 def test_sma_hand_values():
@@ -55,6 +62,39 @@ def test_wilder_atr_gap_true_ranges():
     assert up[-1] == pytest.approx(3.0)
     down = wilder_atr([10, 8], [9, 7.5], [9.8, 7.6], period=2)
     assert down[-1] == pytest.approx((1.0 + 2.3) / 2)
+
+
+def test_rsi_hand_pins():
+    """Golden pins, verified by hand (Wilder RSI, period 2):
+      closes [10, 11, 10.5, 10.5, 12] -> changes +1, -0.5, 0, +1.5
+      seed (i=2): ag = (1 + 0)/2 = 0.5,  al = (0 + 0.5)/2 = 0.25
+                  RSI = 100 * 0.5 / 0.75                       = 66.667
+      i=3 (0):    ag = (0.5 + 0)/2 = 0.25, al = (0.25 + 0)/2 = 0.125
+                  RSI = 100 * 0.25 / 0.375                     = 66.667
+      i=4 (+1.5): ag = (0.25 + 1.5)/2 = 0.875, al = 0.0625
+                  RSI = 100 * 0.875 / 0.9375                   = 93.333
+    """
+    out = rsi([10.0, 11.0, 10.5, 10.5, 12.0], period=2)
+    assert out[0] is None and out[1] is None       # None until warm
+    assert out[2] == pytest.approx(200.0 / 3.0)
+    assert out[3] == pytest.approx(200.0 / 3.0)
+    assert out[4] == pytest.approx(100.0 * 0.875 / 0.9375)
+
+
+def test_rsi_extremes_and_flat_convention():
+    assert rsi([1.0, 2.0, 3.0, 4.0], period=2)[-1] == 100.0   # no losses
+    assert rsi([4.0, 3.0, 2.0, 1.0], period=2)[-1] == 0.0     # no gains
+    assert rsi([5.0, 5.0, 5.0, 5.0], period=2)[-1] == 50.0    # flat: both zero
+    with pytest.raises(ValueError):
+        rsi([1.0, 2.0], period=0)
+
+
+def test_wilder_avg_gain_loss_matches_rsi_seed():
+    """The exposed averages are the RSI internals: the i=2 seed above."""
+    pair = wilder_avg_gain_loss([10.0, 11.0, 10.5], period=2)[-1]
+    assert pair is not None
+    assert pair[0] == pytest.approx(0.5)
+    assert pair[1] == pytest.approx(0.25)
 
 
 def test_wilder_atr_warmup_and_bad_period():
