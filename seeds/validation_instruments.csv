@@ -1,0 +1,10 @@
+symbol,exchange,market,instrument_type,name,sector_gics,currency,economic_exposure
+XLB,NYSEARCA,US,etf,Materials Select Sector SPDR Fund,Materials,USD,US
+XLE,NYSEARCA,US,etf,Energy Select Sector SPDR Fund,Energy,USD,US
+XLF,NYSEARCA,US,etf,Financial Select Sector SPDR Fund,Financials,USD,US
+XLI,NYSEARCA,US,etf,Industrial Select Sector SPDR Fund,Industrials,USD,US
+XLK,NYSEARCA,US,etf,Technology Select Sector SPDR Fund,Information Technology,USD,US
+XLP,NYSEARCA,US,etf,Consumer Staples Select Sector SPDR Fund,Consumer Staples,USD,US
+XLU,NYSEARCA,US,etf,Utilities Select Sector SPDR Fund,Utilities,USD,US
+XLV,NYSEARCA,US,etf,Health Care Select Sector SPDR Fund,Health Care,USD,US
+XLY,NYSEARCA,US,etf,Consumer Discretionary Select Sector SPDR Fund,Consumer Discretionary,USD,US

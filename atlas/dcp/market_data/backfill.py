@@ -3,10 +3,23 @@ corporate actions + per-day quality gates + FX, over exchange-calendar sessions.
 
 Usage: python -m atlas.dcp.market_data.backfill --years 2 --end 2026-07-10
        python -m atlas.dcp.market_data.backfill --from 2010-01-01 --end 2026-07-10
+       python -m atlas.dcp.market_data.backfill --symbols XLB,XLE --from 2010-01-01 --end 2026-07-10
 `--end` is explicit so runs are deterministic and replayable (no wall clock).
 `--from` is the deep-history mode (full vendor history after the subscription
 upgrade); without it `--years` keeps the ADR-0004 default window. Vendor: EODHD
 when ATLAS_EODHD_API_KEY is set; the fixture adapter otherwise.
+
+`--symbols` is the additive validation-instrument mode: it backfills EXACTLY
+the named symbols regardless of is_active (validation-only instruments are
+inactive by design — see market_data/validation_universe.py), reusing the same
+chunking/upsert/split machinery, and writes NO quality gates: gate coverage is
+a tradable-universe contract (market.data_quality_gates asserts per-market
+completeness of the ACTIVE universe; a validation-only instrument is outside
+that contract, and gating it would either dilute the tradable coverage signal
+or paint dishonest REDs for names the fund cannot trade). Completeness for
+validation runs is enforced fail-closed at use time by the xsmom panel
+loader's per-instrument completeness rule. FX is likewise untouched (FX pairs
+derive from ACTIVE instruments' currencies).
 
 Adjustment convention (unchanged, deliberate): bars are fetched from the vendor's
 raw OHLC fields and stored RAW, with splits recorded in `market.corporate_actions`
@@ -231,6 +244,81 @@ def backfill(*, session: Session, adapter: MarketDataAdapter, audit: PostgresAud
     return report
 
 
+@dataclass(frozen=True)
+class SymbolBackfill:
+    symbol: str
+    bars: int                 # bars upserted by THIS run
+    splits: int               # splits recorded by this run's range request
+    inception: date | None    # earliest STORED bar after this run; None = no
+    #                           bars at all (a requested symbol the vendor
+    #                           returned nothing for — always a failure)
+
+
+@dataclass(frozen=True)
+class SymbolsBackfillReport:
+    symbols: tuple[SymbolBackfill, ...]
+
+    @property
+    def failed(self) -> bool:
+        return any(s.inception is None for s in self.symbols)
+
+
+def backfill_symbols(*, session: Session, adapter: MarketDataAdapter,
+                     audit: PostgresAuditLog, symbols: list[str],
+                     start: date, end: date) -> SymbolsBackfillReport:
+    """Backfill bars + splits for EXACTLY the named symbols, regardless of
+    is_active — the validation-instrument mode (--symbols). Reuses the chunked
+    fetch and the upsert/split machinery verbatim; writes NO quality gates and
+    touches NO FX (documented in the module docstring: gate coverage is a
+    tradable-universe contract; validation-only instruments sit outside it).
+    A symbol with no instrument row refuses loudly — seeding is a separate,
+    deliberate step (validation_universe.py), never a side effect here."""
+    rows = session.execute(text(
+        "SELECT id, symbol FROM market.instruments WHERE symbol = ANY(:syms)"),
+        {"syms": symbols}).mappings().all()
+    by_symbol = {r["symbol"]: r["id"] for r in rows}
+    unknown = sorted(set(symbols) - set(by_symbol))
+    if unknown:
+        raise ValueError(f"unknown symbol(s) {unknown} — seed instruments first "
+                         "(python -m atlas.dcp.market_data.validation_universe)")
+
+    source = type(adapter).__name__
+    out: list[SymbolBackfill] = []
+    for sym in symbols:
+        iid = by_symbol[sym]
+        n_splits = 0
+        for sp in adapter.fetch_splits(sym, start, end):
+            record_split(session, iid, sp, source)
+            n_splits += 1
+        n_bars = 0
+        for lo, hi in chunk_windows(start, end):
+            for b in adapter.fetch_bars(sym, lo, hi):
+                if not lo <= b.bar_date <= hi:
+                    continue  # same cross-chunk double-count guard as markets
+                upsert_bar(session, iid, b, source)
+                n_bars += 1
+        inception: date | None = session.execute(text(
+            "SELECT min(bar_date) FROM market.price_bars_daily "
+            "WHERE instrument_id = :iid"), {"iid": iid}).scalar()
+        out.append(SymbolBackfill(symbol=sym, bars=n_bars, splits=n_splits,
+                                  inception=inception))
+
+    report = SymbolsBackfillReport(symbols=tuple(out))
+    audit.append(
+        event_type="market.backfill.symbols.completed", entity_type="market",
+        entity_id=",".join(symbols), actor_type="scheduler", actor_id="backfill",
+        payload={"start": start.isoformat(), "end": end.isoformat(),
+                 "gates_written": False,
+                 "gates_rationale": ("gate coverage is a tradable-universe "
+                                     "contract; validation-only (inactive) "
+                                     "instruments are outside it by design"),
+                 "symbols": {s.symbol: {"bars": s.bars, "splits": s.splits,
+                                        "inception": s.inception.isoformat()
+                                        if s.inception else None}
+                             for s in report.symbols}})
+    return report
+
+
 def _seed_markets(seeds_csv: Path) -> list[str]:
     import csv
 
@@ -254,11 +342,17 @@ def main() -> None:
                    help="last calendar day (ISO), explicit for determinism")
     p.add_argument("--market", action="append", dest="markets",
                    help="restrict to a market (repeatable); default: all in seeds")
+    p.add_argument("--symbols", default=None,
+                   help="validation-instrument mode: backfill EXACTLY these "
+                        "comma-separated symbols regardless of is_active; "
+                        "no gates, no FX (see module docstring)")
     p.add_argument("--seeds", type=Path, default=ROOT / "seeds" / "instruments_seed.csv")
     a = p.parse_args()
 
     if a.start is not None and a.years is not None:
         p.error("--from and --years are mutually exclusive; pick one window spec")
+    if a.symbols is not None and a.markets:
+        p.error("--symbols and --market are mutually exclusive")
     end = date.fromisoformat(a.end)
     if a.start is not None:
         start = date.fromisoformat(a.start)
@@ -266,10 +360,36 @@ def main() -> None:
             p.error(f"--from {start} is after --end {end}")
     else:
         start = end - timedelta(days=round((a.years or DEFAULT_YEARS) * 365.25))
+    clock = FrozenClock(datetime(end.year, end.month, end.day, 22, 0, tzinfo=UTC))
+
+    if a.symbols is not None:
+        from atlas.dcp.market_data.validation_universe import VALIDATION_SEEDS
+
+        symbols = [x.strip() for x in a.symbols.split(",") if x.strip()]
+        if not symbols:
+            p.error("--symbols given but empty")
+        # validation instruments resolve vendor codes via their own seeds CSV
+        # (never the signed manifest); tradable maps still merge for overlap-free
+        # symbols like SPY, under the same collision rules.
+        adapter = adapter_from_settings(
+            fixtures_root=ROOT / "tests" / "fixtures", seeds_csv=a.seeds,
+            extra_seeds_csv=VALIDATION_SEEDS if VALIDATION_SEEDS.exists() else None)
+        with session_scope() as s:
+            sym_report = backfill_symbols(session=s, adapter=adapter,
+                                          audit=PostgresAuditLog(s, clock),
+                                          symbols=symbols, start=start, end=end)
+        for sb in sym_report.symbols:
+            print(f"{sb.symbol}: {sb.bars} bars, {sb.splits} splits, "
+                  f"inception={sb.inception}"
+                  + (" NO BARS — FAILURE" if sb.inception is None else ""))
+        print(f"symbols backfill {start}..{end} via {type(adapter).__name__}: "
+              f"{'FAILURES PRESENT' if sym_report.failed else 'all symbols stored'} "
+              "(no gates written: validation-only mode)")
+        raise SystemExit(2 if sym_report.failed else 0)
+
     markets = a.markets or _seed_markets(a.seeds)
     adapter = adapter_from_settings(fixtures_root=ROOT / "tests" / "fixtures",
                                     seeds_csv=a.seeds)
-    clock = FrozenClock(datetime(end.year, end.month, end.day, 22, 0, tzinfo=UTC))
 
     with session_scope() as s:
         audit = PostgresAuditLog(s, clock)
