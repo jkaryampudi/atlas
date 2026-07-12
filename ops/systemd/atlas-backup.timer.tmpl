@@ -1,0 +1,12 @@
+# 00:30 UTC = 10:30 AEST — an hour after the daily cycle, so the dump
+# includes today's run.
+[Unit]
+Description=Fire the Atlas backup at 00:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=true
+Unit=atlas-backup.service
+
+[Install]
+WantedBy=timers.target

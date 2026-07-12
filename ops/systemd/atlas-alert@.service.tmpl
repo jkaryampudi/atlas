@@ -1,0 +1,11 @@
+# Dead-process pager: fires when a unit FAILS to run at all (the pipeline
+# pages its own in-run failures; this catches the ones it can't).
+[Unit]
+Description=Atlas failure alert for %i
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__REPO__
+EnvironmentFile=__REPO__/.env
+ExecStart=__REPO__/.venv/bin/python -c "from atlas.ops.alerts import notify; notify('Atlas unit FAILED', '%i died before it could report — journalctl -u %i', priority='high')"

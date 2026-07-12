@@ -1,0 +1,20 @@
+# Atlas API + console under systemd (Linux host). Rendered by ops/provision.sh
+# — __REPO__ and __USER__ are substituted with the real path/user at install.
+[Unit]
+Description=Atlas AI Capital API + console (localhost:8001)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=__USER__
+WorkingDirectory=__REPO__
+EnvironmentFile=__REPO__/.env
+# Bind to localhost ONLY: the API has no auth yet — reach the console via
+# Tailscale (tailscale serve / an SSH tunnel), never an open port.
+ExecStart=__REPO__/.venv/bin/uvicorn atlas.api.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

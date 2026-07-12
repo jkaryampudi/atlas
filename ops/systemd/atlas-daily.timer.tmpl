@@ -1,0 +1,13 @@
+# 23:30 UTC = 09:30 AEST: after the US close and EODHD publish, after
+# yesterday's ASX close. Persistent=true runs a missed cycle on boot — a
+# power cut never silently skips a day (the cycle is idempotent per day).
+[Unit]
+Description=Fire the Atlas daily cycle at 23:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 23:30:00 UTC
+Persistent=true
+Unit=atlas-daily.service
+
+[Install]
+WantedBy=timers.target
