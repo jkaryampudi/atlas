@@ -78,6 +78,7 @@ from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.scanner.v1 import scan
+from atlas.dcp.scorecard import compute_memo_outcomes
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -249,6 +250,16 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         return report.summary()
 
     def t9_report() -> str:
+        # scorecard FIRST (memo outcomes mature on this cycle's freshly
+        # ingested bars): fail-soft exactly like the desk/bridge — the failure
+        # is noted in its line and pages, but the report always lands. A SQL
+        # failure that aborts the transaction still kills the run like any
+        # other node-level SQL failure (same caveat as the scanner's).
+        try:
+            scorecard_line = compute_memo_outcomes(session, clock).summary()
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["scorecard_failed"] = True
+            scorecard_line = f"scorecard FAILED: {e}"[:200]
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
@@ -257,11 +268,13 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         bridge_report = state.get("bridge")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
-                  or bool(state.get("bridge_failed", False)))
+                  or bool(state.get("bridge_failed", False))
+                  or bool(state.get("scorecard_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
                  bridge_report.summary() if bridge_report is not None else "bridge idle",
+                 scorecard_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
         if state.get("desk_failed"):

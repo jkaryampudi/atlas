@@ -67,8 +67,14 @@ def desk_symbols(session: Session, *, min_bars: int = 51) -> list[str]:
     return [r.symbol for r in rows if int(r.n) >= min_bars]
 
 
-def run_desk(session: Session, clock: Clock, symbols: list[str]) -> DeskReport:
-    """Debate + committee memo per symbol; every outcome recorded, none fatal."""
+def run_desk(session: Session, clock: Clock, symbols: list[str],
+             source: str | None = None) -> DeskReport:
+    """Debate + committee memo per symbol; every outcome recorded, none fatal.
+
+    `source` is the optional external-origin tag for on-demand analyses
+    (ANALYZE-ANY-TICKER; e.g. 'investing.com'), threaded verbatim to
+    committee_memo where it is persisted with the memo row — it never enters
+    any prompt (see cio.py). None = the desk's own work (nightly cycle)."""
     audit = PostgresAuditLog(session, clock)
     memos: list[DeskMemo] = []
     holds: list[tuple[str, str]] = []
@@ -86,7 +92,7 @@ def run_desk(session: Session, clock: Clock, symbols: list[str]) -> DeskReport:
             memo = committee_memo(session=session, audit=audit,
                                   client=build_client("cio"), symbol=symbol,
                                   question=QUESTION, evidence=evidence,
-                                  debate=debate)
+                                  debate=debate, source=source)
             memos.append(DeskMemo(symbol=symbol,
                                   recommendation=memo.recommendation,
                                   conviction=memo.conviction))

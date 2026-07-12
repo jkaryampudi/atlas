@@ -206,6 +206,22 @@
     <section class="view" id="view-research">
       <h1>Research</h1>
       <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
+      <h2 style="margin-top:0">Analyze Any Ticker</h2>
+      <div class="note">Type a ticker — the full desk analyzes it on demand through the complete cage (debate, grounding verifier, budget breaker, audit chain). Tag the source when the idea came from outside. US symbols only (v1); one analysis at a time.</div>
+      <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <input id="an-sym" placeholder="TICKER e.g. NVDA" size="16" maxlength="10" style="text-transform:uppercase">
+        <select id="an-src">
+          <option value="">no source tag</option>
+          <option value="investing.com">investing.com</option>
+          <option value="other">other</option>
+        </select>
+        <button id="an-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">ANALYZE</button>
+        <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
+      </div>
+      <h2>Desk Scorecard — Graded Against SPY</h2>
+      <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated.</div>
+      <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
+      <h2>Committee Memos</h2>
       <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
         <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
         <span class="pill bl" id="review-progress">PHASE-2 REVIEW: — / 10</span>
@@ -243,6 +259,20 @@
         size = min( NAV × risk% ÷ (entry − stop) , weight-cap ÷ entry , L10 × ADV ) — floored to lot<br>
         reject if value &lt; A$2,000 · size is an output of risk, never conviction · DD1 halves the risk budget
       </div>
+      <h2>What-If Pre-Flight</h2>
+      <div class="note">ADVISORY — a read-only dry run of §4 sizing + L1–L11 against the live book. Nothing is written, nothing is reserved, nothing is proposed: a real proposal re-checks fresh at approval — a pre-flight PASS is never a pre-commitment.</div>
+      <div class="card" id="preflight-card">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input id="pf-symbol" placeholder="SYMBOL" size="9" style="font-size:11px;padding:5px 9px;text-transform:uppercase">
+          <input id="pf-entry" placeholder="entry price" size="11" style="font-size:11px;padding:5px 9px">
+          <input id="pf-stop" placeholder="stop price" size="11" style="font-size:11px;padding:5px 9px">
+          <button id="pf-run" style="border:1px solid var(--line-strong);background:none;color:var(--dim);font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;padding:6px 14px;cursor:pointer">RUN PRE-FLIGHT</button>
+        </div>
+        <div id="pf-result" style="margin-top:12px"></div>
+      </div>
+      <h2>L8 Correlation Heat Matrix</h2>
+      <div class="note" id="corr-note">L8: pairwise 90-session return correlation — awaiting the limit set for the threshold…</div>
+      <div class="card" style="overflow-x:auto" id="corr-matrix"><div class="quiet">awaiting data</div></div>
     </section>
 
     <!-- TRADING — the approval desk -->
@@ -514,6 +544,8 @@ async function renderResearch(){
         <span class="rec ${esc(x.recommendation)}">${esc(x.recommendation)}</span>
         <span class="sym">${esc(x.instrument_symbol||"—")}</span>
         <span class="conv">CONVICTION ${esc(x.conviction)}</span>
+        ${x.source?`<span class="chip" style="color:var(--gold);border-color:rgba(226,185,91,0.5)" title="external origin — tagged when the Principal queued this analysis">src: ${esc(x.source)}</span>`:""}
+        ${x.outcome_20?`<span class="pill ${x.outcome_20.vindicated===true?"g":x.outcome_20.vindicated===false?"r":"gray"}" style="margin-left:auto" title="20-session outcome vs SPY (scorecard)">${esc(pctS(x.outcome_20.excess))} vs SPY @20s${x.outcome_20.vindicated===true?" ✓":x.outcome_20.vindicated===false?" ✗":""}</span>`:""}
       </div>
       <div class="memo-body">
         <div><div class="sect-label">THESIS</div><p>${esc(x.thesis)}</p></div>
@@ -647,6 +679,111 @@ async function renderProgress(){
 }
 document.getElementById("sym-filter").addEventListener("input", ()=>renderResearch());
 
+/* ---------- analyze any ticker (one at a time — the ops lock decides) ----------
+   The inputs live in static HTML outside every re-rendered container, so the
+   30s refresh loop can never wipe a half-typed symbol (house mid-typing
+   guard, same rule as the clearance reason box). Only #an-status is written
+   here, and only by this poller. */
+let anTimer = null;
+function anShow(html, color){
+  const el = document.getElementById("an-status");
+  el.innerHTML = html; el.style.color = color || "var(--dim)";
+}
+async function pollAnalysis(){
+  const r = await get("/v1/research/analyze/status");
+  if(r.err) return;               /* transient — keep polling */
+  const s = r.data, res = s.result || {};
+  if(s.phase === "fetching")
+    anShow(`◌ ${esc(s.symbol||"")} — fetching data… (bars + fundamentals)`);
+  else if(s.phase === "analyzing")
+    anShow(`◌ ${esc(s.symbol||"")} — desk debating… ~2 min (4 debate calls + CIO memo)`, "var(--blue)");
+  else {
+    if(anTimer){ clearInterval(anTimer); anTimer = null; }
+    if(s.phase === "failed")
+      anShow(`■ ANALYSIS FAILED — ${esc(s.detail||"unknown failure")}`, "var(--red)");
+    else if(s.phase === "done"){
+      if(res.outcome === "memo")
+        anShow(`✓ MEMO LANDED — ${esc(res.recommendation)} · conviction ${esc(res.conviction)}${s.source?` · tagged ${esc(s.source)}`:""}`, "var(--green)");
+      else if(res.outcome === "cage_held")   /* the cage holding IS the system working */
+        anShow(`■ CAGE HELD — the run failed closed and no memo landed. This is the system working, not a bug. ${esc(res.reason||"")}`, "var(--gold)");
+      else if(res.outcome === "skipped")
+        anShow(`■ SKIPPED — ${esc(res.reason||"")}`, "var(--gold)");
+      else anShow(esc(s.detail||"finished"));
+      renderResearch(); renderRuns();  /* the new memo (or held run) is visible now */
+    }
+  }
+}
+document.getElementById("an-btn").onclick = async()=>{
+  const b = document.getElementById("an-btn");
+  const sym = document.getElementById("an-sym").value.trim().toUpperCase();
+  if(!/^[A-Z0-9.\-]{1,10}$/.test(sym))
+    return anShow("■ enter a symbol like NVDA (A–Z, 0–9, dot or dash, max 10 chars)", "var(--red)");
+  const src = document.getElementById("an-src").value || null;
+  b.disabled = true;
+  const r = await postFull("/v1/research/analyze", {symbol: sym, source: src});
+  b.disabled = false;
+  if(r.err) return anShow(`■ ${esc(r.err)}`, "var(--red)");
+  if(r.status !== 200)
+    return anShow(`■ ${esc((r.data && r.data.error && r.data.error.message) || ("status "+r.status))}`, "var(--red)");
+  if(r.data.started) anShow(`◌ analysis started for ${esc(sym)} — fetching data…`);
+  else anShow("◌ an analysis is already running — one at a time; watching that one instead", "var(--gold)");
+  if(!anTimer) anTimer = setInterval(pollAnalysis, 2000);
+  pollAnalysis();
+};
+/* resume the 2s watch after a mid-analysis console reload */
+(async()=>{
+  const r = await get("/v1/research/analyze/status");
+  if(r.data && (r.data.phase === "fetching" || r.data.phase === "analyzing")){
+    if(!anTimer) anTimer = setInterval(pollAnalysis, 2000);
+    pollAnalysis();
+  }
+})();
+
+/* ---------- desk scorecard — the desk graded on its own record ---------- */
+/* Semantics (atlas/dcp/scorecard.py): SPY-relative per ADR-0009. BUY
+   vindicated when excess > 0 at the horizon, REJECT when excess < 0.
+   HOLD + shadow rows are tracked but never rated (vindicated: null). */
+const SCORE_MIN_MATURED = 5;  /* below this: too few matured to judge — no verdict color */
+const pctS = v => (v<0?"−":"+") + Math.abs((+v)*100).toFixed(1) + "%";
+async function renderScorecard(){
+  const el = document.getElementById("scorecard");
+  const r = await get("/v1/research/scorecard");
+  if(r.err) return deg(el, r.err);
+  const d = r.data, br = d.by_recommendation || {};
+  const pills = [];
+  ["BUY","REJECT"].forEach(rec=>{
+    const g = br[rec]; if(!g || !g.memos) return;
+    [20,60].forEach(h=>{
+      const m = g[`matured_${h}`]||0, v = g[`vindicated_${h}`]||0, ax = g[`avg_excess_${h}`];
+      if(!m) return pills.push(`<span class="pill gray">${esc(rec)}: 0 matured @${h}s</span>`);
+      const line = `${esc(rec)}: ${v}/${m} vindicated @${h}s · avg excess ${esc(pctS(ax))}`;
+      if(m < SCORE_MIN_MATURED)   /* honesty below the documented minimum */
+        pills.push(`<span class="pill gray">${line} (too few matured to judge)</span>`);
+      else  /* green = the desk beat a coin flip, red = it lost to one, amber = dead heat */
+        pills.push(`<span class="pill ${v*2>m?"g":v*2<m?"r":"am"}">${line}</span>`);
+    });
+  });
+  const rows = d.recent || [];
+  const tbl = !rows.length ? "" :
+    `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th></tr>` +
+    rows.map(o=>`<tr>
+      <td>${esc(o.symbol||"—")}</td>
+      <td><span class="pill ${o.recommendation==="BUY"?"g":o.recommendation==="REJECT"?"r":"gray"}">${esc(o.recommendation)}</span></td>
+      <td>${esc(o.horizon)}s</td>
+      <td class="${o.fwd_return<0?"num-neg":"num-pos"}">${esc(pctS(o.fwd_return))}</td>
+      <td>${esc(pctS(o.spy_return))}</td>
+      <td class="${o.excess<0?"num-neg":"num-pos"}">${esc(pctS(o.excess))}</td>
+      <td>${o.vindicated===true?`<span style="color:var(--green)">✓ VINDICATED</span>`
+           :o.vindicated===false?`<span style="color:var(--red)">✗ WRONG</span>`
+           :`<span style="color:var(--faint)">— not rated</span>`}</td></tr>`).join("") + `</table>`;
+  el.innerHTML =
+    `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${pills.join("")
+       ||`<span class="quiet" style="padding:0">no graded record yet — outcomes mature 20 and 60 sessions after each memo</span>`}</div>` +
+    (d.shadow_excluded?`<div class="note" style="margin:10px 0 0">${esc(d.shadow_excluded)} shadow outcome row(s) tracked but excluded from the rates — non-actionable</div>`:"") +
+    tbl;
+  good(el);
+}
+
 async function renderRuns(){
   const r = await get("/v1/research/runs?limit=40");
   const el = document.getElementById("agent-runs");
@@ -741,6 +878,103 @@ async function renderRisk(){
     good(bel);
   }
 }
+
+/* ---------- risk: what-if pre-flight + L8 heat matrix ---------- */
+/* Self-contained by design (concurrent work owns the other renderers): the
+   matrix drives its OWN 30s refresh instead of joining RENDERERS, and pfGrid
+   is a local copy of the checkGrid row shape rather than a reach into the
+   trading block. The pre-flight inputs live in static HTML and are wired
+   once, so no refresh can ever wipe a half-typed what-if; #pf-result is
+   rewritten only by RUN. */
+const pfNum = v => v==null ? "—" : (+v).toFixed(4).replace(/\.?0+$/,"");
+function pfGrid(results){
+  return (results||[]).map(r=>{
+    const pct = (r.value!=null && r.limit) ? Math.min(100, Math.abs(r.value/r.limit)*100) : null;
+    return `<div style="display:grid;grid-template-columns:44px 14px 1fr 130px;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid var(--line)">
+      <span style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">${esc(r.rule)}</span>
+      <span class="dot ${r.pass?"g":"r"}" style="margin:0"></span>
+      <span style="font-family:var(--mono);font-size:10.5px;color:${r.pass?"var(--dim)":"var(--red)"}">${esc(r.detail||"")}</span>
+      ${pct==null ? "<span></span>" : `<span style="display:flex;align-items:center;gap:6px">
+        <span style="flex:1;height:3px;background:var(--line);position:relative"><span style="position:absolute;left:0;top:0;bottom:0;width:${pct.toFixed(0)}%;background:${r.pass?"var(--green)":"var(--red)"}"></span></span>
+        <span style="font-family:var(--mono);font-size:9.5px;color:var(--dim)">${pfNum(r.value)}/${pfNum(r.limit)}</span></span>`}
+    </div>`;}).join("");
+}
+document.getElementById("pf-run").onclick = async()=>{
+  const btn = document.getElementById("pf-run");
+  const out = document.getElementById("pf-result");
+  const sym = document.getElementById("pf-symbol").value.trim().toUpperCase();
+  const entry = document.getElementById("pf-entry").value.trim();
+  const stop = document.getElementById("pf-stop").value.trim();
+  if(!sym || !(+entry>0) || !(+stop>0))
+    return out.innerHTML = `<div class="quiet">symbol plus positive entry and stop prices required</div>`;
+  btn.disabled = true; btn.textContent = "RUNNING…";
+  /* prices travel as STRINGS: the API parses them as exact Decimals */
+  const r = await postFull("/v1/risk/preflight", {symbol:sym, entry_price:entry, stop_price:stop});
+  btn.disabled = false; btn.textContent = "RUN PRE-FLIGHT";
+  if(r.err) return out.innerHTML = `<div class="unreachable">◌ ${esc(r.err)}</div>`;
+  if(r.status!==200){   /* 400/404/409 envelopes render verbatim — honest answers */
+    const e = (r.data && r.data.error) || {};
+    return out.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:${r.status===409?"var(--gold)":"var(--red)"}">■ ${esc(e.code||r.status)} — ${esc(e.message||"pre-flight failed")}</div>`;
+  }
+  const d = r.data;
+  const sized = d.sizing_accepted
+    ? `engine would size ${esc(d.qty)} shares; ${esc(d.binding_constraint)} binds`
+    : `engine sizes this to ZERO — ${esc(d.sizing_detail)}`;
+  out.innerHTML = `
+    <div class="${d.verdict==="PASS"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:10px">
+      <span class="stamp">${esc(d.verdict)}</span>
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.9">
+        <b style="color:var(--txt)">${esc(d.symbol)}</b> · ${sized}<br>
+        breaker ${esc(String(d.breaker).toUpperCase())} · limit set v${esc(d.limit_set_version)} · NAV A$${(+d.nav_aud).toFixed(2)}
+      </div>
+    </div>
+    ${pfGrid(d.results)}
+    <div class="note" style="margin:8px 0 0">ADVISORY — ${esc(d.advisory)}</div>`;
+};
+["pf-symbol","pf-entry","pf-stop"].forEach(id=>document.getElementById(id)
+  .addEventListener("keydown", e=>{ if(e.key==="Enter") document.getElementById("pf-run").click(); }));
+
+function corrCell(v, thr){
+  if(v==null) return {bg:"rgba(150,170,210,0.05)", fg:"var(--faint)", txt:"n/a"};
+  const txt = (+v).toFixed(2);
+  if(v >= thr) return {bg:"rgba(255,92,92,0.45)", fg:"#ffd7d7", txt};   /* at/above L8: red */
+  const t = Math.max(0, v/thr);          /* negatives clamp to the deep-green floor */
+  if(t >= 0.75) return {bg:"rgba(226,185,91,0.30)", fg:"#f3e3bd", txt}; /* approaching */
+  return {bg:`rgba(53,217,138,${(0.06+0.24*t).toFixed(3)})`, fg:"var(--dim)", txt};
+}
+async function renderCorrMatrix(){
+  const el = document.getElementById("corr-matrix");
+  const note = document.getElementById("corr-note");
+  const [cm, ls] = await Promise.all([get("/v1/risk/correlations"),
+                                      get("/v1/risk/limit-set/current")]);
+  if(cm.err) return deg(el, cm.err);
+  let thr = 0.8, comb = null;   /* fallback matches seeded v1; overwritten by the live register */
+  if(ls.data && ls.data.register){
+    const l8 = ls.data.register.find(x=>x.rule==="L8");
+    const l8b = ls.data.register.find(x=>x.rule==="L8b");
+    if(l8 && l8.value!=null) thr = +l8.value;
+    if(l8b && l8b.value!=null) comb = +l8b.value;
+  }
+  note.textContent = `L8 (Doc 04 §3): a candidate correlated above ${thr} with a holding may not push their combined weight past ${comb!=null?comb:"the L8b cap"}. 90-session window; dim n/a = insufficient data — shown as null, never faked (the engine gates those pairs as worst-case corr 1, fail closed).`;
+  const d = cm.data, syms = d.symbols||[];
+  if(!syms.length){
+    el.innerHTML = `<div class="quiet">no symbols to correlate — flat book and no scanner shortlist yet</div>`;
+    good(el); return;
+  }
+  const th = `style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;color:var(--dim);font-weight:400;padding:6px 8px;border:1px solid var(--line)"`;
+  const head = `<tr><th ${th}></th>${syms.map(x=>`<th ${th}>${esc(x)}</th>`).join("")}</tr>`;
+  const rows = syms.map((rs,i)=>`<tr><th ${th}>${esc(rs)}</th>${
+    syms.map((cs,j)=>{
+      const c = corrCell(d.matrix[i][j], thr);
+      return `<td style="font-family:var(--mono);font-size:10.5px;text-align:center;padding:6px 10px;border:1px solid var(--line);background:${c.bg};color:${c.fg}">${c.txt}</td>`;
+    }).join("")}</tr>`).join("");
+  el.innerHTML = `<table style="border-collapse:collapse">${head}${rows}</table>`
+    + ((d.unknown||[]).length ? `<div class="note" style="margin:10px 0 0;color:var(--gold)">unknown symbols reported by the API, excluded above: ${esc(d.unknown.join(", "))}</div>` : "")
+    + `<div class="note" style="margin:8px 0 0">window ${esc(d.window_sessions)} sessions to ${esc(d.end)} · symbol set: ${esc(d.source)}${d.capped?" · capped at 12":""}</div>`;
+  good(el);
+}
+renderCorrMatrix();
+setInterval(renderCorrMatrix, 30000);
 
 /* ---------- quant ---------- */
 async function renderQuant(){
@@ -1251,7 +1485,8 @@ document.getElementById("attr-month").addEventListener("change", ()=>renderAttri
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderJobs, renderAttribution, renderTrading, renderResearch,
-                   renderProgress, renderRuns, renderQuant, renderRisk, renderMarket];
+                   renderScorecard, renderProgress, renderRuns, renderQuant,
+                   renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")

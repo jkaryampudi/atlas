@@ -18,7 +18,13 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
                    symbol: str, question: str,
                    evidence: list[tuple[str, str]] | None = None,
                    news: list[tuple[str, str]] | None = None,
-                   debate: DebateResult | None = None) -> CommitteeMemo:
+                   debate: DebateResult | None = None,
+                   source: str | None = None) -> CommitteeMemo:
+    """`source` (migration 0017) is the external-origin tag for on-demand
+    analyses (e.g. 'investing.com'); None = the desk's own work. It is
+    persisted to research.memos ONLY and deliberately never appended to the
+    prompt context below — a tag that never reaches the model cannot be a
+    prompt-injection surface, however hostile the string."""
     evidence = evidence or []
     news = news or []
     parts = [f"Candidate: {symbol}", f"Principal's question: {question}",
@@ -41,13 +47,13 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
     memo_id = session.execute(text(
         "INSERT INTO research.memos (agent_run_id, memo_type, instrument_symbol, "
         " recommendation, conviction, thesis, kill_criteria, evidence_refs, dissent, "
-        " debate_summary) "
+        " debate_summary, source) "
         "VALUES (:rid, 'committee', :sym, :rec, :conv, :th, CAST(:kc AS jsonb), "
-        "        CAST(:er AS jsonb), :d, :ds) RETURNING id"),
+        "        CAST(:er AS jsonb), :d, :ds, :src) RETURNING id"),
         {"rid": run_id, "sym": symbol, "rec": memo.recommendation,
          "conv": memo.conviction, "th": memo.thesis,
          "kc": json.dumps(memo.kill_criteria), "er": json.dumps(memo.evidence_refs),
-         "d": memo.dissent, "ds": memo.debate_summary}).scalar_one()
+         "d": memo.dissent, "ds": memo.debate_summary, "src": source}).scalar_one()
     # Provenance (migration 0013): the EXACT evidence text this memo was argued
     # from, verbatim and in order — build_evidence reads live DCP tables, so the
     # bodies are unreconstructible later. Persisted here because this is the one

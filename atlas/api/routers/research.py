@@ -1,10 +1,15 @@
 """Research surface (Doc 06): committee memos with their evidence trail, plus
 the Principal's review write path — the ONE mutation this API performs, because
 Doc 08 makes human memo review a phase gate and the sign-off must be
-evidenceable. Memos themselves are written only by the agent runtime."""
+evidenceable. Memos themselves are written only by the agent runtime.
+
+POST /analyze is a trigger, not a mutation: it hands a ticker to the ops
+layer (atlas/ops/analyze.py, mirroring /v1/system/run-daily -> scheduler);
+every resulting write goes through the full agent cage."""
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from uuid import UUID
 
@@ -16,38 +21,111 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.scorecard import vindicated
 
 router = APIRouter()
 
 REVIEW_TARGET = 10  # Doc 08 Phase-2 gate: human reviews 10 memos
+SCORECARD_RECENT = 20  # last N matured outcome rows on the scorecard
 
 
 @router.get("/memos")
 def memos(symbol: str | None = None, limit: int = 25) -> list[dict[str, object]]:
+    # outcome_20: the memo's 20-session scorecard row (migration 0016) when it
+    # has matured — the console's badge. At most one row per memo (UNIQUE on
+    # memo_id, horizon_sessions), so the join never fans out. Floats are fine:
+    # display analytics, not ledger money.
     q = ("SELECT m.id, m.memo_type, m.instrument_symbol, m.recommendation, "
          " m.conviction, m.thesis, m.kill_criteria, m.evidence_refs, m.dissent, "
-         " m.debate_summary, m.created_at, r.model, r.status AS run_status, r.shadow, "
-         " rev.verdict AS review_verdict, rev.notes AS review_notes, rev.reviewed_at "
+         " m.debate_summary, m.source, "
+         " m.created_at, r.model, r.status AS run_status, r.shadow, "
+         " rev.verdict AS review_verdict, rev.notes AS review_notes, rev.reviewed_at, "
+         " o20.excess AS o20_excess, o20.fwd_return AS o20_fwd_return, "
+         " o20.spy_return AS o20_spy_return "
          "FROM research.memos m "
          "LEFT JOIN research.agent_runs r ON r.id = m.agent_run_id "
-         "LEFT JOIN research.memo_reviews rev ON rev.memo_id = m.id")
+         "LEFT JOIN research.memo_reviews rev ON rev.memo_id = m.id "
+         "LEFT JOIN research.memo_outcomes o20 "
+         "  ON o20.memo_id = m.id AND o20.horizon_sessions = 20")
     params: dict[str, object] = {"n": limit}
     if symbol:
         q += " WHERE m.instrument_symbol = :sym"
         params["sym"] = symbol
     q += " ORDER BY m.created_at DESC LIMIT :n"
     with session_scope() as s:
-        rows = s.execute(text(q), params).mappings()
-        return [{**dict(r), "id": str(r["id"]),
-                 "created_at": r["created_at"].isoformat(),
-                 "reviewed_at": r["reviewed_at"].isoformat() if r["reviewed_at"] else None}
-                for r in rows]
+        out: list[dict[str, object]] = []
+        for r in s.execute(text(q), params).mappings():
+            d = dict(r)
+            excess = d.pop("o20_excess")
+            fwd, spy = d.pop("o20_fwd_return"), d.pop("o20_spy_return")
+            d["outcome_20"] = None if excess is None else {
+                "excess": float(excess), "fwd_return": float(fwd),
+                "spy_return": float(spy),
+                "vindicated": vindicated(r["recommendation"], excess,
+                                         shadow=bool(r["shadow"]))}
+            out.append({**d, "id": str(r["id"]),
+                        "created_at": r["created_at"].isoformat(),
+                        "reviewed_at": (r["reviewed_at"].isoformat()
+                                        if r["reviewed_at"] else None)})
+        return out
 
 
 def _memo_not_found(memo_id: str) -> JSONResponse:
     """Doc 06 §3.3 uniform envelope — same shape the audit/trading routers use."""
     return JSONResponse(status_code=404, content={"error": {
         "code": "NOT_FOUND", "message": f"unknown memo {memo_id}", "details": None}})
+
+
+# ---- ANALYZE-ANY-TICKER: on-demand desk analysis (ops layer does the work) --
+
+_ANALYZE_SYMBOL = re.compile(r"^[A-Z0-9.\-]{1,10}$")
+ANALYZE_SOURCE_MAX = 40
+
+
+class AnalyzeBody(BaseModel):
+    symbol: str
+    source: str | None = None
+
+
+def _bad_request(code: str, message: str) -> JSONResponse:
+    """Doc 06 §3.3 uniform envelope, 400 flavour."""
+    return JSONResponse(status_code=400, content={"error": {
+        "code": code, "message": message, "details": None}})
+
+
+@router.post("/analyze")
+def analyze(body: AnalyzeBody) -> Any:
+    """Queue one on-demand desk analysis. `symbol` is upcased then validated;
+    `source` is the optional external-origin tag (e.g. 'investing.com'),
+    stored VERBATIM up to ANALYZE_SOURCE_MAX chars — it never enters a prompt
+    (see cio.py), so no sanitisation beyond the length cap is needed. A busy
+    desk answers {started: false} honestly — never an error, nothing runs
+    twice (same contract as /v1/system/run-daily)."""
+    from atlas.ops.analyze import start_analysis
+
+    symbol = body.symbol.strip().upper()
+    if not _ANALYZE_SYMBOL.fullmatch(symbol):
+        return _bad_request("INVALID_SYMBOL",
+                            "symbol must match ^[A-Z0-9.\\-]{1,10}$ after upcasing")
+    source = body.source or None  # blank tag -> NULL (the desk's own work)
+    if source is not None and len(source) > ANALYZE_SOURCE_MAX:
+        return _bad_request("INVALID_SOURCE",
+                            f"source tag exceeds {ANALYZE_SOURCE_MAX} characters")
+    started = start_analysis(symbol, source)
+    return {"started": started,
+            "note": (f"analysis running for {symbol} — poll "
+                     "/v1/research/analyze/status" if started
+                     else "an analysis is already running — one at a time; "
+                          "nothing started twice")}
+
+
+@router.get("/analyze/status")
+def analyze_status() -> dict[str, object]:
+    """The current/last analysis: phase fetching -> analyzing -> done|failed,
+    with the memo outcome or the honest cage-hold/skip detail."""
+    from atlas.ops.analyze import analysis_status
+
+    return analysis_status()
 
 
 @router.get("/memos/{memo_id}/decision-flow")
@@ -226,6 +304,74 @@ def review_progress() -> dict[str, object]:
             "SELECT count(*) FROM research.memo_reviews WHERE verdict='agree'")).scalar()
     return {"reviewed": n, "agree": agree, "disagree": (n or 0) - (agree or 0),
             "target": REVIEW_TARGET}
+
+
+@router.get("/scorecard")
+def scorecard() -> dict[str, object]:
+    """The desk graded against its own record (research.memo_outcomes,
+    migration 0016; semantics in atlas/dcp/scorecard.py): SPY-relative per
+    ADR-0009 — a BUY is vindicated when excess > 0 at the horizon, a REJECT
+    when excess < 0 (the desk dodged an underperformer, even one that rose
+    less than the market).
+
+    by_recommendation carries BUY and REJECT only — the directional calls.
+    Shadow-run memos are EXCLUDED from it (non-actionable, ADR-0005 pattern
+    4) and surfaced honestly via shadow_excluded (matured outcome rows so
+    excluded); HOLD and other non-directional recommendations are likewise
+    excluded from the rates but appear in `recent` with vindicated=null.
+    Decimals cross to floats deliberately: display analytics, never ledger
+    money."""
+    with session_scope() as s:
+        by_rec: dict[str, dict[str, object]] = {}
+        for rec in ("BUY", "REJECT"):
+            n_memos = s.execute(text(
+                "SELECT count(*) FROM research.memos m "
+                "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+                "WHERE m.memo_type = 'committee' AND m.recommendation = :rec "
+                "  AND COALESCE(ar.shadow, false) = false"), {"rec": rec}).scalar()
+            entry: dict[str, object] = {"memos": int(n_memos or 0)}
+            for h in (20, 60):
+                rows = s.execute(text(
+                    "SELECT o.excess FROM research.memo_outcomes o "
+                    "JOIN research.memos m ON m.id = o.memo_id "
+                    "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+                    "WHERE m.recommendation = :rec AND o.horizon_sessions = :h "
+                    "  AND COALESCE(ar.shadow, false) = false"),
+                    {"rec": rec, "h": h}).scalars().all()
+                wins = sum(1 for e in rows
+                           if vindicated(rec, e, shadow=False) is True)
+                entry[f"matured_{h}"] = len(rows)
+                entry[f"vindicated_{h}"] = wins
+                entry[f"avg_excess_{h}"] = (
+                    float(sum(rows) / len(rows)) if rows else None)
+            by_rec[rec] = entry
+
+        shadow_excluded = s.execute(text(
+            "SELECT count(*) FROM research.memo_outcomes o "
+            "JOIN research.memos m ON m.id = o.memo_id "
+            "JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+            "WHERE ar.shadow")).scalar()
+
+        recent = [
+            {"memo_id": str(r["memo_id"]), "symbol": r["instrument_symbol"],
+             "recommendation": r["recommendation"],
+             "horizon": int(r["horizon_sessions"]),
+             "fwd_return": float(r["fwd_return"]),
+             "spy_return": float(r["spy_return"]),
+             "excess": float(r["excess"]),
+             "vindicated": vindicated(r["recommendation"], r["excess"],
+                                      shadow=bool(r["shadow"]))}
+            for r in s.execute(text(
+                "SELECT o.memo_id, o.horizon_sessions, o.fwd_return, "
+                " o.spy_return, o.excess, m.instrument_symbol, "
+                " m.recommendation, COALESCE(ar.shadow, false) AS shadow "
+                "FROM research.memo_outcomes o "
+                "JOIN research.memos m ON m.id = o.memo_id "
+                "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+                "ORDER BY o.computed_at DESC, o.memo_id, o.horizon_sessions "
+                "LIMIT :n"), {"n": SCORECARD_RECENT}).mappings()]
+    return {"by_recommendation": by_rec, "recent": recent,
+            "shadow_excluded": int(shadow_excluded or 0)}
 
 
 @router.get("/runs")
