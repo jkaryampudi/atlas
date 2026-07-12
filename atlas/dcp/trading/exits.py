@@ -25,12 +25,39 @@ Documented resolutions (Doc ambiguities, resolved conservatively):
   execution -> order -> (proposal, approval). Positions without a lot trail
   cannot resolve an approval and fail closed (raise) — the lifecycle always
   writes lots, so only hand-seeded rows can hit this.
-- Trigger bar: the LATEST ingested bar with bar_date <= the clock's UTC date
-  and bar_date strictly AFTER the position's opened_at UTC date. The entry
-  day's own bar can never re-trigger (its low may predate the fill), and
-  older intermediate bars are not re-scanned — the daily scan cadence owns
-  catching each bar as it lands; a dip that healed before the scan ran is a
-  missed stop, recorded nowhere because it triggered nothing.
+- Trigger bar — SUPERSEDED 2026-07-13 by board memo 2026-07 item 6. The
+  original resolution scanned only the LATEST ingested bar and held that "a
+  dip that healed before the scan ran is a missed stop, recorded nowhere" —
+  the daily cadence owned catching each bar as it landed. The board overruled
+  that design: a missed cycle (sleeping machine, failed run) followed by a
+  recovering price silently skipped a stop a live broker would have filled,
+  and the hole opened exactly when ops were flaky. Every run now scans ALL
+  bars strictly after the position's scan floor (next bullet) up to the
+  clock's UTC date, oldest first, and fires on the FIRST bar whose low
+  touched the stop — filled at min(stop, that bar's open), stamped with that
+  bar's session open and that bar date's OWN FX. No scan bookmark is
+  persisted: deriving "last scanned" from a prior run's clock date is
+  exactly the broken behaviour, so each run re-derives the full window
+  (O(bars since entry) per position, trivial at daily cadence) and
+  self-heals any gap; the idempotency rule below plus closed_at keep
+  re-scans from double-firing.
+- Scan floor: the position's LATEST tax-lot acquisition date — equal to the
+  entry date for fresh positions. The entry day's own bar can never
+  re-trigger (its low may predate the fill), and the same logic covers
+  add-ons: _record_fill's tighten-only stop merge can RAISE the stop at an
+  add-on fill, and bars before that add-on traded under the OLD lower stop —
+  evaluating them against the raised stop would fabricate fills no broker
+  made. A breach of the old level that a missed cycle failed to catch before
+  an add-on is deliberately not reconstructed (the old stop is not durably
+  stored); protection resumes at the current stop from the add-on forward.
+  Lot-less positions fall back to opened_at (they could never fire anyway —
+  _entry_lineage fails closed without a lot trail).
+- Catch-up visibility (board memo 2026-07 item 6): when the firing bar is
+  older than the newest bar in the window, the position.stop_hit payload
+  carries catch_up=true and bars_scanned=N (the window size) — a stop that
+  fired late is an ops event worth seeing. A breached stop that cannot fill
+  because the breach date's FX is missing emits position.stop_scan_skipped
+  with the reason instead of skipping silently.
 - Idempotency: a position with a LIVE sell order (pending_submit, submitted
   or partially_filled) created at/after its opened_at is skipped — standing
   exit intent means a second sell of the same shares must be unrepresentable.
@@ -53,9 +80,9 @@ Documented resolutions (Doc ambiguities, resolved conservatively):
   the PaperBroker; the daily bar does not say WHEN intraday the low printed).
   A clock still before that open skips the position this run — no fill may
   be recorded before its session opens (replay/live parity).
-- FX: the bar date's OWN rate (fx_on_date) or skip this position this run —
-  fail closed, retry next scan; a stale rate must never enter the immutable
-  execution row.
+- FX: the firing bar date's OWN rate (fx_on_date) or skip this position this
+  run — fail closed, retry next scan, audited as position.stop_scan_skipped;
+  a stale rate must never enter the immutable execution row.
 - NOTHING in the stop path marks the book: no _latest_close, no fx_to_aud
   marking calls — a stale close or missing FX on an UNRELATED holding must
   never block a protective exit. The breaker recorded in the check row is
@@ -169,16 +196,21 @@ def _order_row(session: Session, order_id: UUID) -> Any:
 
 def scan_stop_exits(session: Session, clock: Clock,
                     costs: CostModel | None = None) -> tuple[StopExitReport, ...]:
-    """Fire every protective stop the latest ingested bars have hit.
+    """Fire every protective stop any unscanned bar has hit.
 
-    For each open position with a current_stop: take the latest bar strictly
-    after the entry date; if its low touched the stop, create the
-    pre-authorized sell order (original entry approval + fresh PASS
-    'order_time' check) and fill it in the same transaction at
-    min(stop, open) with sell-side costs. Skips are silent and re-scannable:
-    no bar yet, stop not hit, session not open per the injected clock, or
-    fill-date FX missing (fail closed, retry next run). Runs under DD3 by
-    design — the breaker is exit-only, never exit-blocking (Doc 04 §5)."""
+    For each open position with a current_stop: scan ALL bars strictly after
+    the scan floor (latest lot acquisition date; module docstring) up to the
+    clock's UTC date, oldest first; on the FIRST bar whose low touched the
+    stop, create the pre-authorized sell order (original entry approval +
+    fresh PASS 'order_time' check) and fill it in the same transaction at
+    min(stop, that bar's open) with sell-side costs, that bar's session open
+    and that bar date's own FX. Re-scanning the whole window every run
+    self-heals missed cycles (board memo 2026-07 item 6); a firing bar older
+    than the newest bar is flagged catch_up in the audit payload. Skips are
+    re-scannable: no bar yet, stop never hit, session not open per the
+    injected clock, or breach-date FX missing (fail closed — audited as
+    position.stop_scan_skipped — retry next run). Runs under DD3 by design —
+    the breaker is exit-only, never exit-blocking (Doc 04 §5)."""
     _lifecycle_lock(session)
     c = costs if costs is not None else CostModel()
     now = clock.now()
@@ -189,7 +221,9 @@ def scan_stop_exits(session: Session, clock: Clock,
     breaker = _breaker_fold(_snapshot_navs(session), _confirmed_clearances(session))
     positions = session.execute(text(
         "SELECT p.id, p.qty, p.current_stop, p.opened_at, i.id AS iid, i.symbol, "
-        "       i.market, i.currency "
+        "       i.market, i.currency, "
+        "       (SELECT max(tl.acquired_at) FROM trading.tax_lots tl "
+        "         WHERE tl.position_id = p.id) AS last_acquired_at "
         "FROM trading.positions p JOIN market.instruments i ON i.id = p.instrument_id "
         "WHERE p.closed_at IS NULL AND p.qty > 0 AND p.current_stop IS NOT NULL "
         "  AND p.opened_at IS NOT NULL ORDER BY p.opened_at FOR UPDATE OF p")).all()
@@ -209,27 +243,49 @@ def scan_stop_exits(session: Session, clock: Clock,
             {"iid": p.iid, "opened": p.opened_at}).first()
         if exit_exists is not None:
             continue
-        opened_date = p.opened_at.astimezone(UTC).date()
-        bar = session.execute(text(
+        # scan floor: the latest lot acquisition date (== the entry date for
+        # fresh positions) — bars at/before it may predate the fill or the
+        # add-on's tighten-only raised stop and can never trigger (module
+        # docstring); lot-less rows fall back to opened_at (they could never
+        # fire anyway: _entry_lineage fails closed)
+        floor_date = (p.last_acquired_at.astimezone(UTC).date()
+                      if p.last_acquired_at is not None
+                      else p.opened_at.astimezone(UTC).date())
+        bars = session.execute(text(
             "SELECT bar_date, open, low FROM market.price_bars_daily "
             "WHERE instrument_id = :iid AND source = :src "
-            "  AND bar_date <= :today AND bar_date > :opened "
+            "  AND bar_date <= :today AND bar_date > :floor "
             "  AND open IS NOT NULL AND low IS NOT NULL "
-            "ORDER BY bar_date DESC LIMIT 1"),
+            "ORDER BY bar_date"),
             {"iid": p.iid, "src": PRICE_SOURCE, "today": today,
-             "opened": opened_date}).first()
-        if bar is None:
+             "floor": floor_date}).all()
+        if not bars:
             continue                    # no post-entry bar yet
         stop = Decimal(p.current_stop)
+        # board memo 2026-07 item 6: fire on the FIRST breach in the whole
+        # unscanned window, never just the latest bar — a missed cycle plus
+        # a healed dip must not become a silently skipped stop
+        bar = next((b for b in bars if Decimal(b.low) <= stop), None)
+        if bar is None:
+            continue                    # stop not hit on any unscanned bar
         low = Decimal(bar.low)
-        if low > stop:
-            continue                    # stop not hit on the latest bar
         opens_at = session_open_utc(p.market, bar.bar_date)
         if opens_at > now:
             continue                    # session not open per the injected clock
         fx = fx_on_date(session, p.currency, bar.bar_date)
         if fx is None:
-            continue                    # fail closed: no fill-date FX, retry
+            # fail closed, but LOUDLY: the stop is breached and cannot fill
+            # until the breach date's own FX lands — an ops condition, not a
+            # silent skip (board memo 2026-07 item 6); retry next run
+            audit.append(event_type="position.stop_scan_skipped",
+                         entity_type="position", entity_id=str(p.id),
+                         actor_type="dcp", actor_id="stop_exit_engine",
+                         payload={"position_id": str(p.id), "symbol": p.symbol,
+                                  "reason": "fx_missing_for_breach_date",
+                                  "currency": p.currency,
+                                  "bar_date": bar.bar_date.isoformat(),
+                                  "stop": str(stop), "low": str(low)})
+            continue
         raw = min(stop, Decimal(bar.open))   # gap-down opens fill at the open
         price = effective_price(raw, "sell", c)
         sf = shortfall_bps(price, stop, "sell")
@@ -260,14 +316,20 @@ def scan_stop_exits(session: Session, clock: Clock,
                      actor_id="stop_exit_engine",
                      payload={"order_id": str(order_id), "from": None,
                               "to": "pending_submit"})
+        hit_payload: dict[str, Any] = {
+            "position_id": str(p.id), "symbol": p.symbol,
+            "stop": str(stop), "low": str(low),
+            "bar_date": bar.bar_date.isoformat(),
+            "order_id": str(order_id), "fill_price": str(price)}
+        if bar.bar_date < bars[-1].bar_date:
+            # catch-up fire: the breach sat on a PAST bar while newer bars
+            # exist — a missed cycle was healed; flag it for ops (board memo
+            # 2026-07 item 6). bars_scanned = the window size this run saw.
+            hit_payload["catch_up"] = True
+            hit_payload["bars_scanned"] = len(bars)
         audit.append(event_type="position.stop_hit", entity_type="position",
                      entity_id=str(p.id), actor_type="dcp",
-                     actor_id="stop_exit_engine",
-                     payload={"position_id": str(p.id), "symbol": p.symbol,
-                              "stop": str(stop), "low": str(low),
-                              "bar_date": bar.bar_date.isoformat(),
-                              "order_id": str(order_id),
-                              "fill_price": str(price)})
+                     actor_id="stop_exit_engine", payload=hit_payload)
         fill = Fill(fill_date=bar.bar_date, fill_qty=qty, fill_price=price,
                     fees=Decimal(0), fx_to_aud=fx, decision_price=stop,
                     shortfall_bps=sf, executed_at=opens_at)

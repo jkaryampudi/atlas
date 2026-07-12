@@ -1,8 +1,9 @@
 """Phase-5 exit engine (Doc 04 §5 exit-only breakers, §14 shortfall; Doc 05 §5).
 
 Exercises both ways out of a position against atlas_test: the pre-authorized
-stop exit (scan_stop_exits: latest-bar trigger, min(stop, open) gap fill,
-order_time check, same-transaction fill) and the discretionary close
+stop exit (scan_stop_exits: first-breach trigger over every unscanned bar per
+board memo 2026-07 item 6, min(stop, open) gap fill, order_time check,
+same-transaction fill, catch_up flagging) and the discretionary close
 (close_position -> approve -> next-open settle), plus sell settlement itself —
 FIFO lot disposal with a partial-lot split, cash ledger to the cent, breaker
 independence (DD3 never blocks an exit), idempotency, and fail-closed skips.
@@ -232,6 +233,13 @@ def test_stop_exit_full_round_trip(clean_audit):
     assert evs.count("risk.check.completed") == 3       # proposal/approval/order_time
     assert evs.count("proposal.executed") == 1          # entry only — never twice
 
+    # a same-run latest-bar fire is NOT a catch-up: no flag, no window size
+    hit = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'position.stop_hit'")).one()
+    assert "catch_up" not in hit.payload
+    assert "bars_scanned" not in hit.payload
+
     # idempotent: the position is closed and the exit order exists
     assert scan_stop_exits(s, clock) == ()
     assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 2
@@ -327,6 +335,180 @@ def test_dd3_breaker_allows_stop_exit(clean_audit):
     closed = s.execute(text(
         "SELECT closed_at FROM trading.positions")).scalar()
     assert closed == US_OPEN_STOP
+
+
+def test_missed_cycle_catch_up_fires_on_breach_day(clean_audit):
+    """Board memo 2026-07 item 6, the exact defect scenario: the 07-15 and
+    07-16 cycles never ran (machine asleep), 07-15's low breached the stop
+    and 07-16 healed. The old latest-bar scan saw only a healed bar and
+    silently skipped the stop forever; the 07-17 scan must instead fire on
+    07-15 at min(stop, its open), stamped with 07-15's session open and
+    07-15's OWN FX, and flag the fire as a catch-up ops event."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _, position_id = _entered_position(s, clock, memo_id)
+
+    _bar(s, _ztla_id(s), STOP_SESSION, open_=96, low=94, close=Decimal("95.5"))
+    _fx(s, day=STOP_SESSION, rate=Decimal("1.6"))        # D's OWN rate, distinct
+    _bar(s, _ztla_id(s), date(2026, 7, 16), open_=97, low=96, close=97)  # healed
+    _fx(s, day=date(2026, 7, 16))
+    _bar(s, _ztla_id(s), date(2026, 7, 17), open_=98, low=97, close=98)
+    _fx(s, day=date(2026, 7, 17))
+    clock.advance_to(datetime(2026, 7, 17, 22, 0, tzinfo=UTC))  # 2 missed cycles
+
+    reports = scan_stop_exits(s, clock)
+    assert len(reports) == 1
+    rep = reports[0]
+    assert rep.fill_date == STOP_SESSION                 # the breach day, not today
+    assert rep.fill_price == Decimal("94.905000")        # min(95, 96) * (1 - 10bps)
+    assert rep.shortfall_bps == Decimal("10.0000")
+    ex = s.execute(text(
+        "SELECT fx_rate_used, executed_at FROM trading.executions "
+        "WHERE order_id = :o"), {"o": rep.order_id}).one()
+    assert ex.fx_rate_used == Decimal("1.6")             # 07-15's rate, not 07-17's
+    assert ex.executed_at == US_OPEN_STOP                # 07-15's session open
+    lot = s.execute(text(
+        "SELECT proceeds_aud FROM trading.tax_lots WHERE disposed_at IS NOT NULL")).one()
+    assert lot.proceeds_aud == Decimal("8047.94")        # 53 * 94.905 * 1.6
+    closed = s.execute(text(
+        "SELECT closed_at FROM trading.positions WHERE id = :p"),
+        {"p": position_id}).scalar()
+    assert closed == US_OPEN_STOP
+
+    hit = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'position.stop_hit'")).one()
+    assert hit.payload["bar_date"] == "2026-07-15"
+    assert hit.payload["catch_up"] is True               # fired late: ops event
+    assert hit.payload["bars_scanned"] == 3              # 07-15/16/17 window
+
+    # idempotency survives a catch-up fire: the position is closed, re-scans
+    # find nothing, and no second execution ever appears
+    assert scan_stop_exits(s, clock) == ()
+    assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 2
+
+
+def test_multi_day_gap_fires_first_breach_not_deepest(clean_audit):
+    """Two breach bars inside the missed window: the fill belongs to the
+    FIRST breach day (07-15, intraday touch at the stop) — a live broker's
+    stop was already done that day — never the deeper 07-16 gap."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _entered_position(s, clock, memo_id)
+
+    _bar(s, _ztla_id(s), STOP_SESSION, open_=96, low=Decimal("94.5"),
+         close=Decimal("94.5"))                          # first breach: at the stop
+    _fx(s, day=STOP_SESSION)
+    _bar(s, _ztla_id(s), date(2026, 7, 16), open_=90, low=88, close=89)  # deeper
+    _fx(s, day=date(2026, 7, 16))
+    _bar(s, _ztla_id(s), date(2026, 7, 17), open_=91, low=90, close=91)
+    _fx(s, day=date(2026, 7, 17))
+    clock.advance_to(datetime(2026, 7, 17, 22, 0, tzinfo=UTC))
+
+    reports = scan_stop_exits(s, clock)
+    assert len(reports) == 1
+    assert reports[0].fill_date == STOP_SESSION          # 07-15, not 07-16
+    assert reports[0].fill_price == Decimal("94.905000")  # NOT 89.910000
+    ex = s.execute(text(
+        "SELECT executed_at FROM trading.executions WHERE order_id = :o"),
+        {"o": reports[0].order_id}).one()
+    assert ex.executed_at == US_OPEN_STOP
+    hit = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'position.stop_hit'")).one()
+    assert hit.payload["bar_date"] == "2026-07-15"
+    assert hit.payload["catch_up"] is True
+    assert hit.payload["bars_scanned"] == 3
+    assert scan_stop_exits(s, clock) == ()               # fires exactly once
+
+
+def test_missing_breach_day_fx_fails_closed_with_reason(clean_audit):
+    """A catch-up fill needs the BREACH date's own FX. 07-15 breached but its
+    rate never landed; 07-16 healed and has one. The scan must not borrow a
+    neighbouring day's rate: it skips the position with an AUDITED reason
+    (a breached-but-unfillable stop is an ops condition, not a silent skip)
+    and completes the catch-up once 07-15's rate lands."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _entered_position(s, clock, memo_id)
+
+    _bar(s, _ztla_id(s), STOP_SESSION, open_=96, low=94, close=Decimal("94.5"))
+    _bar(s, _ztla_id(s), date(2026, 7, 16), open_=97, low=96, close=97)  # healed
+    _fx(s, day=date(2026, 7, 16))                        # D+1 has FX; D does NOT
+    clock.advance_to(datetime(2026, 7, 16, 22, 0, tzinfo=UTC))
+
+    assert scan_stop_exits(s, clock) == ()               # fail closed
+    assert s.execute(text("SELECT count(*) FROM trading.orders")).scalar() == 1
+    assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 1
+    skip = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'position.stop_scan_skipped'")).one()
+    assert skip.payload["reason"] == "fx_missing_for_breach_date"
+    assert skip.payload["bar_date"] == "2026-07-15"      # the breach day's rate
+    assert skip.payload["symbol"] == "ZTLA"
+
+    _fx(s, day=STOP_SESSION, rate=Decimal("1.6"))        # the rate lands -> retry
+    reports = scan_stop_exits(s, clock)
+    assert len(reports) == 1
+    assert reports[0].fill_date == STOP_SESSION
+    fx_used = s.execute(text(
+        "SELECT fx_rate_used FROM trading.executions WHERE order_id = :o"),
+        {"o": reports[0].order_id}).scalar()
+    assert fx_used == Decimal("1.6")                     # 07-15's own rate
+    hit = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'position.stop_hit'")).one()
+    assert hit.payload["catch_up"] is True
+    assert hit.payload["bars_scanned"] == 2              # 07-15 + 07-16
+
+
+def test_addon_raised_stop_does_not_retrofire_on_older_bars(clean_audit):
+    """The scan floor is the LATEST lot acquisition (module docstring):
+    _record_fill's tighten-only merge can RAISE the stop at an add-on fill,
+    and bars that printed under the OLD lower stop must not be re-judged
+    against the raised one — that would fabricate a fill no broker made.
+    Bars after the add-on fire against the raised stop as usual. (Add-on is
+    hand-applied: L8 blocks add-on buys through the lifecycle.)"""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _, position_id = _entered_position(s, clock, memo_id)  # stop 95, filled 07-14
+
+    # 07-15 low 96 never touched the stop that was live that day (95)
+    _bar(s, _ztla_id(s), STOP_SESSION, open_=97, low=96, close=97)
+    _fx(s, day=STOP_SESSION)
+    # add-on at the 07-16 open raises the stop 95 -> 98 (tighten-only merge)
+    s.execute(text(
+        "UPDATE trading.positions SET qty = qty + 10, current_stop = 98 "
+        "WHERE id = :p"), {"p": position_id})
+    s.execute(text(
+        "INSERT INTO trading.tax_lots (position_id, qty, cost_aud, acquired_at) "
+        "VALUES (:p, 10, 1500.00, :at)"),
+        {"p": position_id, "at": datetime(2026, 7, 16, 13, 30, tzinfo=UTC)})
+    _bar(s, _ztla_id(s), date(2026, 7, 16), open_=99, low=Decimal("98.5"), close=99)
+    _fx(s, day=date(2026, 7, 16))
+    clock.advance_to(datetime(2026, 7, 16, 22, 0, tzinfo=UTC))
+    # 07-15's low 96 <= raised stop 98, but it predates the raise: NO fire
+    assert scan_stop_exits(s, clock) == ()
+    assert "position.stop_hit" not in _events(s)
+
+    # a bar AFTER the add-on that touches the raised stop fires normally,
+    # for the WHOLE protected quantity
+    _bar(s, _ztla_id(s), date(2026, 7, 17), open_=99, low=Decimal("97.5"), close=98)
+    _fx(s, day=date(2026, 7, 17))
+    clock.advance_to(datetime(2026, 7, 17, 22, 0, tzinfo=UTC))
+    reports = scan_stop_exits(s, clock)
+    assert len(reports) == 1
+    assert reports[0].fill_date == date(2026, 7, 17)
+    assert reports[0].qty == 63                          # 53 entry + 10 add-on
+    assert reports[0].fill_price == Decimal("97.902000")  # 98 * (1 - 10bps)
+    closed = s.execute(text(
+        "SELECT closed_at FROM trading.positions WHERE id = :p"),
+        {"p": position_id}).scalar()
+    assert closed == datetime(2026, 7, 17, 13, 30, tzinfo=UTC)
 
 
 # ------------------------------------------------------ discretionary close
