@@ -10,11 +10,18 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
   T5 snapshot     mark the book -> trading.portfolio_snapshots (+ breaker fold)
   T6 reconcile    internal consistency: positions ≡ open lots, ledger cash
                   finite and NAV recomputable; writes trading.reconciliations
-  T7 desk         the research desk: debate + committee memo per eligible
-                  universe symbol through the full cage — memos EMIT to the
-                  console Research page; runs only on US session days and only
-                  when a model key is configured; a desk failure pages but
-                  never undoes the trading steps (they are already done)
+  T7 desk         SCAN then DESK — one attention+analysis stage. The
+                  deterministic scanner (ADR-0007, atlas/dcp/scanner/v1.py —
+                  attention, not alpha) sweeps the FULL active universe for
+                  free and only its shortlist (top-N by attention score, plus
+                  held/in-flight names) reaches the LLM debate + committee
+                  memo cage — memos EMIT to the console Research page; runs
+                  only on US session days and only when a model key is
+                  configured; a desk failure pages but never undoes the
+                  trading steps (they are already done). If SCANNING breaks,
+                  the desk falls back to the full eligible universe
+                  (fail-soft: the desk must not go blind because ranking
+                  broke) and the run pages like a desk failure
   T8 bridge       memo->proposal bridge (ADR-0006): fresh non-shadow committee
                   BUY memos become sized, L1-L11-checked proposals in the
                   console approval queue; every price derived from vendor bars
@@ -55,6 +62,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Callable
@@ -69,6 +77,7 @@ from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
+from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -119,6 +128,45 @@ def _reconcile(session: Session, clock: Clock) -> str:
         raise RuntimeError(f"reconciliation BREAK: {diffs} — the lot ledger "
                            "disagrees with the positions; halting the run")
     return status
+
+
+@dataclass(frozen=True)
+class ScannedDeskReport:
+    """T7 = scan -> desk, one attention+analysis stage: the scan line is
+    prepended to the DeskReport summary so the node line reads
+    'scanned 112 -> desk 5 (+2 held) · memos ...'."""
+    scan_line: str
+    desk: Any  # DeskReport-shaped: anything with .summary()
+    scan_failed: bool = False
+
+    def summary(self) -> str:
+        return f"{self.scan_line} · {self.desk.summary()}"
+
+
+def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
+                       desk_symbols: Callable[[Session], list[str]],
+                       *, top_n: int = 5) -> Callable[[Session, Clock], ScannedDeskReport]:
+    """The T7 desk callable: deterministic scan first (ADR-0007), then the LLM
+    desk on exactly the shortlist. Fail-soft: if scanning raises, the desk
+    runs on the full eligible universe (desk_symbols) instead — the desk must
+    not go blind because ranking broke — and scan_failed=True makes the run
+    page like a desk failure. This covers ranking bugs, not a dead database:
+    a scan failure that aborts the transaction kills the run like any other
+    node-level SQL failure."""
+    def scanned_desk(session: Session, clock: Clock) -> ScannedDeskReport:
+        try:
+            report = scan(session, clock, top_n=top_n)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            fallback = run_desk(session, clock, desk_symbols(session))
+            return ScannedDeskReport(
+                scan_line=f"scan FAILED ({str(e)[:120]}) -> desk full eligible universe",
+                desk=fallback, scan_failed=True)
+        desk_report = run_desk(session, clock, [e.symbol for e in report.shortlist])
+        return ScannedDeskReport(
+            scan_line=(f"scanned {report.scanned} -> desk {report.n_scored} "
+                       f"(+{report.n_held} held)"),
+            desk=desk_report)
+    return scanned_desk
 
 
 def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
@@ -179,6 +227,12 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             state["desk_failed"] = True
             return f"desk FAILED: {e}"[:300]
         state["desk"] = report
+        if getattr(report, "scan_failed", False):
+            # the scanner broke and the desk fell back to the full eligible
+            # universe (ADR-0007 fail-soft): the memos still landed, but the
+            # run pages exactly like a desk failure so a broken ranker is
+            # never silently absorbed
+            state["desk_failed"] = True
         return report.summary()
 
     def t8_bridge() -> str:
@@ -274,13 +328,15 @@ def main() -> None:
     if os.environ.get("ATLAS_ANTHROPIC_API_KEY"):
         from atlas.agents.desk import desk_symbols, run_desk
 
-        def desk(s: Session, c: Clock) -> Any:
-            return run_desk(s, c, desk_symbols(s))
+        # scan first (ADR-0007): the desk studies the scanner's shortlist,
+        # never the full universe — breadth is the scanner's job, and it's free
+        desk = build_scanned_desk(run_desk, desk_symbols)
     with session_scope() as s:
         results = run_daily_cycle(s, clock, adapter, desk=desk)
     ingest_line = results.get("t0_ingest") or ""
     failed = ("failed=True" in ingest_line
               or "desk FAILED" in (results.get("t7_desk") or "")
+              or "scan FAILED" in (results.get("t7_desk") or "")
               or "bridge FAILED" in (results.get("t8_bridge") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
