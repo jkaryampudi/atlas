@@ -18,7 +18,7 @@ from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import (is_trading_day, previous_trading_day,
                                               recent_sessions)
-from atlas.dcp.market_data.models import Bar, GateStatus, Split
+from atlas.dcp.market_data.models import Bar, Dividend, GateStatus, Split
 from atlas.dcp.market_data.quality import GateResult, evaluate_gate, inception_map
 
 
@@ -59,6 +59,23 @@ def record_split(session: Session, instrument_id: object, split: Split, source: 
         "VALUES (:iid, :d, 'split', :r, :src) "
         "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
         {"iid": instrument_id, "d": split.action_date, "r": split.ratio, "src": source})
+
+
+def record_dividend(session: Session, instrument_id: object, div: Dividend,
+                    source: str) -> None:
+    """Cash dividend into market.corporate_actions: action_type='dividend' is
+    already permitted by the 0001 CHECK constraint and the table carries
+    dedicated `amount`/`currency` columns, so no schema change is needed —
+    `ratio` stays NULL (that column is split semantics). Amount is the RAW
+    declared cash per share (adjust on read, the bars convention). Same
+    natural-key arbiter as record_split, so re-runs never duplicate."""
+    session.execute(text(
+        "INSERT INTO market.corporate_actions "
+        "(instrument_id, action_date, action_type, amount, currency, source) "
+        "VALUES (:iid, :d, 'dividend', :a, :cur, :src) "
+        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
+        {"iid": instrument_id, "d": div.ex_date, "a": div.amount,
+         "cur": div.currency, "src": source})
 
 
 def write_gate(session: Session, gate: GateResult) -> None:

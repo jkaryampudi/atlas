@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from atlas.dcp.market_data.models import Bar, Split
+from atlas.dcp.market_data.models import Bar, Dividend, Split
 
 BASE = "https://eodhd.com/api"
 
@@ -114,6 +114,30 @@ class EodhdAdapter:
             out.append(Split(symbol=symbol, action_date=date.fromisoformat(str(r["date"])),
                              ratio=ratio))
         return out
+
+    def fetch_dividends(self, symbol: str, start: date, end: date) -> list[Dividend]:
+        """GET /api/div/{code}: cash dividends by ex-date. The vendor sends two
+        figures per row — `value` (retroactively split-adjusted) and
+        `unadjustedValue` (the raw declared cash). We store RAW and adjust on
+        read (the bars convention: backfill.py module docstring), so
+        `unadjustedValue` is authoritative; `value` is only a fallback for old
+        rows that lack it. Non-positive/absent amounts are vendor noise and are
+        skipped — Dividend refuses them by construction."""
+        rows = self._get(f"/div/{self._sym(symbol)}",
+                         **{"from": start.isoformat(), "to": end.isoformat()})
+        out = []
+        for r in rows:
+            raw = r.get("unadjustedValue")
+            if not isinstance(raw, (int, float)) or raw <= 0:
+                raw = r.get("value")
+            if not isinstance(raw, (int, float)) or raw <= 0:
+                continue
+            cur = r.get("currency")
+            out.append(Dividend(symbol=symbol,
+                                ex_date=date.fromisoformat(str(r["date"])),
+                                amount=Decimal(str(raw)),
+                                currency=str(cur) if cur else None))
+        return sorted(out, key=lambda d: d.ex_date)
 
     def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
         """GET /api/fundamentals/{code}: the raw vendor document (General /

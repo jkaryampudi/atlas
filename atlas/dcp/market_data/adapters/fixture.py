@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from atlas.dcp.market_data.models import Bar, Split
+from atlas.dcp.market_data.models import Bar, Dividend, Split
 
 
 class FixtureAdapter:
@@ -42,6 +42,23 @@ class FixtureAdapter:
                         out.append(Split(symbol=symbol, action_date=d,
                                          ratio=Decimal(row["ratio"])))
         return out
+
+    def fetch_dividends(self, symbol: str, start: date, end: date) -> list[Dividend]:
+        """dividends.csv (symbol,date,amount[,currency]) — raw declared cash
+        per share by ex-date, the same convention as the vendor adapter."""
+        path = self._root / "dividends.csv"
+        if not path.exists():
+            return []
+        out: list[Dividend] = []
+        with path.open() as f:
+            for row in csv.DictReader(f):
+                if row["symbol"] == symbol:
+                    d = date.fromisoformat(row["date"])
+                    if start <= d <= end:
+                        out.append(Dividend(symbol=symbol, ex_date=d,
+                                            amount=Decimal(row["amount"]),
+                                            currency=row.get("currency") or None))
+        return sorted(out, key=lambda dv: dv.ex_date)
 
     def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
         """fundamentals/{symbol}.json, whole. LookupError when absent — same

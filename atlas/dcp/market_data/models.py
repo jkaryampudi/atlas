@@ -36,3 +36,20 @@ class Split:
     symbol: str
     action_date: date  # effective (ex-) date
     ratio: Decimal     # 10-for-1 split -> Decimal(10)
+
+
+@dataclass(frozen=True)
+class Dividend:
+    """Cash dividend, stored RAW (the declared per-share amount as of its
+    ex-date) — never the vendor's split-adjusted figure, which is retroactively
+    rewritten by every future split. Adjustment happens on read, exactly like
+    bars (adjustment.adjust_for_splits / total_return.adjust_dividends_for_splits)."""
+    symbol: str
+    ex_date: date          # ex-dividend date (the vendor's `date` field)
+    amount: Decimal        # declared cash per share, > 0
+    currency: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.amount <= 0:
+            raise ValueError(f"non-positive dividend {self.amount} for "
+                             f"{self.symbol} {self.ex_date}")

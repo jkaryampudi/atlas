@@ -45,9 +45,26 @@ Convention note (inherited from the round-2 machinery, applied identically to
 strategy, null and both benchmarks): bars are split-adjusted PRICE returns —
 dividends are not reinvested on either side of the comparison.
 
+TOTAL-RETURN MODE (--total-return; board memo 2026-07 items 1+2, ADDITIVE —
+the default path above is untouched): ADR-0009's binding benchmark is SPY
+TOTAL RETURN, and the price-return convention above was found to violate it
+(the 2026-07 PASS is suspended pending this re-score). With the flag, the
+panel is transformed at LOAD TIME by market_data/total_return.py — every
+symbol's dividends reinvested at the ex-date close, applied identically to
+strategy, monkey null, equal-weight benchmark and SPY because all read the
+one panel — and TWO trials run: family 'xsmom-pit-tr' (identical recipe and
+window, TR-vs-TR) and the board's pre-committed KILL-ONLY trial
+'xsmom-pit-tr-2016' (identical recipe, evaluation start 2016-01-01 — the
+memo's endpoint/early-window concern; it can only demote, never validate).
+The combined report carries the verdict-vs-endpoint exhibit (final date
+rolled back monthly, 24 months — exact: a curve truncated at E equals a run
+ended at E) and the per-calendar-year strategy-vs-SPY TR table. Verdicts land
+verbatim either way; the prior PASS is superseded by that report.
+
 Do NOT tune anything to pass — a failed gate is a valid, reportable result.
 
 Usage: python -m atlas.dcp.backtest.xsmom_pit_run [--paths 1000]
+       python -m atlas.dcp.backtest.xsmom_pit_run --total-return [--paths 1000]
 """
 from __future__ import annotations
 
@@ -92,6 +109,7 @@ from atlas.dcp.backtest.real_run import (
     load_adjusted_obars,
 )
 from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.walkforward import leakage_free, purged_folds
 from atlas.dcp.backtest.xsmom_run import (
     _PCTS,
@@ -116,12 +134,35 @@ from atlas.dcp.market_data.index_membership import (
     member_in_window,
     partition_membership,
 )
+from atlas.dcp.market_data.total_return import (
+    load_adjusted_dividends,
+    total_return_series,
+)
 from atlas.dcp.signals.xsmom.v1 import LOOKBACK, SEASONING, SKIP, SPEC, TOP_N
 
 ROOT = Path(__file__).resolve().parents[3]
 BENCHMARK = "SPY"
 FAMILY = "xsmom-pit"
 DECILE = 10  # J&T winner fraction: the top tenth of the ranked universe
+
+# --- total-return mode (board memo 2026-07 items 1+2; additive) -------------
+FAMILY_TR = "xsmom-pit-tr"
+# The board's PRE-COMMITTED kill-test start: the memo's decomposition shows
+# 2016..2025 price-return LOSES to SPY by 14.3pp and the early window rides a
+# biased membership undercount — this trial exists to test that concern and
+# can only demote, never validate.
+KILL_START = date(2016, 1, 1)
+ENDPOINT_MONTHS = 24  # verdict-vs-endpoint exhibit: monthly rollbacks
+TR_REPORT = ROOT / "docs" / "reports" / "xsmom-pit-total-return-2026-07.md"
+PRICE_CONVENTION = "price (split-adjusted; dividends not reinvested)"
+TR_CONVENTION = ("total return (split-adjusted; each dividend reinvested at "
+                 "its ex-date close — market_data/total_return.py)")
+
+
+def tr_family(window_start: date | None) -> str:
+    """Registered family for a TR run: 'xsmom-pit-tr' for the identical
+    window, 'xsmom-pit-tr-<year>' for a pre-committed start override."""
+    return FAMILY_TR if window_start is None else f"{FAMILY_TR}-{window_start.year}"
 
 
 def winner_count(n_eligible: int) -> int:
@@ -325,6 +366,35 @@ def pit_null_distribution(panel: PricePanel,
             for _ in range(paths)]
 
 
+def pit_null_results(panel: PricePanel,
+                     members: Mapping[str, MembershipRow], *,
+                     costs: CostModel, start: date, paths: int,
+                     seed: int) -> list[PortfolioResult]:
+    """pit_null_distribution with the FULL results kept: identical rng
+    conventions (one rng, paths sequential, eligible sets cached), so
+    [r.total_return for r in this] == pit_null_distribution(same args)
+    element for element (pinned by test). The stored equity curves make the
+    verdict-vs-endpoint exhibit EXACT — a monkey curve truncated at endpoint E
+    equals the same monkey run ended at E, because every decision at t reads
+    only data <= t and a pending trade executes after the truncation mark."""
+    rng = random.Random(seed)
+    cache: dict[int, list[str]] = {}
+
+    def monkey(view: PanelView) -> dict[str, float]:
+        elig = cache.get(view.t)
+        if elig is None:
+            elig = pit_eligible(view, members)
+            cache[view.t] = elig
+        if not elig:
+            return {}
+        pick = rng.sample(elig, min(winner_count(len(elig)), len(elig)))
+        w = 1.0 / len(pick)
+        return {s: w for s in pick}
+
+    return [run_pit_backtest(panel, monkey, costs, start=start).result
+            for _ in range(paths)]
+
+
 def pit_walk_forward(panel: PricePanel, strategy: PortfolioStrategy, *,
                      k: int, horizon: int, embargo: int, warmup: int,
                      costs: CostModel) -> PortfolioWalkForwardResult:
@@ -365,6 +435,21 @@ class PitExclusion:
 
 
 @dataclass(frozen=True)
+class TrCoverage:
+    """Dividend coverage of the TR transform — the report's honesty section.
+    'No stored dividends' is NORMAL for never-payers; the ingest audit event
+    (market.dividends.backfill.completed) separates fetched-none from
+    fetch-failed, which this panel-level view cannot."""
+    symbols_with_dividends: int
+    symbols_without_dividends: int
+    dividends_applied: int
+    dropped_before_series: int   # ex-date precedes the first stored bar
+    dropped_after_series: int    # ex-date after the final bar (delisted-cash rule)
+    rolled_forward: int          # ex-date had no bar; reinvested next session
+    spy_dividends: int           # the benchmark MUST carry its yield
+
+
+@dataclass(frozen=True)
 class PitUniverse:
     panel: PricePanel
     members: dict[str, MembershipRow]     # panel symbols that carry membership
@@ -374,6 +459,7 @@ class PitUniverse:
     included_delisted: int
     missing_series: list[PitExclusion]    # member tickers with NO stored bars
     excluded: list[PitExclusion]          # stored but failed completeness rules
+    tr: TrCoverage | None = None          # set only in total-return mode
 
     @property
     def window_members(self) -> int:
@@ -381,12 +467,21 @@ class PitUniverse:
 
 
 def load_pit_panel(session: Session, *, window_end: date | None = None,
-                   index_code: str = INDEX_CODE) -> PitUniverse:
+                   index_code: str = INDEX_CODE,
+                   total_return: bool = False) -> PitUniverse:
     """Aligned open/close matrix over every window-relevant member ticker with
     a usable stored series, PLUS the SPY benchmark (no membership row, so it
     can never be ranked — asserted). Coverage is reported honestly: a member
     whose series is missing or unusable is counted, split living/delisted.
-    window_end defaults to the last stored vendor bar (the data decides)."""
+    window_end defaults to the last stored vendor bar (the data decides).
+
+    total_return=True applies the documented loader-level TR transform
+    (market_data/total_return.py: dividends reinvested at the ex-date close)
+    to EVERY series after its completeness check — strategy holdings, the
+    monkey null, the equal-weight benchmark and SPY all read this one panel,
+    so the convention is identical on both sides of every comparison by
+    construction. Fails loudly when SPY carries no stored dividends: a TR
+    benchmark without SPY's yield would re-create the original defect."""
     if window_end is None:
         window_end = session.execute(text(
             "SELECT max(bar_date) FROM market.price_bars_daily "
@@ -426,6 +521,8 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
                for sym in sorted(members) if sym not in stored]
     excluded: list[PitExclusion] = []
     series: dict[str, tuple[list[float], list[float], list[date]]] = {}
+    tr_with = tr_without = tr_applied = 0
+    tr_before = tr_after = tr_rolled = tr_spy = 0
     for sym in sorted(stored):
         if stored[sym] != "US":
             excluded.append(PitExclusion(sym, _delisted(sym),
@@ -448,10 +545,37 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
                 sym, _delisted(sym),
                 f"{len(off_cal)} bar(s) on non-session dates (first: {off_cal[0]})"))
             continue
-        series[sym] = ([b.open for b in obars], [b.close for b in obars], ds)
+        o = [b.open for b in obars]
+        c = [b.close for b in obars]
+        if total_return:
+            trs = total_return_series(dates=ds, opens=o, closes=c,
+                                      dividends=load_adjusted_dividends(session, sym))
+            o, c = trs.opens, trs.closes
+            tr_with += 1 if trs.applied else 0
+            tr_without += 0 if trs.applied else 1
+            tr_applied += trs.applied
+            tr_before += trs.dropped_before
+            tr_after += trs.dropped_after
+            tr_rolled += trs.rolled
+            if sym == BENCHMARK:
+                tr_spy = trs.applied
+        series[sym] = (o, c, ds)
     if BENCHMARK not in series:
         raise RuntimeError(f"benchmark {BENCHMARK} failed the completeness "
                            "rules — fix its series before evaluating")
+    tr_cov: TrCoverage | None = None
+    if total_return:
+        if tr_spy == 0:
+            raise RuntimeError(
+                f"benchmark {BENCHMARK} has no stored dividends — run "
+                "`python -m atlas.dcp.market_data.dividends` first; a "
+                "total-return benchmark without SPY's yield re-creates the "
+                "defect this mode exists to fix")
+        tr_cov = TrCoverage(
+            symbols_with_dividends=tr_with, symbols_without_dividends=tr_without,
+            dividends_applied=tr_applied, dropped_before_series=tr_before,
+            dropped_after_series=tr_after, rolled_forward=tr_rolled,
+            spy_dividends=tr_spy)
 
     first = min(ds[0] for _, _, ds in series.values())
     last = max(ds[-1] for _, _, ds in series.values())
@@ -474,7 +598,7 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
         partition=part, window_rows=window_rows,
         included_living=sum(1 for s in in_panel if not members[s].is_delisted),
         included_delisted=sum(1 for s in in_panel if members[s].is_delisted),
-        missing_series=missing, excluded=excluded)
+        missing_series=missing, excluded=excluded, tr=tr_cov)
 
 
 # ---------------------------------------------------------------------------
@@ -495,19 +619,35 @@ class XsmomPitRun:
     trials_before_total: int
     trials_after_total: int
     member_counts: list[tuple[date, int, int]]  # (rebalance, members, eligible)
+    # --- total-return mode additions (defaults keep the price path intact) ---
+    family: str = FAMILY
+    return_convention: str = PRICE_CONVENTION
+    null_results: tuple[PortfolioResult, ...] = ()   # curves for the exhibit
+    wf_spy: PortfolioWalkForwardResult | None = None  # SPY per fold (exhibit)
 
 
 def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
-                  paths: int = 1000, seed: int = 7) -> XsmomPitRun:
-    universe = load_pit_panel(session)
+                  paths: int = 1000, seed: int = 7,
+                  total_return: bool = False,
+                  window_start: date | None = None) -> XsmomPitRun:
+    if window_start is not None and not total_return:
+        raise ValueError("window_start overrides are pre-committed board tests "
+                         "and exist only in total-return mode")
+    if window_start is not None and window_start <= WINDOW_START:
+        raise ValueError(f"window_start {window_start} must be after the "
+                         f"membership-reliability bound {WINDOW_START}")
+    family = tr_family(window_start) if total_return else FAMILY
+    convention = TR_CONVENTION if total_return else PRICE_CONVENTION
+    universe = load_pit_panel(session, total_return=total_return)
     panel = universe.panel
     members = universe.members
-    start_i = bisect_left(panel.dates, WINDOW_START)
+    eval_start = WINDOW_START if window_start is None else window_start
+    start_i = bisect_left(panel.dates, eval_start)
     if start_i >= len(panel.dates):
-        raise RuntimeError(f"panel ends before WINDOW_START {WINDOW_START}")
+        raise RuntimeError(f"panel ends before the evaluation start {eval_start}")
     if start_i < SEASONING:
         raise RuntimeError(
-            f"only {start_i} sessions precede {WINDOW_START} — the first "
+            f"only {start_i} sessions precede {eval_start} — the first "
             f"rebalance needs {SEASONING} sessions of formation history "
             "(backfill from PRICE_START first)")
     start = panel.dates[start_i]
@@ -528,10 +668,12 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
 
     trials_before_total = total_trial_count(session)
     spec: dict[str, object] = {
-        **SPEC, "family": FAMILY,
+        **SPEC, "family": family,
         "universe": f"point-in-time {INDEX_CODE} membership "
                     "(validation.index_membership, fail-closed interval rule)",
+        "return_convention": convention,
         "window_start": str(WINDOW_START),
+        "evaluation_start": str(eval_start),
         "window": f"{panel.dates[0]}..{panel.dates[-1]}", "start": str(start),
         "top_n": f"winner decile: max({TOP_N}, n_eligible // {DECILE})",
         "membership_rows": len(universe.partition.usable)
@@ -549,16 +691,24 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
         "data": "EODHD real",
         "costs_bps_per_side": COSTS.commission_bps + COSTS.slippage_bps}
     trial_id = register_trial(
-        session, family=FAMILY, spec=spec,
+        session, family=family, spec=spec,
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
-    n_trials = trial_count(session, FAMILY)
+    n_trials = trial_count(session, family)
     trials_after_total = total_trial_count(session)
 
-    nulls = pit_null_distribution(panel, members, costs=COSTS, start=start,
-                                  paths=paths, seed=seed)
+    null_results: tuple[PortfolioResult, ...] = ()
+    if total_return:
+        # keep the curves: the endpoint exhibit truncates them exactly
+        null_results = tuple(pit_null_results(panel, members, costs=COSTS,
+                                              start=start, paths=paths,
+                                              seed=seed))
+        nulls = [r.total_return for r in null_results]
+    else:
+        nulls = pit_null_distribution(panel, members, costs=COSTS, start=start,
+                                      paths=paths, seed=seed)
     spy = run_pit_backtest(panel, buy_and_hold_strategy(BENCHMARK), COSTS,
                            start=start).result
     ew = run_pit_backtest(panel, pit_equal_weight(members), COSTS,
@@ -567,12 +717,20 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
                           n_trials=n_trials)
     wf = pit_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
                           embargo=EMBARGO, warmup=start_i, costs=COSTS)
+    wf_spy: PortfolioWalkForwardResult | None = None
+    if total_return:
+        # the memo's per-fold-vs-SPY exhibit: SPY B&H through the IDENTICAL
+        # fold machinery (fresh run per fold, same constants, same engine)
+        wf_spy = pit_walk_forward(panel, buy_and_hold_strategy(BENCHMARK),
+                                  k=K_FOLDS, horizon=HORIZON, embargo=EMBARGO,
+                                  warmup=start_i, costs=COSTS)
 
     audit.append(
         event_type="quant.backtest.completed", entity_type="strategy",
-        entity_id=f"{FAMILY}/portfolio", actor_type="dcp",
+        entity_id=f"{family}/portfolio", actor_type="dcp",
         actor_id="xsmom_pit_run",
         payload={"universe": f"point-in-time {INDEX_CODE}",
+                 "return_convention": convention,
                  "members_in_window": universe.window_members,
                  "members_with_series": len(members),
                  "members_missing_series": len(universe.missing_series),
@@ -596,7 +754,9 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
                        gate=gate, wf=wf, trial_id=trial_id, n_trials=n_trials,
                        trials_before_total=trials_before_total,
                        trials_after_total=trials_after_total,
-                       member_counts=member_counts)
+                       member_counts=member_counts,
+                       family=family, return_convention=convention,
+                       null_results=null_results, wf_spy=wf_spy)
 
 
 # ---------------------------------------------------------------------------
@@ -890,15 +1050,406 @@ def render_pit_report(run: XsmomPitRun, *, paths: int) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Total-return re-score (board memo 2026-07 items 1+2) — endpoint exhibit and
+# combined report. Everything below is ADDITIVE; the price-return path above
+# is byte-for-byte what produced the (now suspended) 2026-07 PASS.
+# ---------------------------------------------------------------------------
+
+PRIOR_REPORT = "docs/reports/xsmom-pit-sp500-2026-07.md"
+
+
+@dataclass(frozen=True)
+class EndpointVerdict:
+    endpoint: date
+    strategy_return: float
+    spy_return: float
+    null_p: float
+    dsr: float
+    beats_spy: bool
+    passed: bool
+
+
+def _return_at(result: PortfolioResult, idx: int) -> float:
+    return result.equity_curve[idx] / result.equity_curve[0] - 1.0
+
+
+def _sharpe_at(result: PortfolioResult, idx: int) -> float:
+    """Annualised Sharpe of the curve truncated at index idx — the engine's
+    own formula (fmean/pstdev, sqrt-252) on the truncated daily returns."""
+    c = result.equity_curve[:idx + 1]
+    rets = [c[j] / c[j - 1] - 1.0 for j in range(1, len(c))]
+    mu = statistics.fmean(rets) if rets else 0.0
+    sd = statistics.pstdev(rets) if len(rets) > 1 else 0.0
+    return (mu / sd) * (252 ** 0.5) if sd > 0 else 0.0
+
+
+def verdict_vs_endpoint(run: XsmomPitRun, *,
+                        months: int = ENDPOINT_MONTHS) -> list[EndpointVerdict]:
+    """The board's endpoint-sensitivity exhibit: the full gate re-judged with
+    the final date rolled back to each of the last `months` month-ends. EXACT,
+    not approximate: a curve truncated at endpoint E is identical to a run
+    ended at E (decisions at t read only data <= t; a trade pending at E
+    executes after the truncation mark), so the stored strategy, SPY and
+    monkey-null curves ARE the truncated runs. Thresholds are the imported
+    P_MAX/DSR_MIN and the same strictly-beats-SPY rule as portfolio_gate;
+    deflated Sharpe uses the truncated observation count at the run's own
+    registered trial count."""
+    if not run.null_results:
+        raise ValueError("verdict_vs_endpoint needs stored null curves — "
+                         "run with total_return=True")
+    dates = run.run.result.dates
+    if run.spy.dates != dates or any(r.dates != dates for r in run.null_results):
+        raise RuntimeError("strategy/SPY/null curves cover different sessions "
+                           "— the shared-window invariant is broken")
+    month_ends = [i for i in range(len(dates) - 1)
+                  if dates[i].month != dates[i + 1].month]
+    endpoints = month_ends[-months:] + [len(dates) - 1]
+    out: list[EndpointVerdict] = []
+    for idx in endpoints:
+        sr = _return_at(run.run.result, idx)
+        spy_r = _return_at(run.spy, idx)
+        p = (sum(1 for nr in run.null_results if _return_at(nr, idx) >= sr)
+             / len(run.null_results))
+        dsr = deflated_sharpe(_sharpe_at(run.run.result, idx), idx, run.n_trials)
+        beats = sr > spy_r
+        out.append(EndpointVerdict(
+            endpoint=dates[idx], strategy_return=sr, spy_return=spy_r,
+            null_p=p, dsr=dsr, beats_spy=beats,
+            passed=beats and p <= P_MAX and dsr >= DSR_MIN))
+    return out
+
+
+def _endpoint_lines(run: XsmomPitRun, label: str) -> list[str]:
+    rows = verdict_vs_endpoint(run)
+    n_pass = sum(1 for r in rows if r.passed)
+    n_beat = sum(1 for r in rows if r.beats_spy)
+    lines = [
+        f"### Exhibit: verdict vs endpoint — {label}",
+        "",
+        f"The identical run re-judged at the final date and each of the prior "
+        f"{ENDPOINT_MONTHS} month-ends (exact truncation of the stored "
+        "strategy/SPY/null curves — see verdict_vs_endpoint). A robust edge "
+        "should not need a particular month to end on.",
+        "",
+        f"**{n_beat}/{len(rows)} endpoints beat SPY TR; {n_pass}/{len(rows)} "
+        "endpoints PASS the full gate.**",
+        "",
+        "| endpoint | strategy TR | SPY TR | margin | null p | DSR | verdict |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| {r.endpoint} | {r.strategy_return:+.2%} | {r.spy_return:+.2%} "
+            f"| {r.strategy_return - r.spy_return:+.2%} | {r.null_p:.3f} "
+            f"| {r.dsr:.3f} | {'PASS' if r.passed else 'FAIL'} |")
+    lines.append("")
+    return lines
+
+
+def _per_year_tr_lines(full: XsmomPitRun, kill: XsmomPitRun) -> list[str]:
+    """Board exhibit: per-calendar-year strategy-vs-SPY TOTAL returns. This is
+    comparison evidence for the endpoint/subperiod question (pre-committed by
+    the memo), not an earnings profile — the bootstrap dispersion block stays
+    behind the house rule."""
+    full_years = {y.year: y for y in calendar_year_returns(full.run.result)}
+    spy_years = {y.year: y for y in calendar_year_returns(full.spy)}
+    kill_years = {y.year: y for y in calendar_year_returns(kill.run.result)}
+    if set(spy_years) != set(full_years):
+        raise RuntimeError("strategy and SPY cover different years — the "
+                           "shared-window invariant is broken")
+    lines = [
+        "### Exhibit: per-calendar-year total returns",
+        "",
+        "Identical engine, panel and costs in every column; the 2016-start "
+        "column is the kill-test run (all-cash until its first rebalance, so "
+        "its 2016 is partial by construction). SPY TR column from the "
+        "full-window benchmark run.",
+        "",
+        "| year | strategy TR (full) | strategy TR (2016 start) | SPY TR | note |",
+        "|---|---|---|---|---|",
+    ]
+    for year in sorted(full_years):
+        k = kill_years.get(year)
+        kill_cell = f"{k.ret:+.2%}" if k is not None else "—"
+        lines.append(
+            f"| {year} | {full_years[year].ret:+.2%} | {kill_cell} "
+            f"| {spy_years[year].ret:+.2%} | {full_years[year].note} |")
+    lines.append("")
+    return lines
+
+
+def _tr_run_lines(run: XsmomPitRun, title: str, extra: list[str]) -> list[str]:
+    """One TR run's result/gate/walk-forward block — verdicts and gate reasons
+    VERBATIM, per-fold SPY column included (the memo's per-fold exhibit)."""
+    g, wf, r = run.gate, run.wf, run.run.result
+    verdict = "PASS" if g.passed else "FAIL"
+    lines = [
+        f"## {title}",
+        "",
+        *extra,
+        f"Evaluation start {run.start}; family `{run.family}`; "
+        f"{r.n_rebalances} rebalances; forced delisting liquidations "
+        f"{len(run.run.forced_liquidations)}; unfilled buys "
+        f"{len(run.run.unfilled_buys)}.",
+        "",
+        f"Return {r.total_return:+.2%}, Sharpe {r.sharpe:.2f}, max drawdown "
+        f"{r.max_drawdown:.2%}, avg turnover {r.avg_turnover:.2%} per "
+        "rebalance (sum |Δw|, both sides)",
+        "",
+        f"### Gate verdict: **{verdict}**",
+        "",
+        f"- verdict: **{verdict}**",
+        f"- strategy TOTAL return: {g.strategy_return:+.2%}",
+        f"- SPY buy-and-hold TOTAL return (BINDING benchmark per ADR-0009): "
+        f"{g.spy_bh_return:+.2%}",
+        f"- margin over SPY TR: {g.strategy_return - g.spy_bh_return:+.2%}",
+        f"- equal-weight all-eligible TR, monthly (informational, NOT "
+        f"binding): {g.ew_return:+.2%}",
+        f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ {P_MAX})",
+        f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
+        f"(must be ≥ {DSR_MIN})",
+        f"- trial registry id: `{run.trial_id}`",
+        "",
+    ]
+    if g.reasons:
+        lines.append("Verbatim gate reasons:")
+        lines += [f"- {reason}" for reason in g.reasons]
+        lines.append("")
+    lines += [
+        f"### Walk-forward: {wf.positive_folds}/{len(wf.fold_results)} folds "
+        "positive — with SPY through the identical fold machinery",
+        "",
+        "| fold | strategy TR | SPY TR (same fold) | strategy − SPY |",
+        "|---|---|---|---|",
+    ]
+    assert run.wf_spy is not None
+    for i, (fr, sp) in enumerate(zip(wf.fold_results, run.wf_spy.fold_results),
+                                 start=1):
+        lines.append(f"| {i} | {fr.total_return:+.2%} | {sp.total_return:+.2%} "
+                     f"| {fr.total_return - sp.total_return:+.2%} |")
+    lines += [
+        "",
+        f"- mean return {wf.mean_return:+.2%}, mean Sharpe {wf.mean_sharpe:.2f}, "
+        f"worst fold {wf.worst_fold_return:+.2%}",
+        "",
+        *_endpoint_lines(run, title),
+    ]
+    return lines
+
+
+def render_tr_report(full: XsmomPitRun, kill: XsmomPitRun, *,
+                     paths: int) -> str:
+    """The board-mandated total-return re-score report: both verdicts
+    VERBATIM, the endpoint-sensitivity and per-year exhibits, the explicit
+    supersession of the prior PASS either way, and NO earnings profile unless
+    the full-window TR run passes (house rule)."""
+    tr = full.universe.tr
+    assert tr is not None
+    panel = full.universe.panel
+    full_verdict = "PASS" if full.gate.passed else "FAIL"
+    kill_verdict = "PASS" if kill.gate.passed else "FAIL"
+    lines = [
+        "# TOTAL-RETURN RE-SCORE — xsmom recipe on the point-in-time S&P 500, "
+        "scored against SPY TOTAL RETURN (2026-07)",
+        "",
+        "> ## WHY THIS TEST EXISTS",
+        "> The board's seven-persona review (docs/reports/board-memo-2026-07.md) "
+        "found that the",
+        f"> prior PASS ({PRIOR_REPORT}) was scored against the WRONG BENCHMARK "
+        "per ADR-0009's",
+        "> own text: the ADR requires beating **SPY total return**, and the "
+        "verdict was scored",
+        "> price-return vs price-return because dividends were not ingested "
+        "anywhere in the",
+        "> system. SPY's ~1.9%/yr yield compounds to roughly the size of the "
+        "entire prior pass",
+        "> margin, and the strategy's low-yield momentum tilt makes the "
+        "correction asymmetric.",
+        "> The prior PASS is SUSPENDED and this report re-scores the identical "
+        "recipe with",
+        "> dividends ingested and everything — strategy holdings, monkey null, "
+        "equal-weight",
+        "> benchmark and SPY — on ONE total-return panel. Verdicts land "
+        "verbatim either way;",
+        "> this is a test of the PASS, not a defence of it.",
+        "",
+        "> ## SUPERSESSION",
+        f"> **The prior PASS ({PRIOR_REPORT}, family `xsmom-pit`) is "
+        "superseded by this",
+        "> report — whatever the verdicts below say.**",
+        "",
+        "## Method",
+        "",
+        "Identical PIT recipe, membership rule, delisting rule, engine, costs, "
+        "eligibility,",
+        "walk-forward constants and gate thresholds as the prior run (all "
+        "imported, nothing",
+        "restated — see that report). TWO pre-committed trials, each "
+        "registered once:",
+        "",
+        f"1. **`{full.family}`** — the identical evaluation window "
+        f"({full.start} → {panel.dates[-1]}), scored TR-vs-TR.",
+        f"2. **`{kill.family}`** — the board's KILL-ONLY subperiod test: "
+        f"identical recipe, evaluation start {kill.start} (memo item 2: the "
+        "2012-2015 window rides a biased membership undercount and 2016-2025 "
+        "price-return LOSES to SPY by 14.3pp). It can only demote — a PASS "
+        "here validates nothing by itself.",
+        "",
+        "TOTAL-RETURN CONVENTION (market_data/total_return.py, stated once, "
+        "applied identically",
+        "to every series in the panel): each cash dividend is reinvested at "
+        "its EX-DATE'S CLOSE",
+        "— opens and closes share one cumulative factor, so intraday moves "
+        "are untouched and the",
+        "overnight ex-date gap (where the price drops by the detached "
+        "dividend) absorbs the",
+        "compensation. Dividends are stored RAW "
+        "(market.corporate_actions, action_type='dividend')",
+        "and split-adjusted on read, exactly as bars are. A dividend whose "
+        "ex-date falls after a",
+        "delisted series' final bar is dropped (the position was already "
+        "liquidated to cash) and",
+        "counted below.",
+        "",
+        f"- Null model: {paths}-path monkey MC on the SAME TR panel, identical "
+        "engine/costs/delisting rule (ADR-0002 #2)",
+        "- Gate thresholds IMPORTED from the committed validation module — "
+        "nothing restated, nothing tuned",
+        "- Deflated Sharpe at each family's true registered trial count "
+        "(ADR-0002 #1)",
+        "- Window grade (ADR-0004): "
+        + "; ".join(
+            f"`{r.family}` {r.start} → {panel.dates[-1]} "
+            + ("(>= 10 years — decision-grade)"
+               if (panel.dates[-1] - r.start).days >= 3650
+               else "(⚠️ SHORT WINDOW — not decision-grade)")
+            for r in (full, kill)),
+        "",
+        "## Dividend coverage (honesty section)",
+        "",
+        f"- Panel symbols with >= 1 dividend applied: "
+        f"{tr.symbols_with_dividends}; with none stored: "
+        f"{tr.symbols_without_dividends} (never-payers are normal; the ingest "
+        "audit event `market.dividends.backfill.completed` separates "
+        "fetched-none from fetch-failed)",
+        f"- Dividends reinvested: {tr.dividends_applied}; dropped before "
+        f"series inception: {tr.dropped_before_series}; dropped after a "
+        f"delisted series' final bar: {tr.dropped_after_series}; rolled "
+        f"forward to the next session: {tr.rolled_forward}",
+        f"- SPY (the binding benchmark) carries {tr.spy_dividends} reinvested "
+        "distributions — asserted non-zero by the loader",
+        "",
+        *_tr_run_lines(
+            full,
+            f"Re-run 1 — `{full.family}`: the identical window, TR-vs-TR",
+            ["The suspended PASS re-scored honestly. Same evaluation window "
+             "as the prior report;",
+             "the ONLY change is the return convention on both sides of "
+             "every comparison.",
+             ""]),
+        *_tr_run_lines(
+            kill,
+            f"Re-run 2 — `{kill.family}`: the board's kill test "
+            f"(start {kill.start})",
+            ["KILL-ONLY (pre-committed): removes the biased early-membership "
+             "window and the",
+             "2012-2015 head start; a FAIL here demotes the strategy "
+             "regardless of Re-run 1.",
+             ""]),
+        *_per_year_tr_lines(full, kill),
+        "## Summary",
+        "",
+        "| trial | window | strategy TR | SPY TR | margin | null p | "
+        "DSR (n) | WF+ | verdict |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for run in (full, kill):
+        g = run.gate
+        lines.append(
+            f"| `{run.family}` | {run.start} → {panel.dates[-1]} "
+            f"| {g.strategy_return:+.2%} | {g.spy_bh_return:+.2%} "
+            f"| {g.strategy_return - g.spy_bh_return:+.2%} "
+            f"| {g.null_p_value:.3f} | {g.dsr:.3f} ({g.n_trials}) "
+            f"| {run.wf.positive_folds}/{len(run.wf.fold_results)} "
+            f"| **{'PASS' if g.passed else 'FAIL'}** |")
+    lines += [
+        "",
+        f"Trial registry: **{full.trials_before_total} trials before this "
+        f"re-score → {kill.trials_after_total} after** (one `{full.family}` "
+        f"trial, one `{kill.family}` trial).",
+        "",
+        "## Annual outcome distribution",
+        "",
+    ]
+    if full.gate.passed:
+        strat_draws = block_bootstrap_annual(daily_returns(full.run.result))
+        spy_draws = block_bootstrap_annual(daily_returns(full.spy))
+        lines += [
+            "> **History is not a forecast.** This is the DISPERSION a "
+            "strategy like this has",
+            "> exhibited — any single future year can land anywhere in (or "
+            "outside) this range;",
+            "> the median is not a promise.",
+            "",
+            f"Block bootstrap of annual TOTAL-return outcomes: daily returns "
+            f"resampled in {BOOT_BLOCK}-session blocks, {BOOT_DRAWS} seeded "
+            f"draws of {BOOT_HORIZON} sessions (seed {BOOT_SEED}); paired "
+            "draws, same method for both columns.",
+            "",
+            "| percentile of simulated annual return | strategy | SPY B&H |",
+            "|---|---|---|",
+            *[f"| {label} | {percentile(strat_draws, q):+.2%} "
+              f"| {percentile(spy_draws, q):+.2%} |" for label, q in _PCTS],
+            "",
+        ]
+    else:
+        lines += [
+            "No distribution is derived for a failed strategy (house rule: "
+            "earnings profiles are derived only for validated strategies — "
+            "profit is a result to be discovered, never an input). The "
+            "per-calendar-year exhibit above is comparison evidence "
+            "pre-committed by the board, not an earnings profile.",
+            "",
+        ]
+    lines += [
+        "## Verdict disposition",
+        "",
+        f"- Re-run 1 (`{full.family}`, identical window, TR-vs-TR): "
+        f"**{full_verdict}**",
+        f"- Re-run 2 (`{kill.family}`, kill-only, start {kill.start}): "
+        f"**{kill_verdict}**",
+        "- The prior PASS is superseded by this report.",
+        "",
+        "## Approval status",
+        "",
+        "**None sought here — by design.** This is a VALIDATION re-score on "
+        "a membership-gated universe built from validation-only instruments; "
+        "it does not itself qualify any strategy for the approval workflow "
+        "(dcp/backtest/approval.py). The gates were not modified; no strategy "
+        "row is touched.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def main() -> None:
     from atlas.core.db import session_scope
 
     p = argparse.ArgumentParser(
         description="Definitive point-in-time S&P 500 xsmom evaluation")
     p.add_argument("--paths", type=int, default=1000)
-    p.add_argument("--report", type=Path,
-                   default=ROOT / "docs" / "reports" / "xsmom-pit-sp500-2026-07.md")
+    p.add_argument("--total-return", dest="total_return", action="store_true",
+                   help="board memo 2026-07 items 1+2: re-score TR-vs-TR "
+                        "(two registered trials — the identical window and "
+                        "the pre-committed 2016 kill test) and write the "
+                        "combined supersession report")
+    p.add_argument("--report", type=Path, default=None,
+                   help="report path (defaults per mode)")
     a = p.parse_args()
+    report_path: Path = a.report or (
+        TR_REPORT if a.total_return else
+        ROOT / "docs" / "reports" / "xsmom-pit-sp500-2026-07.md")
 
     with session_scope() as s:
         # deterministic clock: derived from the data, not the wall
@@ -910,11 +1461,37 @@ def main() -> None:
         clock = FrozenClock(datetime(last_bar.year, last_bar.month, last_bar.day,
                                      22, 0, tzinfo=UTC))
         audit = PostgresAuditLog(s, clock)
-        run = run_xsmom_pit(s, audit, paths=a.paths)
+        if a.total_return:
+            full = run_xsmom_pit(s, audit, paths=a.paths, total_return=True)
+            kill = run_xsmom_pit(s, audit, paths=a.paths, total_return=True,
+                                 window_start=KILL_START)
+        else:
+            run = run_xsmom_pit(s, audit, paths=a.paths)
+
+    if a.total_return:
+        report = render_tr_report(full, kill, paths=a.paths)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(report)
+        for r in (full, kill):
+            g = r.gate
+            print(f"{r.family}/portfolio: gate={'PASS' if g.passed else 'FAIL'} "
+                  f"return={g.strategy_return:+.2%} spy={g.spy_bh_return:+.2%} "
+                  f"margin={g.strategy_return - g.spy_bh_return:+.2%} "
+                  f"p={g.null_p_value:.3f} dsr={g.dsr:.3f} "
+                  f"wf={r.wf.positive_folds}/{len(r.wf.fold_results)} "
+                  f"(reasons: {list(g.reasons) or 'none'})")
+            eps = verdict_vs_endpoint(r)
+            print(f"  endpoints: {sum(1 for e in eps if e.beats_spy)}"
+                  f"/{len(eps)} beat SPY TR, "
+                  f"{sum(1 for e in eps if e.passed)}/{len(eps)} full-gate PASS")
+        print(f"trials: {full.trials_before_total} -> "
+              f"{kill.trials_after_total}")
+        print(f"report written: {report_path}")
+        return
 
     report = render_pit_report(run, paths=a.paths)
-    a.report.parent.mkdir(parents=True, exist_ok=True)
-    a.report.write_text(report)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report)
     g = run.gate
     print(f"{FAMILY}/portfolio: gate={'PASS' if g.passed else 'FAIL'} "
           f"return={g.strategy_return:+.2%} spy={g.spy_bh_return:+.2%} "
@@ -927,7 +1504,7 @@ def main() -> None:
           f"forced liquidations {len(run.run.forced_liquidations)}")
     print(f"trials: {run.trials_before_total} -> {run.trials_after_total} "
           f"({FAMILY} family: {run.n_trials})")
-    print(f"report written: {a.report}")
+    print(f"report written: {report_path}")
 
 
 if __name__ == "__main__":
