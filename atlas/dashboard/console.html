@@ -149,6 +149,9 @@
       <div class="plane-tags"><span class="r">REASONING</span><span class="d">DETERMINISTIC</span></div>
       <div id="brief" style="margin-top:20px"></div>
       <div id="gates-alerts" style="margin-top:14px"></div>
+      <h2>Daily Cycle — Jobs Board</h2>
+      <div class="note">One row per pipeline run (T0 ingest → T8 report). Green = the machine ran itself; red names the step that stopped it.</div>
+      <div class="card" id="jobs-board"><div class="quiet">awaiting data</div></div>
       <h2>Data Freshness</h2>
       <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
       <h2>Quality Gates — Latest Per Market</h2>
@@ -854,12 +857,34 @@ document.getElementById("settle-btn").onclick = async()=>{
   renderTrading(true);
 };
 
+/* ---------- jobs board: pipeline runs ---------- */
+async function renderJobs(){
+  const el = document.getElementById("jobs-board");
+  const r = await get("/v1/system/pipeline-runs?limit=10");
+  if(r.err) return deg(el, r.err);
+  if(!r.data.length) return el.innerHTML =
+    `<div class="quiet">no pipeline runs yet — the first automatic cycle fires at 09:30, or run <span style="font-family:var(--mono)">make daily</span></div>`;
+  el.innerHTML = r.data.map(run=>{
+    const ok = run.status === "completed";
+    const nodes = (run.nodes||[]).map(n=>{
+      const good = n.status === "done";
+      return `<span title="${esc(n.result||"")}" style="font-family:var(--mono);font-size:9.5px;padding:2px 7px;border:1px solid ${good?"var(--line-strong)":"rgba(255,92,92,0.6)"};color:${good?"var(--dim)":"var(--red)"};white-space:nowrap">${esc(n.node.replace(/^t\d+_/,""))}${n.result?` ${esc(String(n.result).slice(0,34))}`:""}</span>`;
+    }).join("");
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)">
+      <span class="dot ${ok?"g":run.status==="failed"?"r":"au"}" style="margin-top:3px"></span>
+      <span style="font-family:var(--mono);font-size:11px;min-width:150px">${esc(run.run_id)}<br>
+        <span style="color:var(--dim);font-size:9.5px">${esc(run.status.toUpperCase())} · ${esc(ts(run.started_at))}</span></span>
+      <span style="display:flex;gap:5px;flex-wrap:wrap">${nodes||`<span class="quiet">no node results</span>`}</span>
+    </div>`;}).join("");
+  good(el);
+}
+
 /* ---------- refresh loop ---------- */
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
-                   renderTrading, renderResearch, renderProgress, renderRuns,
-                   renderQuant, renderRisk, renderMarket];
+                   renderJobs, renderTrading, renderResearch, renderProgress,
+                   renderRuns, renderQuant, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")

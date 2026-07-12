@@ -164,3 +164,28 @@ def test_memo_review_write_path(client):
     assert n == 2
     assert c.post("/v1/research/memos/00000000-0000-0000-0000-000000000000/review",
                   json={"verdict": "agree"}).status_code == 404
+
+
+def test_pipeline_runs_jobs_board(client):
+    c, s = client
+    s.execute(text("DELETE FROM workflow.workflow_node_results WHERE run_id='daily-tapi'"))
+    s.execute(text("DELETE FROM workflow.workflow_runs WHERE run_id='daily-tapi'"))
+    s.execute(text(
+        "INSERT INTO workflow.workflow_runs (run_id, status, started_at, completed_at) "
+        "VALUES ('daily-tapi', 'completed', '2026-07-10T23:30Z', '2026-07-10T23:31Z')"))
+    s.execute(text(
+        "INSERT INTO workflow.workflow_node_results "
+        "(run_id, node_name, status, output_ref, completed_at) VALUES "
+        "('daily-tapi', 't0_ingest', 'done', 'bars=9 failed=False', '2026-07-10T23:30:20Z'), "
+        "('daily-tapi', 't8_report', 'done', 'NAV A$100000', '2026-07-10T23:31:00Z')"))
+    s.commit()
+    try:
+        runs = c.get("/v1/system/pipeline-runs").json()
+        run = next(r for r in runs if r["run_id"] == "daily-tapi")
+        assert run["status"] == "completed"
+        assert [n["node"] for n in run["nodes"]] == ["t0_ingest", "t8_report"]
+        assert run["nodes"][0]["result"] == "bars=9 failed=False"
+    finally:
+        s.execute(text("DELETE FROM workflow.workflow_node_results WHERE run_id='daily-tapi'"))
+        s.execute(text("DELETE FROM workflow.workflow_runs WHERE run_id='daily-tapi'"))
+        s.commit()
