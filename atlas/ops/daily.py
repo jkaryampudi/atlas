@@ -63,7 +63,7 @@ from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
 from atlas.ops.alerts import notify
-from atlas.tools.verify_chain import main as verify_chain_main
+from atlas.tools.verify_chain import run as verify_chain
 
 
 def _reconcile(session: Session, clock: Clock) -> str:
@@ -120,12 +120,13 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         return f"bars={bars} failed={report.failed}"
 
     def t1_verify_chain() -> str:
-        # verify against THIS session's connection (atlas_test in tests, the
-        # live DB in production — verify_chain_main reads the env URL)
-        rc = verify_chain_main()
-        if rc != 0:
-            raise RuntimeError("audit chain verification FAILED — kill condition")
-        return "chain ok"
+        # verify THE database this cycle writes to, through THIS session and
+        # THIS clock — a side connection from the env URL would verify some
+        # other database's chain and call it ours (the exact false-pass CI
+        # caught: locally the env pointed at the dev DB's valid chain).
+        # ChainVerificationError propagates = the run dies = kill condition.
+        n = verify_chain(session, clock)
+        return f"chain ok ({n} events)"
 
     def t2_expire() -> str:
         return f"expired={len(expire_stale(session, clock))}"

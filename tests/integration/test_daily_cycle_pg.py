@@ -106,7 +106,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     assert results["t3_settle"] == "fills=1"
     assert results["t4_stops"] == "stops_fired=1"
     assert results["t6_reconcile"] == "clean"
-    assert results["t1_verify_chain"] == "chain ok"
+    assert results["t1_verify_chain"].startswith("chain ok (")
     assert results["t7_desk"] == "desk off (no model key configured)"
 
     pos = s.execute(text(
