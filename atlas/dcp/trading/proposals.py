@@ -21,8 +21,18 @@ Documented resolutions (Doc ambiguities, resolved conservatively):
   trading.executions, so replays are exact.
 - Breaker level is the LATCHED fold of engine.next_breaker_state over the
   trading.portfolio_snapshots NAV history (Doc 04 §5): DD2/DD3 do not clear
-  on NAV recovery — and since the dual-confirmation human clearing action is
-  not built yet, they stay latched until it ships. Fail-closed by design.
+  on NAV recovery. The ONLY step down is a confirmed risk.breaker_clearances
+  row (the dual-confirmation human action, atlas.dcp.risk.clearance): a
+  clearance confirmed between two NAV points makes the fold evaluate that
+  step with human_cleared=True, which steps the latch down to the COMPUTED
+  target — still DD2 if the drawdown is live at DD2 depth (you clear a
+  latched memory of a drawdown, never a live one). A clearance confirmed
+  after every persisted snapshot applies at the next evaluated point: the
+  live nav_now point in _latched_breaker, or a re-evaluation of the LAST
+  persisted point when the fold runs over history alone (the exit paths and
+  clearance.py never mark the book, so the last persisted drawdown state is
+  the honest evaluation point). With zero clearance rows the fold is
+  behaviorally identical to the pre-clearance latch. Fail-closed by design.
 - Worst-case pro-forma (Doc 04 §3): pending 'pending_submit'/'submitted'
   orders count as holdings at their proposal entry price, and their cost is
   deducted from pro-forma cash.
@@ -286,24 +296,56 @@ def _ledger_cash(session: Session) -> Decimal:
     return cash
 
 
-def _breaker_fold(navs: Sequence[Decimal]) -> BreakerLevel:
+# Timestamp of the live (not yet persisted) NAV point in _latched_breaker:
+# later than any snapshot, so every confirmed clearance sorts before it.
+# clearance.py stamps confirmed_at from the injected clock, never the future.
+_LIVE_POINT = datetime.max.replace(tzinfo=UTC)
+
+
+def _breaker_fold(points: Sequence[tuple[datetime, Decimal]],
+                  clearances: Sequence[datetime] = ()) -> BreakerLevel:
     """Chronological latch fold (Doc 04 §5): DD2/DD3, once entered, survive
     NAV recovery — engine.next_breaker_state only steps them down through the
-    dual-confirmed human action, which does not exist yet, so they hold."""
+    dual-confirmed human action. Each confirmed clearance instant is consumed
+    by the first (as_of, nav) point at or after it: that step evaluates with
+    human_cleared=True and lands on the COMPUTED target for its drawdown
+    (still DD2 if the drawdown is live at DD2 depth). Clearances after every
+    point re-evaluate the LAST point — the latch steps down at the last known
+    drawdown state without waiting for the next snapshot (module docstring).
+    With no clearances this is exactly the original latch fold."""
     level, hwm = BreakerLevel.NONE, Decimal(0)
-    for nav in navs:
+    nav: Decimal | None = None
+    remaining = sorted(clearances)
+    i = 0
+    for as_of, nav in points:
+        cleared = False
+        while i < len(remaining) and remaining[i] <= as_of:
+            cleared, i = True, i + 1
         hwm = max(hwm, nav)
-        level = next_breaker_state(level, drawdown(nav, hwm))
+        level = next_breaker_state(level, drawdown(nav, hwm),
+                                   human_cleared=cleared)
+    if i < len(remaining) and nav is not None:
+        level = next_breaker_state(level, drawdown(nav, hwm), human_cleared=True)
     return level
 
 
-def _snapshot_navs(session: Session) -> list[Decimal]:
-    return [Decimal(r[0]) for r in session.execute(text(
-        "SELECT nav_aud FROM trading.portfolio_snapshots ORDER BY as_of"))]
+def _snapshot_navs(session: Session) -> list[tuple[datetime, Decimal]]:
+    return [(r.as_of, Decimal(r.nav_aud)) for r in session.execute(text(
+        "SELECT as_of, nav_aud FROM trading.portfolio_snapshots ORDER BY as_of"))]
+
+
+def _confirmed_clearances(session: Session) -> list[datetime]:
+    """Confirmed dual-confirmation clearance instants, ascending (Doc 04 §5:
+    resumption from DD2/DD3). Pending requests (confirmed_at NULL) do not
+    move the fold — only confirmation B does."""
+    return [r.confirmed_at for r in session.execute(text(
+        "SELECT confirmed_at FROM risk.breaker_clearances "
+        "WHERE confirmed_at IS NOT NULL ORDER BY confirmed_at"))]
 
 
 def _latched_breaker(session: Session, nav_now: Decimal) -> BreakerLevel:
-    return _breaker_fold([*_snapshot_navs(session), nav_now])
+    return _breaker_fold([*_snapshot_navs(session), (_LIVE_POINT, nav_now)],
+                         _confirmed_clearances(session))
 
 
 def _build_book(session: Session, clock: Clock) -> _Book:
@@ -587,7 +629,7 @@ def _approve_exit(session: Session, clock: Clock, *, row: Any,
         "SELECT id, qty FROM trading.positions "
         "WHERE instrument_id = :iid AND closed_at IS NULL AND qty > 0 FOR UPDATE"),
         {"iid": row.instrument_id}).first()
-    breaker = _breaker_fold(_snapshot_navs(session))
+    breaker = _breaker_fold(_snapshot_navs(session), _confirmed_clearances(session))
     if pos is None:
         exit_ok, exit_detail = False, "position already closed — nothing to exit"
     elif int(pos.qty) != int(row.position_size):
@@ -1109,9 +1151,10 @@ def snapshot(session: Session, clock: Clock) -> SnapshotResult:
     open_risk_pct = (open_risk / snap.nav_aud).quantize(_PCT)
     # Doc 04 §5: breaker state changes are audit events. The new NAV point may
     # move the latched fold — compare before/after and record the transition.
-    navs_before = _snapshot_navs(session)
-    breaker_before = _breaker_fold(navs_before)
-    breaker_after = _breaker_fold([*navs_before, snap.nav_aud])
+    points_before = _snapshot_navs(session)
+    clearances = _confirmed_clearances(session)
+    breaker_before = _breaker_fold(points_before, clearances)
+    breaker_after = _breaker_fold([*points_before, (now, snap.nav_aud)], clearances)
     snapshot_id = session.execute(text(
         "INSERT INTO trading.portfolio_snapshots (as_of, nav_aud, cash_aud, holdings, "
         " exposures, fx_rates, open_risk_pct) "

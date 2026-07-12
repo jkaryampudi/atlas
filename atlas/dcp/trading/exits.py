@@ -105,6 +105,7 @@ from atlas.dcp.trading.proposals import (
     _audit,
     _breaker_fold,
     _CENT,
+    _confirmed_clearances,
     _latest_close,
     _lifecycle_lock,
     _persist_static_check,
@@ -185,7 +186,7 @@ def scan_stop_exits(session: Session, clock: Clock,
     audit = _audit(session, clock)
     # breaker from persisted NAV history only — the stop path never marks the
     # book (module docstring: an unrelated stale close must not block an exit)
-    breaker = _breaker_fold(_snapshot_navs(session))
+    breaker = _breaker_fold(_snapshot_navs(session), _confirmed_clearances(session))
     positions = session.execute(text(
         "SELECT p.id, p.qty, p.current_stop, p.opened_at, i.id AS iid, i.symbol, "
         "       i.market, i.currency "
@@ -322,7 +323,7 @@ def close_position(session: Session, clock: Clock, *, position_id: str,
     qty = int(pos.qty)
     stop = Decimal(pos.current_stop) if pos.current_stop is not None else close
     value_aud = (Decimal(qty) * close * fx).quantize(_CENT)
-    breaker = _breaker_fold(_snapshot_navs(session))
+    breaker = _breaker_fold(_snapshot_navs(session), _confirmed_clearances(session))
 
     # 'risk_review' first: the pending_approval_requires_check constraint
     # (Doc 04 §2.1) forbids awaiting approval before the check row exists.

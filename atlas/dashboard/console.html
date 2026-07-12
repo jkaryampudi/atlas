@@ -532,8 +532,10 @@ async function renderRuns(){
 }
 
 /* ---------- risk ---------- */
+let bcNote = null;   /* last clearance-action outcome, survives the re-render */
 async function renderRisk(){
-  const [ls, br] = await Promise.all([get("/v1/risk/limit-set/current"), get("/v1/risk/breakers")]);
+  const [ls, br, bc] = await Promise.all([get("/v1/risk/limit-set/current"),
+    get("/v1/risk/breakers"), get("/v1/risk/breaker-clearances")]);
   const banner = document.getElementById("limit-banner");
   const reg = document.getElementById("limit-register");
   if(ls.err) deg(reg, ls.err);
@@ -550,12 +552,59 @@ async function renderRisk(){
     good(reg);
   }
   const bel = document.getElementById("breaker-ladder");
+  /* mid-decision guard (same rule as the approval desk): the 30s refresh must
+     never wipe a half-typed clearance reason */
+  const bcInput = bel.querySelector("input.bc-reason");
+  if(bcInput && (bcInput.value || bel.contains(document.activeElement))) return;
   if(br.err) deg(bel, br.err);
   else {
-    bel.innerHTML = `<div class="note">CURRENT LEVEL: <span class="pill g">${esc(br.data.current_level)}</span> — ${esc(br.data.provenance)}</div>
+    const lvl = br.data.current_level;
+    const lvlCls = lvl==="NONE" ? "g" : lvl==="DD1" ? "am" : "r";
+    const latched = lvl==="DD2" || lvl==="DD3";
+    const pending = bc.data ? bc.data.find(x=>x.pending) : null;
+    let controls = "";
+    if(latched){
+      controls = pending
+        ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 0 0">
+            <span class="dot au"></span>
+            <span style="font-family:var(--mono);font-size:10.5px;color:var(--gold)">CLEARANCE PENDING — from ${esc(pending.from_level)} · requested ${esc(ts(pending.requested_at))} by ${esc(pending.requested_by)} · “${esc(pending.reason)}”</span>
+            <button class="bc-confirm" data-cid="${esc(pending.id)}" style="border:1px solid rgba(226,185,91,0.55);background:none;color:var(--gold);font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;padding:6px 14px;cursor:pointer">CONFIRM CLEAR — NOT BEFORE ${esc(ts(pending.confirmable_after))}</button>
+          </div>`
+        : `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 0 0">
+            <input class="bc-reason" placeholder="clearance reason (required, audited)" size="38" style="font-size:11px;padding:5px 9px">
+            <button class="bc-request" style="border:1px solid rgba(255,92,92,0.5);background:none;color:var(--red);font-family:var(--mono);font-size:10.5px;letter-spacing:0.1em;padding:6px 14px;cursor:pointer">REQUEST CLEAR — CONFIRMATION A</button>
+          </div>`;
+      controls += `<div class="note" style="margin:8px 0 0">Resumption from ${esc(lvl)} is the dual-confirmation human action (Doc 04 §5): request, then confirm ≥1h later. Clearing steps down to the COMPUTED level — a drawdown still at DD2 depth stays DD2.</div>`;
+    }
+    bel.innerHTML = `<div class="note">CURRENT LEVEL: <span class="pill ${lvlCls}">${esc(lvl)}</span> — ${esc(br.data.provenance)}</div>
       <table><tr><th>LEVEL</th><th>TRIGGER</th><th>AUTOMATIC ACTION</th></tr>` +
       br.data.ladder.map(l=>`<tr><td>${esc(l.level)}</td><td class="num-neg">${l.trigger_pct}%</td>
-        <td style="white-space:normal">${esc(l.action)}</td></tr>`).join("") + `</table>`;
+        <td style="white-space:normal">${esc(l.action)}</td></tr>`).join("") + `</table>` +
+      controls +
+      (bcNote ? `<div style="font-family:var(--mono);font-size:11px;color:${bcNote.color};padding-top:10px">${esc(bcNote.text)}</div>` : "");
+    const reqBtn = bel.querySelector("button.bc-request");
+    if(reqBtn) reqBtn.onclick = async()=>{
+      const inp = bel.querySelector("input.bc-reason");
+      if(!inp.value.trim()){ inp.style.borderColor = "var(--red)"; inp.focus(); return; }
+      const r = await postFull("/v1/risk/breaker-clearances", {reason: inp.value.trim()});
+      inp.value = "";
+      if(r.err) bcNote = {color:"var(--red)", text:r.err};
+      else if(r.status===200)
+        bcNote = {color:"var(--green)", text:`CLEARANCE ${(r.data.clearance_id||"").slice(0,8)} REQUESTED — confirmation A is on the audit chain; CONFIRM CLEAR unlocks after the 1h gap`};
+      else bcNote = {color:"var(--gold)", text:(r.data && r.data.error && r.data.error.message) || `status ${r.status}`};
+      renderRisk();
+    };
+    const cfmBtn = bel.querySelector("button.bc-confirm");
+    if(cfmBtn) cfmBtn.onclick = async()=>{
+      const r = await postFull(`/v1/risk/breaker-clearances/${cfmBtn.dataset.cid}/confirm`, {});
+      if(r.err) bcNote = {color:"var(--red)", text:r.err};
+      else if(r.status===200)
+        bcNote = {color:"var(--green)", text:`✓ BREAKER CLEARED — latched level is now ${String(r.data.latched_level||"").toUpperCase()}; the change is on the audit chain`};
+      else if(r.data && r.data.error && r.data.error.code==="DUAL_CONFIRM_TOO_SOON")
+        bcNote = {color:"var(--gold)", text:r.data.error.message};  /* verbatim, in gold */
+      else bcNote = {color:"var(--red)", text:(r.data && r.data.error && r.data.error.message) || `status ${r.status}`};
+      renderRisk();
+    };
     good(bel);
   }
 }
