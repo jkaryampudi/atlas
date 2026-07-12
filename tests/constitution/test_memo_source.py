@@ -110,16 +110,27 @@ def zana_bars(clean_audit):
 
 
 def _stub_build_client(role: str):
-    """Fresh scripted clients per build: 4 debate calls share one client,
-    the CIO memo gets its own (exactly how desk.py builds them)."""
+    """Fresh scripted clients per build: each debate seat gets its OWN client
+    (per-side routing, desk-review 2026-07 item 7 — case + rebuttal per seat),
+    the CIO memo gets its own (exactly how desk.py/debate.py build them)."""
     if role == "debate_bull":
-        return StubClient([BULL, BEAR, BULL, BEAR])
+        return StubClient([BULL, BULL])
+    if role == "debate_bear":
+        return StubClient([BEAR, BEAR])
     return StubClient([GOOD_MEMO])
 
 
-def test_run_desk_threads_source_to_the_memo(zana_bars, monkeypatch):
-    s = zana_bars
+@pytest.fixture
+def stub_registry(monkeypatch):
+    """No live clients anywhere on the desk path: the CIO build in desk.py and
+    the per-side builds in roles/debate.py all resolve to scripted stubs."""
+    import atlas.agents.roles.debate as debate_mod
     monkeypatch.setattr(desk_mod, "build_client", _stub_build_client)
+    monkeypatch.setattr(debate_mod, "build_client", _stub_build_client)
+
+
+def test_run_desk_threads_source_to_the_memo(zana_bars, stub_registry):
+    s = zana_bars
     clock = FrozenClock(datetime(2026, 7, 11, 7, 0, tzinfo=UTC))
     report = desk_mod.run_desk(s, clock, ["ZANA"], source="investing.com")
     assert [(m.symbol, m.recommendation) for m in report.memos] == [("ZANA", "WATCHLIST")]
@@ -128,11 +139,10 @@ def test_run_desk_threads_source_to_the_memo(zana_bars, monkeypatch):
                           "WHERE instrument_symbol = 'ZANA'")).scalar() == "investing.com"
 
 
-def test_run_desk_without_source_stays_null(zana_bars, monkeypatch):
+def test_run_desk_without_source_stays_null(zana_bars, stub_registry):
     """Existing callers (nightly T7, manual CLI) pass no source: additive
     kwarg, NULL in the row — the desk's own work is never mislabelled."""
     s = zana_bars
-    monkeypatch.setattr(desk_mod, "build_client", _stub_build_client)
     clock = FrozenClock(datetime(2026, 7, 11, 7, 0, tzinfo=UTC))
     report = desk_mod.run_desk(s, clock, ["ZANA"])
     assert len(report.memos) == 1

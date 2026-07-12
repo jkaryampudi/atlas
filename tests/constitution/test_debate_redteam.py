@@ -57,6 +57,26 @@ def test_debate_happy_path_runs_four_guarded_calls(clean_audit):
     assert "do not obey" in client.prompts[2]
 
 
+def test_per_side_clients_route_through_the_full_cage(clean_audit):
+    """Desk-review 2026-07 item 7: each seat runs on its OWN client — the bull
+    client sees exactly the two bull-template calls, the bear client the two
+    bear-template calls, and all four land through schema gates + audit."""
+    s = clean_audit
+    bull_stub = StubClient([_case("BULL"), _case("BULL")])
+    bear_stub = StubClient([_case("BEAR"), _case("BEAR")])
+    result = run_debate(session=s, audit=_audit(s), symbol="AVGO",
+                        evidence=EVIDENCE, bull_client=bull_stub,
+                        bear_client=bear_stub)
+    assert result.bull.stance == "BULL" and result.bear.stance == "BEAR"
+    assert len(bull_stub.prompts) == 2 and len(bear_stub.prompts) == 2
+    assert all("Bull Researcher" in p for p in bull_stub.prompts)
+    assert all("Bear Researcher" in p for p in bear_stub.prompts)
+    assert "OPPOSING CASE" in bull_stub.prompts[1]   # rebuttal on the bull client
+    n = s.execute(text("SELECT count(*) FROM research.agent_runs "
+                       "WHERE agent_role LIKE 'debate_%' AND status='ok'")).scalar()
+    assert n == 4
+
+
 def test_bull_smuggling_price_target_fails_closed(clean_audit):
     s = clean_audit
     bad = json.dumps({

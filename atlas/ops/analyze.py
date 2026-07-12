@@ -43,6 +43,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.agents.desk import DeskReport, run_desk
+from atlas.agents.runtime.runner import budget_surface
 from atlas.core.clock import SystemClock
 from atlas.core.config import get_settings
 from atlas.core.db import session_scope
@@ -188,7 +189,13 @@ def _run_analysis(symbol: str, source: str | None) -> None:
                           f"instrument; {prep}) — desk debating")
     with session_scope() as s:
         try:
-            report = run_desk(s, SystemClock(), [symbol], source=source)
+            # Per-surface budget sub-cap (desk-review 2026-07 item 6): every
+            # run in this analysis counts against ATLAS_BUDGET_ANALYZE (default
+            # $3.00) inside the global $10 breaker, so an analyze spree can
+            # never starve the nightly desk — precedence and watermark
+            # semantics documented in atlas/agents/runtime/runner.py.
+            with budget_surface("analyze"):
+                report = run_desk(s, SystemClock(), [symbol], source=source)
         except Exception:
             # failed runs' cost + audit trail must persist — the budget
             # breaker counts them (live_run.py precedent); a rollback here

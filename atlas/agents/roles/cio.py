@@ -65,4 +65,19 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
             "VALUES (:m, :o, :ref, :body)"),
             [{"m": memo_id, "o": i, "ref": ref, "body": body}
              for i, (ref, body) in enumerate(evidence)])
+    # Debate provenance (migration 0019, desk-review item 7): the four
+    # validated DebateCases persisted VERBATIM (model_dump JSON) with the memo
+    # they informed — same transaction, same pattern, same rationale as
+    # memo_evidence above: summary_context() is lossy and the cases are
+    # unreconstructible later. A cage-failed run never reaches this line, so
+    # no memo means no debate rows.
+    if debate is not None:
+        session.execute(text(
+            "INSERT INTO research.memo_debate (memo_id, role, payload) "
+            "VALUES (:m, :role, CAST(:p AS jsonb))"),
+            [{"m": memo_id, "role": role, "p": json.dumps(case.model_dump())}
+             for role, case in (("bull", debate.bull),
+                                ("bear", debate.bear),
+                                ("bull_rebuttal", debate.bull_rebuttal),
+                                ("bear_rebuttal", debate.bear_rebuttal))])
     return memo

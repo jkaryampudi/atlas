@@ -249,6 +249,27 @@ def test_known_fresh_symbol_makes_no_vendor_calls(app_db, cleanup_symbols,
     assert adapter.calls == []             # zero vendor calls: everything was fresh
 
 
+def test_analysis_binds_the_analyze_budget_surface(app_db, cleanup_symbols,
+                                                   monkeypatch):
+    """Desk-review 2026-07 item 6: every ANALYZE run enters the runner under
+    the 'analyze' budget sub-cap (ATLAS_BUDGET_ANALYZE), so a spree of console
+    analyses can never starve the nightly desk inside the shared breaker."""
+    cleanup_symbols.append("ZQSF")
+    captured: dict[str, object] = {}
+
+    def fake_desk(session, clock, symbols, source=None):
+        from atlas.agents.runtime.runner import current_budget_surface
+        captured["surface"] = current_budget_surface()
+        return DeskReport(skipped=((symbols[0], "not enough real bars"),))
+
+    monkeypatch.setattr(analyze, "_build_adapter", lambda sym, exch: StubAdapter())
+    monkeypatch.setattr(analyze, "run_desk", fake_desk)
+    assert analyze.start_analysis("ZQSF", None) is True
+    _wait_finished()
+    assert analyze.analysis_status()["phase"] == "done"
+    assert captured["surface"] == "analyze"
+
+
 def test_status_snapshot_never_leaks_the_live_dict():
     """Same discipline as scheduler.status(): mutating the snapshot must not
     reach the live status (no DB needed)."""

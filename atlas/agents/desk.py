@@ -9,17 +9,24 @@ the memo->proposal bridge is deliberately absent until the deterministic
 stop-derivation policy is decided (CLAUDE.md invariant 2: agent numbers never
 reach execution).
 
-Fail-soft means HONEST: a symbol whose run the cage kills (grounding
-violation, schema failure, budget breaker) is recorded as a cage hold in the
-report — a held cage is the system working, never an exception that stops the
-other symbols or the pipeline. Failed runs' cost still persists (the runner
-commits agent_runs rows); the breaker counts them.
+Fail-soft means HONEST, and outcomes are typed (desk-review 2026-07 item 6):
+- CAGE HOLD — schema/grounding kill or the budget breaker: the system working,
+  recorded per symbol, never an exception that stops the other symbols.
+  Failed runs' cost still persists (the runner commits agent_runs rows); the
+  breaker counts them. A tripped breaker additionally HALTS the remaining
+  shortlist (each further attempt would still hit the vendor before the check
+  — real spend a tripped breaker forbids) and records those symbols as
+  not-attempted holds.
+- TRANSIENT SKIP — HTTP 429/5xx/timeout that survived the runner's bounded
+  backoff: vendor plumbing, not a verdict on the symbol; recorded in
+  `skipped` with a 'transient:' reason and the shortlist continues.
 
 Usage (manual): python -m atlas.agents.desk --symbols SPY,AVGO
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -28,13 +35,30 @@ from sqlalchemy.orm import Session
 from atlas.agents.live_run import build_evidence
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import run_debate
+from atlas.agents.runtime.budget import BudgetExhausted
 from atlas.agents.runtime.registry import build_client
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import (
+    PROMPTS,
+    AgentRunFailed,
+    TransientLlmFailure,
+    budget_surface,
+    current_budget_surface,
+)
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
 
-QUESTION = ("Given the quant gate verdict and current trend evidence, "
-            "what should the committee do with this name?")
+# The Principal's standing question lives in the prompt store (desk-review
+# 2026-07 item 10): prompts are code (CLAUDE.md invariant 5), so changing the
+# question is a reviewed diff and tests/unit/test_desk_question.py golden-pins
+# the file hash. live_run.py's copy of this string should converge on the same
+# template file.
+QUESTION_TEMPLATE_REL_PATH = "question/default.md"
+
+
+def load_question() -> tuple[str, str]:
+    """(question_text, sha256-of-file) from the hashed prompt-template store."""
+    raw = (PROMPTS / QUESTION_TEMPLATE_REL_PATH).read_text()
+    return raw.strip(), hashlib.sha256(raw.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -48,7 +72,8 @@ class DeskMemo:
 class DeskReport:
     memos: tuple[DeskMemo, ...] = ()
     cage_holds: tuple[tuple[str, str], ...] = ()   # (symbol, reason)
-    skipped: tuple[tuple[str, str], ...] = ()      # (symbol, why) — e.g. thin history
+    skipped: tuple[tuple[str, str], ...] = ()      # (symbol, why) — thin history,
+    #                                                or 'transient: ...' LLM-transport skips
     cost_usd_today: float = 0.0
 
     def summary(self) -> str:
@@ -74,30 +99,47 @@ def run_desk(session: Session, clock: Clock, symbols: list[str],
     `source` is the optional external-origin tag for on-demand analyses
     (ANALYZE-ANY-TICKER; e.g. 'investing.com'), threaded verbatim to
     committee_memo where it is persisted with the memo row — it never enters
-    any prompt (see cio.py). None = the desk's own work (nightly cycle)."""
+    any prompt (see cio.py). None = the desk's own work (nightly cycle).
+
+    Budget surface: unless a caller already bound one (analyze.py binds
+    'analyze'), every run here counts against the NIGHTLY sub-cap
+    (ATLAS_BUDGET_NIGHTLY) inside the global breaker — see runner.py for the
+    watermark semantics and precedence (global always wins)."""
     audit = PostgresAuditLog(session, clock)
+    question, _ = load_question()
     memos: list[DeskMemo] = []
     holds: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
-    for symbol in symbols:
-        try:
-            evidence = build_evidence(session, symbol)
-        except LookupError as e:
-            skipped.append((symbol, str(e)))
-            continue
-        try:
-            debate = run_debate(session=session, audit=audit,
-                                client=build_client("debate_bull"),
-                                symbol=symbol, evidence=evidence)
-            memo = committee_memo(session=session, audit=audit,
-                                  client=build_client("cio"), symbol=symbol,
-                                  question=QUESTION, evidence=evidence,
-                                  debate=debate, source=source)
-            memos.append(DeskMemo(symbol=symbol,
-                                  recommendation=memo.recommendation,
-                                  conviction=memo.conviction))
-        except AgentRunFailed as e:
-            holds.append((symbol, str(e)[:200]))   # cage held — honest outcome
+    with budget_surface(current_budget_surface() or "nightly"):
+        for i, symbol in enumerate(symbols):
+            try:
+                evidence = build_evidence(session, symbol)
+            except LookupError as e:
+                skipped.append((symbol, str(e)))
+                continue
+            try:
+                debate = run_debate(session=session, audit=audit,
+                                    symbol=symbol, evidence=evidence)
+                memo = committee_memo(session=session, audit=audit,
+                                      client=build_client("cio"), symbol=symbol,
+                                      question=question, evidence=evidence,
+                                      debate=debate, source=source)
+                memos.append(DeskMemo(symbol=symbol,
+                                      recommendation=memo.recommendation,
+                                      conviction=memo.conviction))
+            except AgentRunFailed as e:
+                holds.append((symbol, str(e)[:200]))   # cage held — honest outcome
+            except TransientLlmFailure as e:
+                # vendor plumbing, not a verdict: this symbol only; continue
+                skipped.append((symbol, f"transient: {str(e)[:180]}"))
+            except BudgetExhausted as e:
+                # the breaker (global or surface sub-cap) is terminal for this
+                # desk run: hold the symbol, halt the shortlist — attempting
+                # the rest would still spend at the vendor before the check
+                holds.append((symbol, f"budget: {str(e)[:180]}"))
+                holds.extend((s, "budget exhausted — not attempted")
+                             for s in symbols[i + 1:])
+                break
     cost = session.execute(text(
         "SELECT COALESCE(SUM(cost_usd),0) FROM research.agent_runs "
         "WHERE created_at::date = :d"), {"d": clock.now().date()}).scalar()
