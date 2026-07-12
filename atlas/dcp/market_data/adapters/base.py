@@ -6,13 +6,23 @@ from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
-from atlas.dcp.market_data.models import Bar, Dividend, Split
+from atlas.dcp.market_data.models import Bar, Dividend, EarningsEvent, Split
 
 
 class MarketDataAdapter(Protocol):
     def fetch_bars(self, symbol: str, start: date, end: date) -> list[Bar]: ...
     def fetch_splits(self, symbol: str, start: date, end: date) -> list[Split]: ...
     def fetch_dividends(self, symbol: str, start: date, end: date) -> list[Dividend]: ...
+
+    def fetch_earnings_calendar(self, symbol: str, start: date,
+                                end: date) -> list[EarningsEvent]:
+        """Earnings report dates (announcement days) inside [start, end].
+        Empty list = the vendor reports nothing in the window (a valid answer
+        — most instruments have no print in any 30-day span; ETFs never do).
+        Timing flags outside the closed vocabulary (models.EARNINGS_WHEN_TIMES)
+        are normalized to None here, at the boundary — vendor free text never
+        crosses into storage."""
+        ...
     def fetch_fx(self, base: str, quote: str, on: date) -> Decimal | None: ...
     def fetch_fx_series(self, base: str, quote: str, start: date,
                         end: date) -> dict[date, Decimal]: ...

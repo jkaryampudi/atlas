@@ -35,6 +35,12 @@ stored payload is never updated. A per-instrument vendor failure is recorded
 in report.failures and the run continues (fail-soft, like bars). NOTE: the
 payload contains vendor free-text — a prompt-injection surface; only the
 whitelist extractor in fundamentals.py may turn it into agent evidence.
+
+Earnings-calendar refresh (after fundamentals): the same shape — every ACTIVE
+instrument whose stored calendar is stale (> earnings.STALE_DAYS) or absent
+gets one window refresh, fail-soft per instrument, counts in the report and
+the audit payload. Mechanics (window, supersede-on-refresh, closed-vocabulary
+timing flag) live in market_data/earnings.py.
 """
 from __future__ import annotations
 
@@ -55,6 +61,7 @@ from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import (is_trading_day, last_completed_session,
                                               local_date, previous_trading_day,
                                               trading_days_between)
+from atlas.dcp.market_data.earnings import EarningsDaily, refresh_earnings
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
 from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_split,
                                           upsert_bar, write_gate)
@@ -102,6 +109,7 @@ class DailyIngestReport:
     markets: dict[str, MarketDaily]
     fx: dict[str, FxPairDaily]
     fundamentals: FundamentalsDaily
+    earnings: EarningsDaily
     failures: tuple[str, ...]  # vendor failures + required FX pairs with no history
 
     @property
@@ -342,9 +350,10 @@ def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter,
     results = {m: _ingest_market(session, adapter, m, now, failures) for m in markets}
     fx = _ingest_fx(session, adapter, now, failures)
     fundamentals = _refresh_fundamentals(session, adapter, now, failures)
+    earnings = refresh_earnings(session, adapter, now, failures)
 
     report = DailyIngestReport(markets=results, fx=fx, fundamentals=fundamentals,
-                               failures=tuple(failures))
+                               earnings=earnings, failures=tuple(failures))
     PostgresAuditLog(session, clock).append(
         event_type="market.daily_ingest.completed", entity_type="market",
         entity_id=",".join(markets), actor_type="scheduler", actor_id="daily_ingest",
@@ -361,7 +370,10 @@ def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter,
                         for pair, f in fx.items()},
                  "fundamentals": {"fetched": list(fundamentals.fetched),
                                   "fresh": list(fundamentals.fresh),
-                                  "failed": list(fundamentals.failed)}})
+                                  "failed": list(fundamentals.failed)},
+                 "earnings": {"fetched": list(earnings.fetched),
+                              "fresh": list(earnings.fresh),
+                              "failed": list(earnings.failed)}})
     return report
 
 
@@ -399,6 +411,10 @@ def main() -> None:
     print(f"fundamentals: {len(fnd.fetched)} fetched, {len(fnd.fresh)} fresh, "
           f"{len(fnd.failed)} failed"
           + (f" ({list(fnd.failed)})" if fnd.failed else ""))
+    earn = report.earnings
+    print(f"earnings: {len(earn.fetched)} fetched, {len(earn.fresh)} fresh, "
+          f"{len(earn.failed)} failed"
+          + (f" ({list(earn.failed)})" if earn.failed else ""))
     for msg in report.failures:
         print(f"FAILURE: {msg}")
     print("daily ingest via " + type(adapter).__name__ + ": "

@@ -20,10 +20,17 @@ ROOT = Path(__file__).parents[1]
 ADMIN_URL = os.environ.get(
     "ATLAS_DATABASE_URL",
     "postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas")
-TEST_DB_NAME = "atlas_test"
 URL = os.environ.get(
     "ATLAS_TEST_DATABASE_URL",
-    ADMIN_URL.rsplit("/", 1)[0] + f"/{TEST_DB_NAME}")
+    ADMIN_URL.rsplit("/", 1)[0] + "/atlas_test")
+# The guarded name derives from the URL so concurrent workstreams can run
+# against isolated databases (ATLAS_TEST_DATABASE_URL=.../atlas_test_<name>),
+# but destructive fixtures stay structurally unable to touch the dev DB: any
+# name that does not begin with "atlas_test" is refused outright.
+TEST_DB_NAME = URL.rsplit("/", 1)[-1]
+if not TEST_DB_NAME.startswith("atlas_test"):
+    raise RuntimeError(f"ATLAS_TEST_DATABASE_URL points at {TEST_DB_NAME!r} — "
+                       "test databases must be named atlas_test*")
 
 _prepared = False
 

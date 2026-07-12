@@ -13,7 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from atlas.dcp.market_data.models import Bar, Dividend, Split
+from atlas.dcp.market_data.models import (EARNINGS_WHEN_TIMES, Bar, Dividend,
+                                           EarningsEvent, Split)
 
 BASE = "https://eodhd.com/api"
 
@@ -138,6 +139,39 @@ class EodhdAdapter:
                                 amount=Decimal(str(raw)),
                                 currency=str(cur) if cur else None))
         return sorted(out, key=lambda d: d.ex_date)
+
+    def fetch_earnings_calendar(self, symbol: str, start: date,
+                                end: date) -> list[EarningsEvent]:
+        """GET /api/calendar/earnings?symbols={code}&from=&to=: unlike /eod
+        this endpoint wraps its rows in an object — the list lives under the
+        "earnings" key (response shape probed live 2026-07-13; each row:
+        code, report_date, date [fiscal period end], before_after_market,
+        currency, actual, estimate, difference, percent). Only `report_date`
+        and the closed-vocabulary `before_after_market` flag are read; a row
+        whose report_date does not parse as an ISO date is vendor noise and
+        is dropped. A flag outside EARNINGS_WHEN_TIMES becomes None — never
+        stored, never rendered."""
+        r = self._client.get(f"{BASE}/calendar/earnings",
+                             params={"api_token": self._key, "fmt": "json",
+                                     "symbols": self._sym(symbol),
+                                     "from": start.isoformat(),
+                                     "to": end.isoformat()})
+        r.raise_for_status()
+        data = r.json()
+        rows = data.get("earnings") if isinstance(data, dict) else None
+        out: list[EarningsEvent] = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                day = date.fromisoformat(str(row.get("report_date")))
+            except ValueError:
+                continue
+            flag = row.get("before_after_market")
+            out.append(EarningsEvent(
+                symbol=symbol, report_date=day,
+                when_time=flag if flag in EARNINGS_WHEN_TIMES else None))
+        return sorted(out, key=lambda e: e.report_date)
 
     def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
         """GET /api/fundamentals/{code}: the raw vendor document (General /

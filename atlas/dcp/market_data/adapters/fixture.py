@@ -7,7 +7,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from atlas.dcp.market_data.models import Bar, Dividend, Split
+from atlas.dcp.market_data.models import (EARNINGS_WHEN_TIMES, Bar, Dividend,
+                                           EarningsEvent, Split)
 
 
 class FixtureAdapter:
@@ -59,6 +60,28 @@ class FixtureAdapter:
                                             amount=Decimal(row["amount"]),
                                             currency=row.get("currency") or None))
         return sorted(out, key=lambda dv: dv.ex_date)
+
+    def fetch_earnings_calendar(self, symbol: str, start: date,
+                                end: date) -> list[EarningsEvent]:
+        """earnings.csv (symbol,report_date[,when_time]) — report dates by
+        announcement day, the same contract as the vendor adapter. A missing
+        file means no calendar fixture: empty list, like splits.csv. Flags
+        outside the closed vocabulary normalize to None at this boundary."""
+        path = self._root / "earnings.csv"
+        if not path.exists():
+            return []
+        out: list[EarningsEvent] = []
+        with path.open() as f:
+            for row in csv.DictReader(f):
+                if row["symbol"] != symbol:
+                    continue
+                d = date.fromisoformat(row["report_date"])
+                if start <= d <= end:
+                    flag = row.get("when_time") or None
+                    out.append(EarningsEvent(
+                        symbol=symbol, report_date=d,
+                        when_time=flag if flag in EARNINGS_WHEN_TIMES else None))
+        return sorted(out, key=lambda e: e.report_date)
 
     def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
         """fundamentals/{symbol}.json, whole. LookupError when absent — same

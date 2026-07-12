@@ -12,6 +12,7 @@ Usage: ATLAS_MODEL_DEFAULT=claude-opus-4-8 python -m atlas.agents.live_run --sym
 from __future__ import annotations
 
 import argparse
+import hashlib
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import run_debate
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import PROMPTS, AgentRunFailed
 from atlas.agents.runtime.registry import build_client, resolve_model
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
@@ -27,8 +28,34 @@ from atlas.core.db import session_scope
 from atlas.dcp.backtest.quant_evidence import build_quant_evidence
 from atlas.dcp.indicators.core import rolling_return, sma
 from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.desk_context import (extract_regime_evidence,
+                                                extract_scanner_context)
+from atlas.dcp.market_data.earnings import extract_earnings_evidence
 from atlas.dcp.market_data.fundamentals import extract_fundamentals_evidence
 from atlas.dcp.market_data.models import Bar, Split
+
+QUESTION_TEMPLATE_REL_PATH = "question/default.md"
+
+
+def load_default_question() -> tuple[str, str]:
+    """(question_text, sha256-of-template-file) — desk-review 2026-07 item 10.
+
+    The default Principal's question used to hide in an argparse default;
+    prompts are code (CLAUDE.md invariant 5), and the question shapes every
+    committee memo, so it lives in atlas/agents/prompts/question/ under the
+    same review-and-hash discipline as every other template. The role
+    templates' recorded prompt_template_hash covers constitution + role
+    template only (the question rides in the memo context), so this file
+    hash is printed with the run to pin the exact question text used.
+
+    OPERATOR NOTE (duplication, deliberate): atlas/agents/desk.py loads the
+    SAME template file with an identical 3-line loader (same raw-bytes hash
+    convention). The loader cannot be shared from here without a circular
+    import (desk.py imports build_evidence from this module); hoisting one
+    shared loader into runtime/runner.py is a clean follow-up once both
+    workstreams land. A unit test pins the two loaders equal meanwhile."""
+    raw = (PROMPTS / QUESTION_TEMPLATE_REL_PATH).read_text()
+    return raw.strip(), hashlib.sha256(raw.encode()).hexdigest()
 
 
 def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
@@ -85,23 +112,40 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
         build_quant_evidence(s, symbol),
     ]
 
-    # Fundamentals: DCP-side whitelist extraction (numeric + closed-vocabulary
-    # facts only — vendor free text is a prompt-injection surface and never
-    # enters evidence). None = no snapshot as of the bar date; the desk keeps
-    # the evidence set above rather than fabricating a line.
-    fundamentals = extract_fundamentals_evidence(s, symbol, on=rows[-1].bar_date)
-    if fundamentals is not None:
-        evidence.append(fundamentals)
+    # Blocks 4-7 share one contract: DCP-side extraction of numeric /
+    # closed-vocabulary / ISO-date facts only (vendor free text is a
+    # prompt-injection surface and never enters evidence), and None = no
+    # record — the desk keeps the evidence set above rather than fabricating
+    # a line. `on` is the symbol's last bar date, so every block is honest to
+    # the same evidence date.
+    on = rows[-1].bar_date
+    # 4. fundamentals: whitelisted numeric facts from the latest snapshot
+    # 5. earnings calendar (desk-review item 9): next/last report as ISO
+    #    dates + session counts — ~1 in 3 memos straddles a print
+    # 6. market regime (item 10a): SPY label from the deterministic P3
+    #    classifier, closed vocabulary, never a warmup artifact
+    # 7. scanner context (item 10b): WHY the scanner routed this name —
+    #    score components from the scanner.completed audit payload, labelled
+    #    attention-not-prediction; None on analyze-box runs and stale scans
+    for block in (extract_fundamentals_evidence(s, symbol, on=on),
+                  extract_earnings_evidence(s, symbol, on=on),
+                  extract_regime_evidence(s, on=on),
+                  extract_scanner_context(s, symbol, on=on)):
+        if block is not None:
+            evidence.append(block)
     return evidence
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Live committee run (Phase 2 evals)")
     p.add_argument("--symbol", default="AVGO")
-    p.add_argument("--question",
-                   default="Given the quant gate verdict and current trend evidence, "
-                           "what should the committee do with this name?")
+    p.add_argument("--question", default=None,
+                   help="override the Principal's standing question (default: the "
+                        "hashed template atlas/agents/prompts/question/default.md)")
     a = p.parse_args()
+    if a.question is None:
+        a.question, q_hash = load_default_question()
+        print(f"question template {QUESTION_TEMPLATE_REL_PATH} sha256 {q_hash[:12]}")
 
     print(f"models: debate={resolve_model('debate_bull')} cio={resolve_model('cio')}")
     with session_scope() as s:
