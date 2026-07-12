@@ -38,14 +38,25 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
                       "debate_present": debate is not None},
         evidence_bodies=dict(evidence),  # grounding: numbers must exist in cited refs
         max_tokens=2500)  # memo + debate summary need headroom; 1200 truncated live
-    session.execute(text(
+    memo_id = session.execute(text(
         "INSERT INTO research.memos (agent_run_id, memo_type, instrument_symbol, "
         " recommendation, conviction, thesis, kill_criteria, evidence_refs, dissent, "
         " debate_summary) "
         "VALUES (:rid, 'committee', :sym, :rec, :conv, :th, CAST(:kc AS jsonb), "
-        "        CAST(:er AS jsonb), :d, :ds)"),
+        "        CAST(:er AS jsonb), :d, :ds) RETURNING id"),
         {"rid": run_id, "sym": symbol, "rec": memo.recommendation,
          "conv": memo.conviction, "th": memo.thesis,
          "kc": json.dumps(memo.kill_criteria), "er": json.dumps(memo.evidence_refs),
-         "d": memo.dissent, "ds": memo.debate_summary})
+         "d": memo.dissent, "ds": memo.debate_summary}).scalar_one()
+    # Provenance (migration 0013): the EXACT evidence text this memo was argued
+    # from, verbatim and in order — build_evidence reads live DCP tables, so the
+    # bodies are unreconstructible later. Persisted here because this is the one
+    # place the memo id exists; part of the same memo-landing transaction that
+    # agent.run.completed already evidences on the audit chain.
+    if evidence:
+        session.execute(text(
+            "INSERT INTO research.memo_evidence (memo_id, ordinal, ref, body) "
+            "VALUES (:m, :o, :ref, :body)"),
+            [{"m": memo_id, "o": i, "ref": ref, "body": body}
+             for i, (ref, body) in enumerate(evidence)])
     return memo

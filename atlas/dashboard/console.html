@@ -92,6 +92,23 @@
   .chip{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line-strong);padding:2px 8px}
   .memo-foot{padding:10px 20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--faint);display:flex;gap:18px}
 
+  /* ---------- decision flow: one memo's journey, staged top to bottom ---------- */
+  @keyframes dfIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes dfFlow{0%{background-position:0 0}100%{background-position:0 24px}}
+  .df-box{display:none;border-top:1px solid var(--line);padding:16px 20px;background:rgba(90,167,255,0.02)}
+  .df-stage{border:1px solid var(--line);background:#0a0f1c;padding:12px 16px;opacity:0;transform:translateY(8px);animation:dfIn 0.35s ease forwards}
+  .df-stage.dim{border-style:dashed}
+  .df-stage.dim .df-stage-label{color:var(--faint)}
+  .df-stage-label{font-family:var(--mono);font-size:9.5px;letter-spacing:0.2em;color:rgba(140,185,255,0.72);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+  .df-stage-label .df-note{color:var(--faint);letter-spacing:0.04em}
+  .df-content{margin-top:9px}
+  .df-line{width:2px;height:18px;margin-left:24px;opacity:0;background:repeating-linear-gradient(180deg,var(--blue) 0 6px,transparent 6px 12px);background-size:2px 24px;animation:dfIn 0.35s ease forwards,dfFlow 0.9s linear infinite}
+  .df-line.dim{background:var(--line);animation:dfIn 0.35s ease forwards}
+  .df-ev{border:1px solid var(--line);border-left:2px solid var(--blue);padding:9px 12px;margin:6px 0;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7;word-break:break-word}
+  /* mid-decision guard: a refresh re-expand must not replay the entrance */
+  .df-box.noanim .df-stage,.df-box.noanim .df-line{animation:none;opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.df-stage,.df-line{animation:none;opacity:1;transform:none}}
+
   input,select{background:#0a0f1c;border:1px solid var(--line-strong);color:var(--txt);font-family:var(--mono);font-size:12px;padding:8px 12px;outline:none}
   input:focus,select:focus{border-color:var(--blue)}
 
@@ -516,7 +533,9 @@ async function renderResearch(){
              <button class="rv" data-id="${esc(x.id)}" data-v="agree" style="background:none;border:1px solid rgba(53,217,138,0.5);color:var(--green);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer">AGREE</button>
              <button class="rv" data-id="${esc(x.id)}" data-v="disagree" style="background:none;border:1px solid rgba(255,92,92,0.5);color:var(--red);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer">DISAGREE</button>
              <input class="rv-notes" data-id="${esc(x.id)}" placeholder="notes (optional)" size="40" style="font-size:11px;padding:5px 9px">`}
+        <button class="df-btn" data-id="${esc(x.id)}" style="margin-left:auto;background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;padding:3px 10px;cursor:pointer">${flowOpen.has(x.id)?"COLLAPSE FLOW":"DECISION FLOW"}</button>
       </div>
+      <div class="df-box" data-id="${esc(x.id)}"></div>
     </article>`).join("");
   el.querySelectorAll("button.rv").forEach(b=>b.onclick=async()=>{
     const notes = el.querySelector(`input.rv-notes[data-id="${b.dataset.id}"]`);
@@ -525,7 +544,96 @@ async function renderResearch(){
     if(r.err) b.textContent = "FAILED — RETRY";
     else { renderResearch(); renderProgress(); }
   });
+  el.querySelectorAll("button.df-btn").forEach(b=>b.onclick=async()=>{
+    const id = b.dataset.id;
+    const box = el.querySelector(`.df-box[data-id="${id}"]`);
+    if(flowOpen.has(id)){   // second click collapses
+      flowOpen.delete(id); box.style.display = "none"; box.innerHTML = "";
+      b.textContent = "DECISION FLOW"; return;
+    }
+    flowOpen.add(id); b.textContent = "COLLAPSE FLOW";
+    await renderFlow(box, id, true);
+  });
+  /* re-expand flows the principal had open before this refresh re-render —
+     mid-decision guard: no entrance-animation replay on the 30s tick */
+  flowOpen.forEach(id=>{
+    const box = el.querySelector(`.df-box[data-id="${id}"]`);
+    if(box) renderFlow(box, id, false); else flowOpen.delete(id);
+  });
   good(el);
+}
+
+/* ---------- decision flow: the memo's journey, SCANNER -> SEAL ---------- */
+const flowOpen = new Set();   /* memo ids with an open flow — survives the
+                                 30s refresh loop (same rule as reconOpen) */
+function flowTree(d){
+  const st = d.stages || {};
+  const cards = [];
+  const add = (name, s, inner) =>
+    cards.push({name, avail: !!(s && s.available), inner, note: (s && s.note) || "unavailable"});
+
+  const sc = st.scanner || {}, e = sc.entry || {};
+  add("SCANNER — WHY THE DESK LOOKED", sc, `
+    <div style="font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.9">
+      criteria v${esc(sc.criteria_version)} · scanned ${esc(sc.scanned)} → eligible ${esc(sc.eligible)} · top ${esc(sc.top_n)} · ${esc(ts(sc.scanned_at))}<br>
+      ${e.held?`<span class="pill am">HELD — BOOK NAME</span> `:""}${e.score==null?`<span style="color:var(--faint)">no score components (held name outside the eligible set)</span>`
+        :`score ${num(e.score)} · |ret20| ${num(e.ret20_abs)} (rank ${num(e.ret20_rank)}) · vol surge ${num(e.volume_surge)} (rank ${num(e.surge_rank)})`}
+    </div>`);
+
+  const ev = st.evidence || {};
+  add("EVIDENCE — WHAT THE AGENTS READ", ev,
+    (ev.items||[]).map(it=>`<div class="df-ev"><div style="color:var(--blue);margin-bottom:4px">[${esc(it.ref)}]</div>${esc(it.body)}</div>`).join(""));
+
+  const db = st.debate || {};
+  add("DEBATE — BULL v BEAR, DISSENT KEPT", db,
+    (db.debate_summary?`<div class="debate-block" style="margin-bottom:10px"><div class="sect-label" style="color:rgba(90,167,255,0.7)">SUMMARY</div><p>${esc(db.debate_summary)}</p></div>`:"") +
+    (db.dissent?`<div class="dissent-block"><div class="sect-label" style="color:rgba(255,92,92,0.7)">DISSENT — THE CASE AGAINST</div><p>${esc(db.dissent)}</p></div>`:""));
+
+  const v = st.verdict || {}, run = v.agent_run;
+  add("VERDICT — THE COMMITTEE'S ANSWER", v, `
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <span class="rec ${esc(v.recommendation)}" style="font-size:12px;padding:3px 10px">${esc(v.recommendation)}</span>
+      <span class="conv">CONVICTION ${esc(v.conviction)}</span>
+      ${run?`<span class="conv">${esc(run.model)} · run ${esc(run.status||"—")} · $${(+run.cost_usd||0).toFixed(4)}${run.shadow?` · <span style="color:var(--gold)">SHADOW</span>`:""}</span>`:""}
+    </div>
+    <p style="font-size:13px;line-height:1.65;color:rgba(220,230,248,0.82)">${esc(v.thesis)}</p>
+    <ul class="kill" style="margin-top:6px">${(v.kill_criteria||[]).map(k=>`<li>${esc(k)}</li>`).join("")}</ul>`);
+
+  const br = st.bridge || {}, bp = br.proposal;
+  const stCol = s => ({approved:"var(--green)",executed:"var(--green)",rejected:"var(--red)",
+                       voided:"var(--red)",expired:"var(--gold)"}[s]||"var(--gold)");
+  add("BRIDGE — DETERMINISTIC NUMBERS ONLY", br, bp?`
+    <div style="font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.9">
+      proposal ${esc((bp.id||"").slice(0,8))} · <span style="letter-spacing:0.1em;color:${stCol(bp.state)}">${esc((bp.state||"").toUpperCase())}</span><br>
+      ${esc((bp.action||"buy").toUpperCase())} ${esc(bp.qty)} sh · entry ${num(bp.entry_price)} · stop ${num(bp.stop_loss)} · target ${num(bp.target_price)} · A$${(+bp.position_value_aud||0).toFixed(2)}
+    </div>`:"");
+
+  const se = st.seal || {};
+  const sealCol = {approved:"var(--green)",rejected:"var(--red)",voided:"var(--red)",
+                   expired:"var(--gold)",awaiting:"var(--gold)"};
+  add("SEAL — THE HUMAN DECISION", se, `
+    <div style="font-family:var(--mono);font-size:11px;line-height:1.9">
+      <span style="letter-spacing:0.12em;color:${sealCol[se.status]||"var(--dim)"}">${esc((se.status||"").toUpperCase())}</span>
+      <span style="color:var(--faint)"> · proposal state ${esc(se.state)}</span>
+      ${(se.approvals||[]).map(a=>`<div style="color:var(--gold)">${esc((a.decision||"").toUpperCase())} — ${esc(a.approver)} via ${esc(a.auth_method||"—")} @ ${esc(ts(a.decided_at))}</div>`).join("")
+        || `<div style="color:var(--faint)">no human decision recorded yet</div>`}
+    </div>`);
+
+  return cards.map((c,i)=>
+    (i?`<div class="df-line ${c.avail?"":"dim"}" style="animation-delay:${i*250-120}ms"></div>`:"") +
+    `<div class="df-stage ${c.avail?"":"dim"}" style="animation-delay:${i*250}ms">
+       <div class="df-stage-label"><span>${String(i+1).padStart(2,"0")}</span><span>${c.name}</span>${c.avail?"":`<span class="df-note">◌ ${esc(c.note)}</span>`}</div>
+       ${c.avail?`<div class="df-content">${c.inner}</div>`:""}
+     </div>`).join("");
+}
+async function renderFlow(box, id, animate){
+  box.style.display = "block";
+  if(!box.innerHTML) box.innerHTML = `<div class="quiet">tracing the decision…</div>`;
+  const r = await get(`/v1/research/memos/${encodeURIComponent(id)}/decision-flow`);
+  /* errors render inline in the box — an expansion must fail visibly, not vanish */
+  if(r.err){ box.innerHTML = `<div class="unreachable">◌ DECISION FLOW FAILED — ${esc(r.err)}</div>`; return; }
+  box.classList.toggle("noanim", !animate);
+  box.innerHTML = flowTree(r.data);
 }
 
 async function renderProgress(){
