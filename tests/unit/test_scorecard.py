@@ -1,7 +1,8 @@
 """Scorecard planning core (atlas/dcp/scorecard.py): anchor/horizon session
-math, vindication semantics, HOLD/shadow tracking, idempotency — all on the
-pure planner, no database. The DB flow (inserts, audit event, API shape, t9
-wiring) lives in tests/integration/test_scorecard_pg.py.
+math, vindication semantics, HOLD/shadow tracking, idempotency, dartboard base
+rates and dissent grading (desk-review 2026-07 item 5) — all on the pure
+functions, no database. The DB flow (inserts, audit event, API shape, the
+analysis-only top-up, t9 wiring) lives in tests/integration/test_scorecard_pg.py.
 """
 from __future__ import annotations
 
@@ -11,6 +12,8 @@ from decimal import Decimal
 from atlas.dcp.scorecard import (
     MemoRef,
     anchor_index,
+    dartboard_baseline,
+    dissent_right,
     plan_outcomes,
     vindicated,
 )
@@ -182,6 +185,95 @@ def test_hold_and_shadow_memos_are_still_tracked_in_rows():
         {"ZSC": bars}, flat_spy(dates), existing=set())
     assert {(r.memo_id, r.horizon_sessions) for r in rows} == {("h1", 20),
                                                                ("s1", 20)}
+
+
+# ------------------------------------------- dissent grading (desk-review item 5)
+
+def test_dissent_right_is_the_exact_complement_for_directional_memos():
+    up, down = Decimal("0.041000"), Decimal("-0.023000")
+    for rec, e in (("BUY", up), ("BUY", down), ("REJECT", up), ("REJECT", down)):
+        v = vindicated(rec, e, shadow=False)
+        assert dissent_right(rec, e, shadow=False) is (not v)
+
+
+def test_dead_heat_grades_the_dissent_right():
+    """excess == 0 vindicates neither direction, so the dissent — the case
+    against the call — grades right: the call failed to beat the passive
+    core, and the rule is conservative against the desk by construction."""
+    zero = Decimal("0.000000")
+    assert dissent_right("BUY", zero, shadow=False) is True
+    assert dissent_right("REJECT", zero, shadow=False) is True
+
+
+def test_hold_and_shadow_dissent_stays_ungraded():
+    """No gradable direction, no gradable dissent — mirrors vindicated()."""
+    x = Decimal("0.100000")
+    assert dissent_right("HOLD", x, shadow=False) is None
+    assert dissent_right(None, x, shadow=False) is None
+    assert dissent_right("BUY", x, shadow=True) is None
+    assert dissent_right("REJECT", -x, shadow=True) is None
+
+
+# --------------------------------------- dartboard base rates (desk-review item 5)
+
+def excesses(*vals: str) -> list[Decimal]:
+    return [Decimal(v) for v in vals]
+
+
+def test_dartboard_baseline_hand_pinned():
+    """10 tracked outcomes: 6 down, 3 up, 1 dead heat. REJECT's dart scores
+    6/10, BUY's 3/10 — the dead heat counts for neither, exactly like the
+    vindication rule (so the two baselines need not sum to one)."""
+    xs = excesses("-0.010000", "-0.020000", "-0.030000", "-0.040000",
+                  "-0.050000", "-0.060000", "0.010000", "0.020000",
+                  "0.030000", "0.000000")
+    assert dartboard_baseline("REJECT", xs) == Decimal("0.6")
+    assert dartboard_baseline("BUY", xs) == Decimal("0.3")
+
+
+def test_dartboard_baseline_empty_and_non_directional_is_none():
+    assert dartboard_baseline("BUY", []) is None
+    assert dartboard_baseline("REJECT", []) is None
+    assert dartboard_baseline("HOLD", excesses("-0.010000")) is None
+    assert dartboard_baseline(None, excesses("-0.010000")) is None
+
+
+def test_always_reject_desk_in_a_bear_market_scores_zero_edge():
+    """THE reason the dartboard exists (desk-review 2026-07 item 5): every
+    tracked outcome is negative, the desk REJECTed everything, and raw
+    vindication reads a perfect 10/10 — but a direction-blind dart thrown at
+    the same outcomes scores the same 10/10. rate - baseline == 0: the desk
+    demonstrated no skill the falling market didn't hand it."""
+    xs = excesses(*(f"-0.0{i}0000" for i in range(1, 10)), "-0.100000")
+    assert len(xs) == 10 and all(x < 0 for x in xs)
+    wins = sum(1 for x in xs if vindicated("REJECT", x, shadow=False) is True)
+    rate = Decimal(wins) / Decimal(len(xs))
+    base = dartboard_baseline("REJECT", xs)
+    assert rate == Decimal("1")
+    assert base == Decimal("1")
+    assert rate - base == Decimal("0")            # zero edge — that is the point
+
+
+def test_vendor_adapter_factory_selects_by_key(monkeypatch):
+    """vendor_adapter_for: single-entry vendor map when a key is configured
+    (the daily adapter's map refuses analysis-only symbols), deterministic
+    fixture adapter keyless — mirror of the ops/analyze construction."""
+    import atlas.dcp.scorecard as sc
+    from atlas.dcp.market_data.adapters.eodhd import EodhdAdapter
+    from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
+
+    class _Keyless:
+        eodhd_api_key = ""
+
+    class _Keyed:
+        eodhd_api_key = "k"
+
+    monkeypatch.setattr(sc, "get_settings", lambda: _Keyless())
+    assert isinstance(sc.vendor_adapter_for("ZSCT", "NASDAQ"), FixtureAdapter)
+    monkeypatch.setattr(sc, "get_settings", lambda: _Keyed())
+    keyed = sc.vendor_adapter_for("ZSCT", "NASDAQ")
+    assert isinstance(keyed, EodhdAdapter)
+    assert keyed._sym("ZSCT") == "ZSCT.US"        # the one-entry map, vendor rule
 
 
 # ------------------------------------------------------------------ idempotency

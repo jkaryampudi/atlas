@@ -219,7 +219,7 @@
         <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
       <h2>Desk Scorecard — Graded Against SPY</h2>
-      <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated.</div>
+      <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
       <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
       <h2>Committee Memos</h2>
       <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
@@ -742,44 +742,66 @@ document.getElementById("an-btn").onclick = async()=>{
 /* ---------- desk scorecard — the desk graded on its own record ---------- */
 /* Semantics (atlas/dcp/scorecard.py): SPY-relative per ADR-0009. BUY
    vindicated when excess > 0 at the horizon, REJECT when excess < 0.
-   HOLD + shadow rows are tracked but never rated (vindicated: null). */
+   HOLD + shadow rows are tracked but never rated (vindicated: null).
+   Dartboard honesty (desk-review 2026-07 item 5): every rate carries the
+   direction-blind dart's base rate over ALL tracked outcomes and the edge
+   over it — an always-REJECT desk in a falling market shows edge 0, which
+   is the point. Dissent is graded as the exact complement of the call. */
 const SCORE_MIN_MATURED = 5;  /* below this: too few matured to judge — no verdict color */
 const pctS = v => (v<0?"−":"+") + Math.abs((+v)*100).toFixed(1) + "%";
+const ppS = v => (v<0?"−":"+") + Math.abs((+v)*100).toFixed(0) + "pp";  /* edge, percentage points */
 async function renderScorecard(){
   const el = document.getElementById("scorecard");
   const r = await get("/v1/research/scorecard");
   if(r.err) return deg(el, r.err);
   const d = r.data, br = d.by_recommendation || {};
-  const pills = [];
+  const sliceBits = o => Object.entries(o||{}).map(([k,s])=>{
+    const parts = [20,60].map(h=>s[`matured_${h}`]?`${s[`vindicated_${h}`]}/${s[`matured_${h}`]}@${h}s`:null).filter(Boolean);
+    return `<span style="color:var(--dim)">${esc(k)}</span> ${parts.join(" ")||`0 matured (${s.memos} memo${s.memos===1?"":"s"})`}`;
+  }).join(`<span style="color:var(--faint)"> · </span>`);
+  const blocks = [];
   ["BUY","REJECT"].forEach(rec=>{
     const g = br[rec]; if(!g || !g.memos) return;
+    const pills = [];
     [20,60].forEach(h=>{
       const m = g[`matured_${h}`]||0, v = g[`vindicated_${h}`]||0, ax = g[`avg_excess_${h}`];
+      const b = g[`baseline_${h}`], edge = g[`rate_minus_baseline_${h}`], dr = g[`dissent_right_${h}`]||0;
       if(!m) return pills.push(`<span class="pill gray">${esc(rec)}: 0 matured @${h}s</span>`);
-      const line = `${esc(rec)}: ${v}/${m} vindicated @${h}s · avg excess ${esc(pctS(ax))}`;
+      /* dart = what a direction-blind throw at ALL tracked outcomes would score, on this slice's denominator */
+      const dart = (b==null||edge==null) ? "" : ` (dart: ${Math.round(b*m)}/${m}, edge ${esc(ppS(edge))})`;
+      const line = `${esc(rec)}: ${v}/${m} vindicated @${h}s${dart} · avg excess ${esc(pctS(ax))} · dissent right ${dr}/${m}`;
       if(m < SCORE_MIN_MATURED)   /* honesty below the documented minimum */
         pills.push(`<span class="pill gray">${line} (too few matured to judge)</span>`);
-      else  /* green = the desk beat a coin flip, red = it lost to one, amber = dead heat */
-        pills.push(`<span class="pill ${v*2>m?"g":v*2<m?"r":"am"}">${line}</span>`);
+      else  /* green = positive edge over the dart, red = negative, amber = the desk IS the dart */
+        pills.push(`<span class="pill ${edge>0?"g":edge<0?"r":"am"}">${line}</span>`);
     });
+    blocks.push(`<div style="margin-bottom:12px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${pills.join("")}</div>
+      <div style="font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:6px 0 0 2px">CONVICTION&nbsp;&nbsp;${sliceBits(g.by_conviction)}</div>
+      <div style="font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:2px 0 0 2px">SOURCE&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${sliceBits(g.by_source)}</div>
+    </div>`);
   });
   const rows = d.recent || [];
   const tbl = !rows.length ? "" :
-    `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th></tr>` +
+    `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th><th>DISSENT</th></tr>` +
     rows.map(o=>`<tr>
-      <td>${esc(o.symbol||"—")}</td>
-      <td><span class="pill ${o.recommendation==="BUY"?"g":o.recommendation==="REJECT"?"r":"gray"}">${esc(o.recommendation)}</span></td>
+      <td>${esc(o.symbol||"—")}${o.source?` <span style="color:var(--gold);font-size:9.5px" title="external origin">${esc(o.source)}</span>`:""}</td>
+      <td><span class="pill ${o.recommendation==="BUY"?"g":o.recommendation==="REJECT"?"r":"gray"}" title="conviction ${esc(o.conviction||"—")}">${esc(o.recommendation)}</span></td>
       <td>${esc(o.horizon)}s</td>
       <td class="${o.fwd_return<0?"num-neg":"num-pos"}">${esc(pctS(o.fwd_return))}</td>
       <td>${esc(pctS(o.spy_return))}</td>
       <td class="${o.excess<0?"num-neg":"num-pos"}">${esc(pctS(o.excess))}</td>
       <td>${o.vindicated===true?`<span style="color:var(--green)">✓ VINDICATED</span>`
            :o.vindicated===false?`<span style="color:var(--red)">✗ WRONG</span>`
-           :`<span style="color:var(--faint)">— not rated</span>`}</td></tr>`).join("") + `</table>`;
+           :`<span style="color:var(--faint)">— not rated</span>`}</td>
+      <td>${o.dissent_right===true?`<span style="color:var(--gold)">✓ RIGHT</span>`
+           :o.dissent_right===false?`<span style="color:var(--faint)">✗ wrong</span>`
+           :`<span style="color:var(--faint)">—</span>`}</td></tr>`).join("") + `</table>`;
   el.innerHTML =
-    `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${pills.join("")
-       ||`<span class="quiet" style="padding:0">no graded record yet — outcomes mature 20 and 60 sessions after each memo</span>`}</div>` +
-    (d.shadow_excluded?`<div class="note" style="margin:10px 0 0">${esc(d.shadow_excluded)} shadow outcome row(s) tracked but excluded from the rates — non-actionable</div>`:"") +
+    (blocks.length ? blocks.join("")
+       : `<div class="quiet" style="padding:0">no graded record yet — outcomes mature 20 and 60 sessions after each memo</div>`) +
+    (d.shadow_excluded?`<div class="note" style="margin:10px 0 0">${esc(d.shadow_excluded)} shadow outcome row(s) tracked but excluded from the rates — non-actionable. Dart universe: ${esc((d.dart_tracked||{})["20"]??0)} tracked @20s / ${esc((d.dart_tracked||{})["60"]??0)} @60s, HOLD + shadow included.</div>`
+      :(d.dart_tracked&&(d.dart_tracked["20"]||d.dart_tracked["60"])?`<div class="note" style="margin:10px 0 0">Dart universe: ${esc(d.dart_tracked["20"])} tracked @20s / ${esc(d.dart_tracked["60"])} @60s, HOLD + shadow included.</div>`:"")) +
     tbl;
   good(el);
 }

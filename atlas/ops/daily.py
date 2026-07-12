@@ -78,7 +78,7 @@ from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.scanner.v1 import scan
-from atlas.dcp.scorecard import compute_memo_outcomes
+from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -256,7 +256,12 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         # failure that aborts the transaction still kills the run like any
         # other node-level SQL failure (same caveat as the scanner's).
         try:
-            scorecard_line = compute_memo_outcomes(session, clock).summary()
+            # adapter_for enables the bounded analysis-only bar top-up (desk-
+            # review 2026-07 item 5): inactive instruments are skipped by t0
+            # ingest, so the scorecard fetches their missing forward window
+            # itself — pure addition; None would keep t9 a pure read
+            scorecard_line = compute_memo_outcomes(
+                session, clock, adapter_for=vendor_adapter_for).summary()
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             state["scorecard_failed"] = True
             scorecard_line = f"scorecard FAILED: {e}"[:200]

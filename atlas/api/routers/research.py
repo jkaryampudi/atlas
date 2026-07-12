@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -21,7 +22,7 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
-from atlas.dcp.scorecard import vindicated
+from atlas.dcp.scorecard import dartboard_baseline, dissent_right, vindicated
 
 router = APIRouter()
 
@@ -306,6 +307,44 @@ def review_progress() -> dict[str, object]:
             "target": REVIEW_TARGET}
 
 
+DESK_SOURCE = "desk nightly"          # label for source IS NULL — the desk's own work
+_CONVICTION_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "N/A": 3, "UNSPECIFIED": 4}
+
+
+def _slice_rows(rec: str, graded: list[dict[str, Any]],
+                memo_counts: list[dict[str, Any]], field: str,
+                null_label: str) -> dict[str, dict[str, object]]:
+    """One memo attribute (conviction | source) aggregated into scorecard
+    sub-slices for a directional recommendation: memo count plus matured /
+    vindicated / dissent-right counts per horizon. Keys are the attribute
+    values verbatim, NULL relabelled (`null_label`); a slice with memos but
+    no matured outcomes still appears — 0 matured is an honest answer."""
+    def label(v: object) -> str:
+        return null_label if v is None else str(v)
+
+    keys = ({label(c[field]) for c in memo_counts if c["rec"] == rec}
+            | {label(r[field]) for r in graded})
+    order = ((lambda k: (_CONVICTION_ORDER.get(k, 9), k)) if field == "conviction"
+             else (lambda k: (k != DESK_SOURCE, k)))
+    out: dict[str, dict[str, object]] = {}
+    for k in sorted(keys, key=order):
+        rows_k = [r for r in graded if label(r[field]) == k]
+        e: dict[str, object] = {"memos": sum(
+            int(c["n"]) for c in memo_counts
+            if c["rec"] == rec and label(c[field]) == k)}
+        for h in (20, 60):
+            hs = [r for r in rows_k if r["h"] == h]
+            e[f"matured_{h}"] = len(hs)
+            e[f"vindicated_{h}"] = sum(
+                1 for r in hs
+                if vindicated(rec, r["excess"], shadow=False) is True)
+            e[f"dissent_right_{h}"] = sum(
+                1 for r in hs
+                if dissent_right(rec, r["excess"], shadow=False) is True)
+        out[k] = e
+    return out
+
+
 @router.get("/scorecard")
 def scorecard() -> dict[str, object]:
     """The desk graded against its own record (research.memo_outcomes,
@@ -319,59 +358,91 @@ def scorecard() -> dict[str, object]:
     4) and surfaced honestly via shadow_excluded (matured outcome rows so
     excluded); HOLD and other non-directional recommendations are likewise
     excluded from the rates but appear in `recent` with vindicated=null.
+
+    DESK-REVIEW 2026-07 ITEM 5 additions (all additive):
+    - baseline_{h} / rate_minus_baseline_{h}: the dartboard base rate — what
+      a direction-blind dart scores against ALL tracked outcomes at the
+      horizon (HOLD and shadow included; dart_tracked carries the universe
+      size) — and the slice's vindication rate minus it. This is the number
+      that stops an always-REJECT desk in a falling market from looking
+      smart: the dart matches it and the edge reads zero.
+    - dissent_right_{h}: the dissent graded as the exact complement of
+      vindicated() for directional memos (dead heats grade the dissent
+      right); HOLD/shadow stay ungraded on both sides.
+    - by_conviction / by_source sub-slices per recommendation (source NULL =
+      'desk nightly' — the pick-filter loop verdict lives in by_source), and
+      conviction / source / dissent_right on each `recent` row.
     Decimals cross to floats deliberately: display analytics, never ledger
     money."""
     with session_scope() as s:
-        by_rec: dict[str, dict[str, object]] = {}
-        for rec in ("BUY", "REJECT"):
-            n_memos = s.execute(text(
-                "SELECT count(*) FROM research.memos m "
-                "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
-                "WHERE m.memo_type = 'committee' AND m.recommendation = :rec "
-                "  AND COALESCE(ar.shadow, false) = false"), {"rec": rec}).scalar()
-            entry: dict[str, object] = {"memos": int(n_memos or 0)}
-            for h in (20, 60):
-                rows = s.execute(text(
-                    "SELECT o.excess FROM research.memo_outcomes o "
-                    "JOIN research.memos m ON m.id = o.memo_id "
-                    "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
-                    "WHERE m.recommendation = :rec AND o.horizon_sessions = :h "
-                    "  AND COALESCE(ar.shadow, false) = false"),
-                    {"rec": rec, "h": h}).scalars().all()
-                wins = sum(1 for e in rows
-                           if vindicated(rec, e, shadow=False) is True)
-                entry[f"matured_{h}"] = len(rows)
-                entry[f"vindicated_{h}"] = wins
-                entry[f"avg_excess_{h}"] = (
-                    float(sum(rows) / len(rows)) if rows else None)
-            by_rec[rec] = entry
-
-        shadow_excluded = s.execute(text(
-            "SELECT count(*) FROM research.memo_outcomes o "
+        tracked = [dict(r) for r in s.execute(text(
+            "SELECT o.horizon_sessions AS h, o.memo_id, o.fwd_return, "
+            " o.spy_return, o.excess, m.instrument_symbol AS symbol, "
+            " m.recommendation AS rec, m.conviction, m.source, "
+            " COALESCE(ar.shadow, false) AS shadow "
+            "FROM research.memo_outcomes o "
             "JOIN research.memos m ON m.id = o.memo_id "
-            "JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
-            "WHERE ar.shadow")).scalar()
+            "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+            "ORDER BY o.computed_at DESC, o.memo_id, "
+            " o.horizon_sessions")).mappings()]
+        memo_counts = [dict(r) for r in s.execute(text(
+            "SELECT m.recommendation AS rec, m.conviction, m.source, "
+            " count(*) AS n "
+            "FROM research.memos m "
+            "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
+            "WHERE m.memo_type = 'committee' "
+            "  AND COALESCE(ar.shadow, false) = false "
+            "GROUP BY 1, 2, 3")).mappings()]
 
-        recent = [
-            {"memo_id": str(r["memo_id"]), "symbol": r["instrument_symbol"],
-             "recommendation": r["recommendation"],
-             "horizon": int(r["horizon_sessions"]),
-             "fwd_return": float(r["fwd_return"]),
-             "spy_return": float(r["spy_return"]),
-             "excess": float(r["excess"]),
-             "vindicated": vindicated(r["recommendation"], r["excess"],
-                                      shadow=bool(r["shadow"]))}
-            for r in s.execute(text(
-                "SELECT o.memo_id, o.horizon_sessions, o.fwd_return, "
-                " o.spy_return, o.excess, m.instrument_symbol, "
-                " m.recommendation, COALESCE(ar.shadow, false) AS shadow "
-                "FROM research.memo_outcomes o "
-                "JOIN research.memos m ON m.id = o.memo_id "
-                "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
-                "ORDER BY o.computed_at DESC, o.memo_id, o.horizon_sessions "
-                "LIMIT :n"), {"n": SCORECARD_RECENT}).mappings()]
+    # the dart's universe: EVERY tracked outcome at the horizon — HOLD and
+    # shadow rows included, because the dart is blind to what the desk said
+    all_excess = {h: [r["excess"] for r in tracked if r["h"] == h]
+                  for h in (20, 60)}
+
+    by_rec: dict[str, dict[str, object]] = {}
+    for rec in ("BUY", "REJECT"):
+        graded = [r for r in tracked if r["rec"] == rec and not r["shadow"]]
+        entry: dict[str, object] = {"memos": sum(
+            int(c["n"]) for c in memo_counts if c["rec"] == rec)}
+        for h in (20, 60):
+            hs = [r for r in graded if r["h"] == h]
+            wins = sum(1 for r in hs
+                       if vindicated(rec, r["excess"], shadow=False) is True)
+            entry[f"matured_{h}"] = len(hs)
+            entry[f"vindicated_{h}"] = wins
+            entry[f"avg_excess_{h}"] = (
+                float(sum(r["excess"] for r in hs) / len(hs)) if hs else None)
+            entry[f"dissent_right_{h}"] = sum(
+                1 for r in hs
+                if dissent_right(rec, r["excess"], shadow=False) is True)
+            base = dartboard_baseline(rec, all_excess[h])
+            entry[f"baseline_{h}"] = None if base is None else float(base)
+            entry[f"rate_minus_baseline_{h}"] = (
+                None if base is None or not hs
+                else float(Decimal(wins) / Decimal(len(hs)) - base))
+        entry["by_conviction"] = _slice_rows(rec, graded, memo_counts,
+                                             "conviction", "UNSPECIFIED")
+        entry["by_source"] = _slice_rows(rec, graded, memo_counts,
+                                         "source", DESK_SOURCE)
+        by_rec[rec] = entry
+
+    recent = [
+        {"memo_id": str(r["memo_id"]), "symbol": r["symbol"],
+         "recommendation": r["rec"], "conviction": r["conviction"],
+         "source": r["source"], "horizon": int(r["h"]),
+         "fwd_return": float(r["fwd_return"]),
+         "spy_return": float(r["spy_return"]),
+         "excess": float(r["excess"]),
+         "vindicated": vindicated(r["rec"], r["excess"],
+                                  shadow=bool(r["shadow"])),
+         "dissent_right": dissent_right(r["rec"], r["excess"],
+                                        shadow=bool(r["shadow"]))}
+        for r in tracked[:SCORECARD_RECENT]]
+
     return {"by_recommendation": by_rec, "recent": recent,
-            "shadow_excluded": int(shadow_excluded or 0)}
+            "shadow_excluded": sum(1 for r in tracked if r["shadow"]),
+            "dart_tracked": {"20": len(all_excess[20]),
+                             "60": len(all_excess[60])}}
 
 
 @router.get("/runs")

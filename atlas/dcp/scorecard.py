@@ -19,6 +19,25 @@ SCORING SEMANTICS — read this before interpreting any number here:
   EXCLUDED from vindication rates: no direction to grade / non-actionable
   output (ADR-0005 pattern 4). vindicated() returns None for them.
 
+DARTBOARD BASE RATES (desk-review 2026-07 item 5): a vindication rate alone
+cannot support a skill claim, because the base rate is free. The honest
+comparator is a direction-blind dart thrown at the same tracked outcomes:
+REJECT's baseline is the fraction of ALL tracked outcomes at the horizon with
+excess < 0, BUY's the fraction with excess > 0 (dead heats count for neither
+— exactly the vindication rule). The point of publishing rate-minus-baseline:
+an always-REJECT desk in a falling market grades near-perfect on raw
+vindication while the dart grades the same — its EDGE is zero, and zero edge
+is the verdict. dartboard_baseline() is the one place this rule lives.
+
+DISSENT GRADING (same review item): every directional committee memo records
+a dissent — the strongest case AGAINST the call — so the dissent's verdict is
+derivable at read time as the EXACT complement of vindicated(): dissent right
+= NOT vindicated for BUY/REJECT. A dead heat therefore grades the dissent
+right (the call failed to beat the passive core — conservative against the
+desk by construction). HOLD and shadow memos stay ungraded on both sides
+(None): a memo with no gradable direction has no gradable dissent. No schema
+change — dissent_right() is a pure read over the recorded excess.
+
 MECHANICS:
 
 - Anchor: the last vendor bar_date <= the memo's created_at UTC date — the
@@ -32,7 +51,28 @@ MECHANICS:
   anchor->fwd dates from SPY closes; excess = fwd_return - spy_return. All
   three are quantized to the 6dp column quantum (fwd/spy first, so excess is
   exact). Fail-closed skips: SPY missing either exact date, no resolvable
-  single active instrument, no anchor bar, non-positive close at either end.
+  instrument, no anchor bar, non-positive close at either end.
+- INSTRUMENT RESOLUTION (desk-review 2026-07 item 5): exactly one ACTIVE
+  instrument for the symbol wins — the bridge's rule. With no active row,
+  exactly one row of ANY activity resolves too: grading needs bars, not
+  tradability. Analyze-box memos land on analysis-only instruments
+  (is_active=FALSE, ops/analyze.py) and were permanently ungradeable under
+  the active-only rule — corrupted-by-omission, per the review. Ambiguity
+  (two active rows, or no active and several inactive) still fails closed.
+- ANALYSIS-ONLY BAR TOP-UP (same review item): nightly ingest skips inactive
+  instruments, so an analysis-only memo's forward bars never arrive and its
+  outcomes never mature. When the ops layer passes `adapter_for` (a
+  (symbol, exchange) -> MarketDataAdapter factory; the t9 call site passes
+  vendor_adapter_for), the scorecard tops the bars up itself, BOUNDED: only
+  inactive instruments, only symbols with committee memos still awaiting an
+  outcome row, only the missing session window (incremental from the latest
+  stored vendor bar through the last completed session at the injected
+  clock — never a partial or forward bar), splits recorded alongside so the
+  split-adjusted read stays honest. No stored vendor bars at all = no
+  top-up: this is maintenance of a window ops/analyze.py already fetched,
+  never a backfill. Vendor failures are fail-soft per symbol (noted in the
+  report; grading proceeds on stored bars). Default None = pure read —
+  deterministic replays and tests stay hermetic unless ops opts in.
 - SPLIT-ADJUSTED, both legs (desk-review 2026-07 item 2): vendor bars are
   stored RAW, so a split between anchor and forward would fabricate a phantom
   outcome — a 10:1 split reads as a -90% "return" — and write it into the
@@ -61,18 +101,27 @@ numerics stay Decimal end to end.
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Mapping, Sequence, Set as AbstractSet
+from collections.abc import Callable, Mapping, Sequence, Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, date
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
+from atlas.core.config import get_settings
+from atlas.dcp.market_data.adapters.base import MarketDataAdapter
+from atlas.dcp.market_data.adapters.eodhd import EodhdAdapter, vendor_symbol
+from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
 from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.daily import incremental_sessions
+from atlas.dcp.market_data.ingest import record_split, upsert_bar
 from atlas.dcp.market_data.models import Bar, Split
+
+_REPO = Path(__file__).resolve().parents[2]
 
 HORIZONS: tuple[int, ...] = (20, 60)   # sessions; must match the 0016 CHECK
 BENCHMARK_SYMBOL = "SPY"               # ADR-0009: the fund's honest alternative
@@ -122,10 +171,14 @@ class ScorecardReport:
     written: tuple[PlannedOutcome, ...]
     skipped: tuple[OutcomeSkip, ...]
     already: int                       # rows previously recorded (idempotent re-encounter)
+    topups: tuple[str, ...] = ()       # analysis-only bar top-up notes, one per symbol
 
     def summary(self) -> str:
-        return (f"scorecard: +{len(self.written)} outcomes" if self.written
+        base = (f"scorecard: +{len(self.written)} outcomes" if self.written
                 else "scorecard: none matured")
+        if self.topups:
+            base += f" · topped up {len(self.topups)} analysis-only symbol(s)"
+        return base
 
 
 def vindicated(recommendation: str | None, excess: Decimal,
@@ -140,6 +193,41 @@ def vindicated(recommendation: str | None, excess: Decimal,
     if recommendation == "REJECT":
         return excess < 0
     return None
+
+
+def dissent_right(recommendation: str | None, excess: Decimal,
+                  *, shadow: bool) -> bool | None:
+    """The dissent graded at read time (module docstring): the EXACT
+    complement of vindicated() for directional memos — every committee memo
+    records the strongest case against its own call, so a call that was not
+    vindicated means the dissent was right. Dead heats grade the dissent
+    right (conservative against the desk). HOLD/other and shadow memos: None
+    — no gradable direction, no gradable dissent."""
+    v = vindicated(recommendation, excess, shadow=shadow)
+    return None if v is None else not v
+
+
+def dartboard_baseline(recommendation: str | None,
+                       excesses: Sequence[Decimal]) -> Decimal | None:
+    """The base rate a direction-blind dart scores against the SAME tracked
+    outcomes (module docstring): the fraction of `excesses` whose sign
+    matches the slice's vindication direction — excess > 0 for BUY,
+    excess < 0 for REJECT, dead heats for neither. `excesses` is EVERY
+    tracked outcome at the horizon (HOLD and shadow rows included: the dart
+    throws at everything the fund tracked, blind to what the desk said).
+    None when nothing is tracked yet, or for non-directional slices.
+    Subtracting this from a slice's vindication rate is what stops an
+    always-REJECT desk in a falling market from looking smart: the dart
+    matches it, and the edge reads zero."""
+    if not excesses:
+        return None
+    if recommendation == "BUY":
+        hits = sum(1 for e in excesses if e > 0)
+    elif recommendation == "REJECT":
+        hits = sum(1 for e in excesses if e < 0)
+    else:
+        return None
+    return Decimal(hits) / Decimal(len(excesses))
 
 
 def anchor_index(bar_dates: Sequence[date], memo_date: date) -> int | None:
@@ -173,7 +261,7 @@ def plan_outcomes(
             skips.append(OutcomeSkip(
                 memo_id=memo.memo_id, symbol=memo.symbol, horizon_sessions=None,
                 reason="no instrument (symbol does not resolve to exactly one "
-                       "active instrument)"))
+                       "active instrument, or one row of any activity)"))
             continue
         bars = series[memo.symbol]
         dates = [d for d, _ in bars]
@@ -231,14 +319,33 @@ def plan_outcomes(
     return rows, skips, already
 
 
-def _resolved_instrument_id(session: Session, symbol: str) -> str | None:
-    """Exactly one active instrument for the symbol, else None (the same
-    resolution rule the bridge applies — a memo the bridge could not act on
-    is a memo the scorecard cannot grade)."""
+@dataclass(frozen=True)
+class ResolvedInstrument:
+    """What grading (and the analysis-only top-up) needs to know about the
+    one instrument a memo symbol resolved to."""
+    instrument_id: str
+    exchange: str
+    market: str
+    is_active: bool
+
+
+def _resolve_instrument(session: Session, symbol: str) -> ResolvedInstrument | None:
+    """Exactly one ACTIVE instrument wins — the rule the bridge applies. With
+    no active row, exactly one row of ANY activity resolves too (module
+    docstring): grading needs bars, not tradability, and analyze-box memos
+    live on analysis-only is_active=FALSE rows. Ambiguity fails closed."""
     rows = session.execute(text(
-        "SELECT id FROM market.instruments WHERE symbol = :s AND is_active"),
-        {"s": symbol}).all()
-    return str(rows[0].id) if len(rows) == 1 else None
+        "SELECT id, exchange, market, is_active FROM market.instruments "
+        "WHERE symbol = :s"), {"s": symbol}).all()
+    active = [r for r in rows if r.is_active]
+    if len(active) == 1:
+        pick = active[0]
+    elif not active and len(rows) == 1:
+        pick = rows[0]
+    else:
+        return None
+    return ResolvedInstrument(instrument_id=str(pick.id), exchange=pick.exchange,
+                              market=pick.market, is_active=bool(pick.is_active))
 
 
 def _load_series(session: Session, instrument_id: str,
@@ -268,11 +375,82 @@ def _load_series(session: Session, instrument_id: str,
     return [(b.bar_date, b.close) for b in adjust_for_splits(bars, splits)]
 
 
-def compute_memo_outcomes(session: Session, clock: Clock) -> ScorecardReport:
+def vendor_adapter_for(symbol: str, exchange: str) -> MarketDataAdapter:
+    """Adapter factory for the analysis-only top-up — what the t9 call site
+    passes as `adapter_for`. The daily cycle's own adapter maps only
+    seed/universe symbols and refuses bare pass-through, so an analysis-only
+    symbol needs its own single-entry map (the ops/analyze construction,
+    same vendor_symbol rule; unknown exchanges still fail loudly there).
+    Keyless local development gets the deterministic fixture adapter,
+    exactly like the daily ingest."""
+    settings = get_settings()
+    if settings.eodhd_api_key:
+        return EodhdAdapter(settings.eodhd_api_key,
+                            symbol_map={symbol: vendor_symbol(symbol, exchange)})
+    return FixtureAdapter(_REPO / "tests" / "fixtures")
+
+
+def _top_up_inactive_bars(
+        session: Session, clock: Clock,
+        adapter_for: Callable[[str, str], MarketDataAdapter],
+        awaiting: AbstractSet[str],
+        instruments: Mapping[str, ResolvedInstrument]) -> tuple[str, ...]:
+    """Bounded forward-bar maintenance for analysis-only instruments (module
+    docstring): nightly ingest skips inactive rows, so without this their
+    memo outcomes never mature. Only inactive instruments among `awaiting`
+    (symbols with committee memos still missing an outcome row), only the
+    missing window — sessions after the latest stored vendor bar through the
+    last completed session at the injected clock; a bar outside that window
+    is never stored (no partials, no look-ahead). Splits are recorded
+    alongside so the split-adjusted read stays honest. No stored vendor bars
+    = no top-up (grading fails closed on its own; this is maintenance, never
+    a backfill). Vendor failures are fail-soft per symbol and noted — an SQL
+    failure still aborts the transaction like any node-level SQL failure
+    (the scanner's caveat, ops/daily.py)."""
+    notes: list[str] = []
+    now = clock.now()
+    for symbol in sorted(awaiting):
+        inst = instruments.get(symbol)
+        if inst is None or inst.is_active:
+            continue                   # active instruments are t0 ingest's job
+        latest = session.execute(text(
+            "SELECT max(bar_date) FROM market.price_bars_daily "
+            "WHERE instrument_id = :iid AND source = :src"),
+            {"iid": inst.instrument_id, "src": VENDOR_SOURCE}).scalar()
+        if latest is None:
+            continue
+        days = incremental_sessions(inst.market, latest, now)
+        if not days:
+            continue                   # already current through the last close
+        start, end = days[0], days[-1]
+        try:
+            adapter = adapter_for(symbol, inst.exchange)
+            source = type(adapter).__name__
+            for sp in adapter.fetch_splits(symbol, start, end):
+                record_split(session, inst.instrument_id, sp, source)
+            n_bars = 0
+            for b in adapter.fetch_bars(symbol, start, end):
+                if not start <= b.bar_date <= end:
+                    continue           # never a partial or forward bar
+                upsert_bar(session, inst.instrument_id, b, source)
+                n_bars += 1
+        except Exception as e:  # noqa: BLE001 — fail-soft per symbol, never silent
+            notes.append(f"{symbol}: top-up failed ({str(e)[:120]})")
+            continue
+        notes.append(f"{symbol}: +{n_bars} bars through {end}")
+    return tuple(notes)
+
+
+def compute_memo_outcomes(
+        session: Session, clock: Clock,
+        adapter_for: Callable[[str, str], MarketDataAdapter] | None = None,
+) -> ScorecardReport:
     """Grade every committee memo whose outcomes have matured (module
     docstring). Inserts matured (memo, horizon) rows exactly once, counts
     skips with reasons, and appends ONE research.scorecard.updated audit
-    event when — and only when — new rows landed."""
+    event when — and only when — new rows landed. `adapter_for` (optional,
+    ops-injected) enables the bounded analysis-only bar top-up before
+    grading; None keeps this a pure read of stored tables."""
     now = clock.now()
     today = now.astimezone(UTC).date()
 
@@ -293,16 +471,27 @@ def compute_memo_outcomes(session: Session, clock: Clock) -> ScorecardReport:
                     "SELECT memo_id, horizon_sessions "
                     "FROM research.memo_outcomes")).all()}
 
-    series: dict[str, list[tuple[date, Decimal]]] = {}
+    instruments: dict[str, ResolvedInstrument] = {}
     for symbol in sorted({m.symbol for m in memos if m.symbol is not None}):
-        iid = _resolved_instrument_id(session, symbol)
-        if iid is not None:
-            series[symbol] = _load_series(session, iid, today)
+        inst = _resolve_instrument(session, symbol)
+        if inst is not None:
+            instruments[symbol] = inst
+
+    topups: tuple[str, ...] = ()
+    if adapter_for is not None:
+        awaiting = {m.symbol for m in memos
+                    if m.symbol is not None
+                    and any((m.memo_id, h) not in existing for h in HORIZONS)}
+        topups = _top_up_inactive_bars(session, clock, adapter_for,
+                                       awaiting, instruments)
+
+    series = {symbol: _load_series(session, inst.instrument_id, today)
+              for symbol, inst in instruments.items()}
 
     spy: dict[date, Decimal] = {}
-    spy_iid = _resolved_instrument_id(session, BENCHMARK_SYMBOL)
-    if spy_iid is not None:            # no SPY => every horizon skips fail-closed
-        spy = dict(_load_series(session, spy_iid, today))
+    spy_inst = _resolve_instrument(session, BENCHMARK_SYMBOL)
+    if spy_inst is not None:           # no SPY => every horizon skips fail-closed
+        spy = dict(_load_series(session, spy_inst.instrument_id, today))
 
     rows, skips, already = plan_outcomes(memos, series, spy, existing)
 
@@ -318,13 +507,17 @@ def compute_memo_outcomes(session: Session, clock: Clock) -> ScorecardReport:
              "sr": r.spy_return, "ex": r.excess, "t": now})
 
     if rows:
+        payload: dict[str, object] = {
+            "written": len(rows),
+            "memo_ids": sorted({r.memo_id for r in rows}),
+            "by_horizon": {str(h): sum(1 for r in rows
+                                       if r.horizon_sessions == h)
+                           for h in HORIZONS}}
+        if topups:
+            payload["topups"] = list(topups)
         PostgresAuditLog(session, clock).append(
             event_type="research.scorecard.updated", entity_type="scorecard",
             entity_id=today.isoformat(), actor_type="dcp", actor_id="scorecard",
-            payload={"written": len(rows),
-                     "memo_ids": sorted({r.memo_id for r in rows}),
-                     "by_horizon": {str(h): sum(1 for r in rows
-                                                if r.horizon_sessions == h)
-                                    for h in HORIZONS}})
+            payload=payload)
     return ScorecardReport(written=tuple(rows), skipped=tuple(skips),
-                           already=already)
+                           already=already, topups=topups)

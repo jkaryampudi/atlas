@@ -8,6 +8,13 @@ Rules of this run (in addition to the Constitution):
 - BUY is permitted ONLY if the context contains DCP evidence references (signal IDs,
   research memo IDs). If evidence_available=false, BUY is forbidden.
 - conviction: LOW/MEDIUM/HIGH; cap at LOW when evidence_available=false.
+  What each level MEANS (your conviction is graded against outcomes — use these
+  operationally, not as mood):
+  - HIGH: the evidence would have to be materially wrong for this call to miss;
+    you would defend it against the dissent unprompted.
+  - MEDIUM: the call follows from the evidence, but a reasonable committee member
+    could weigh the dissent higher.
+  - LOW: directionally supported, but one plausible development flips it.
 - kill_criteria: at least two observable conditions under which the thesis is wrong.
 - dissent: the strongest genuine case against your recommendation.
 - evidence_refs: list every reference ID you relied on — a REJECT verdict still
