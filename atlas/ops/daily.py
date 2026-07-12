@@ -15,7 +15,14 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   console Research page; runs only on US session days and only
                   when a model key is configured; a desk failure pages but
                   never undoes the trading steps (they are already done)
-  T8 report       summary incl. desk results -> audit + operator alert
+  T8 bridge       memo->proposal bridge (ADR-0006): fresh non-shadow committee
+                  BUY memos become sized, L1-L11-checked proposals in the
+                  console approval queue; every price derived from vendor bars
+                  alone (CLAUDE.md invariant 2). Runs desk or no desk — a
+                  manually-run desk's memos must still bridge next cycle; a
+                  bridge failure pages exactly like a desk failure but never
+                  undoes the prior steps
+  T9 report       summary incl. desk + bridge results -> audit + operator alert
 
 The run is checkpointed under run_id = daily-<date> (WorkflowRunner). The
 whole cycle runs in ONE transaction: an in-process node failure that is
@@ -36,10 +43,11 @@ fail closed per-instrument on their own) — but they DO fail the run's exit
 code and page the operator. A chain break or reconciliation break is a KILL
 condition: the run raises immediately and pages at high priority.
 
-The desk emits MEMOS only. The memo->proposal bridge stays absent until the
-deterministic stop-derivation policy is decided (agents must never produce
-sizing/pricing numbers — CLAUDE.md invariant 2; a Principal decision).
-Proposals are still built explicitly and approved on the console desk.
+The desk emits MEMOS only; T8 (atlas.dcp.trading.bridge) is the sole path
+from memo to proposal, under the signed ADR-0006 stop-derivation policy —
+agents never produce sizing/pricing numbers (CLAUDE.md invariant 2), the DCP
+derives entry/stop/target from vendor bars and the risk engine sizes. Human
+approval on the console desk remains the only way a proposal becomes an order.
 """
 from __future__ import annotations
 
@@ -60,6 +68,7 @@ from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
+from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
 from atlas.ops.alerts import notify
@@ -164,21 +173,39 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["desk"] = report
         return report.summary()
 
-    def t8_report() -> str:
+    def t8_bridge() -> str:
+        # runs desk or no desk: memos from a manually-run desk (or an earlier
+        # cycle) must still bridge — candidacy lives in the memos table, not
+        # in this run's T7 result (ADR-0006)
+        try:
+            report = bridge_memos(session, clock)
+        except Exception as e:  # noqa: BLE001 — a bridge failure pages, but
+            #                     the settled, protected book stands untouched
+            state["bridge_failed"] = True
+            return f"bridge FAILED: {e}"[:300]
+        state["bridge"] = report
+        return report.summary()
+
+    def t9_report() -> str:
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
         nav = state.get("nav", Decimal(0))
         desk_report = state.get("desk")
-        failed = bool(state.get("ingest_failed", False)) or bool(
-            state.get("desk_failed", False))
+        bridge_report = state.get("bridge")
+        failed = (bool(state.get("ingest_failed", False))
+                  or bool(state.get("desk_failed", False))
+                  or bool(state.get("bridge_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
+                 bridge_report.summary() if bridge_report is not None else "bridge idle",
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
         if state.get("desk_failed"):
             lines.append("desk FAILED — see log")
+        if state.get("bridge_failed"):
+            lines.append("bridge FAILED — see log")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -199,7 +226,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t5_snapshot", t5_snapshot),
         Node("t6_reconcile", t6_reconcile),
         Node("t7_desk", t7_desk),
-        Node("t8_report", t8_report),
+        Node("t8_bridge", t8_bridge),
+        Node("t9_report", t9_report),
     ])
 
 
@@ -226,7 +254,8 @@ def main() -> None:
         results = run_daily_cycle(s, clock, adapter, desk=desk)
     ingest_line = results.get("t0_ingest") or ""
     failed = ("failed=True" in ingest_line
-              or "desk FAILED" in (results.get("t7_desk") or ""))
+              or "desk FAILED" in (results.get("t7_desk") or "")
+              or "bridge FAILED" in (results.get("t8_bridge") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 

@@ -69,9 +69,12 @@ def _seed_entered_position(s, clock) -> str:
         "       ('USD','AUD','2026-07-15',:r,'zcy-test') "
         "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = :r"),
         {"r": FX_USD_AUD})
+    # created_at from the injected clock: the bridge's 48h candidacy window
+    # must never depend on the DB wall clock (deterministic replays)
     memo_id = str(s.execute(text(
         "INSERT INTO research.memos (memo_type, instrument_symbol, recommendation, "
-        "evidence_refs) VALUES ('committee', 'ZCYA', 'BUY', '[]') RETURNING id")).scalar())
+        "evidence_refs, created_at) VALUES ('committee', 'ZCYA', 'BUY', '[]', :ca) "
+        "RETURNING id"), {"ca": clock.now()}).scalar())
     res = build_proposal(s, clock, memo_id=memo_id, symbol="ZCYA",
                          signal_refs=[str(uuid4())], entry_price=Decimal("100"),
                          stop_price=Decimal("95"), target_price=Decimal("120"))
@@ -99,7 +102,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-        "t5_snapshot", "t6_reconcile", "t7_desk", "t8_report"]
+        "t5_snapshot", "t6_reconcile", "t7_desk", "t8_bridge", "t9_report"]
     # the entry order fills at the 7/14 open AND the 7/15 bar fires the stop
     # in ONE cycle: settle runs before the scan precisely so a just-entered
     # position is never naked while its breaching bar is already ingested
@@ -108,6 +111,9 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     assert results["t6_reconcile"] == "clean"
     assert results["t1_verify_chain"].startswith("chain ok (")
     assert results["t7_desk"] == "desk off (no model key configured)"
+    # the seeded memo (2026-07-13 20:00) is >48h old at this cycle's clock:
+    # a stale thesis is not a bridge candidate at all
+    assert results["t8_bridge"] == "bridged 0 (none) · skipped 0"
 
     pos = s.execute(text(
         "SELECT qty, closed_at FROM trading.positions")).one()
@@ -171,7 +177,10 @@ def test_desk_failure_pages_but_never_undoes_trading(clean_audit):
     assert results["t3_settle"] == "fills=1"              # trading unaffected
     assert results["t6_reconcile"] == "clean"
     assert results["t7_desk"].startswith("desk FAILED: model API melted")
-    assert "desk FAILED" in results["t8_report"]
+    # the bridge still ran after the desk failure: the memo is fresh at this
+    # clock but already consumed by the entry proposal -> recorded skip
+    assert results["t8_bridge"] == "bridged 0 (none) · skipped 1"
+    assert "desk FAILED" in results["t9_report"]
     n_ex = s.execute(text("SELECT count(*) FROM trading.executions")).scalar()
     assert n_ex == 1
 
@@ -191,3 +200,6 @@ def test_desk_skipped_on_non_us_session_day(clean_audit):
                               desk=counting_desk)
     assert results["t7_desk"] == "desk skipped (2026-07-12 is not a US session)"
     assert calls["n"] == 0
+    # the bridge is NOT desk-gated: it runs (and finds no candidates) even on
+    # a non-session day — a manually-run desk's memos must still bridge
+    assert results["t8_bridge"] == "bridged 0 (none) · skipped 0"
