@@ -33,6 +33,38 @@ def test_backfill_cli_clean_week_exits_zero(cli_env, capsys):
     assert "zero red gates" in out
 
 
+def test_backfill_cli_explicit_from_window_exits_zero(cli_env, capsys):
+    """Deep-history mode: --from replaces --years with an explicit ISO start
+    (same fixture week here; the operator points it at 2010-01-01 for real).
+    The report now prints per-instrument inception dates (rules v1.2)."""
+    cli_env.setattr(sys, "argv", ["backfill", "--from", "2024-07-10",
+                                  "--end", "2024-07-15", "--market", "US"])
+    with pytest.raises(SystemExit) as e:
+        backfill_main()
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "zero red gates" in out
+    assert "inception AVGO: 2024-07-10" in out
+
+
+def test_backfill_cli_from_and_years_are_mutually_exclusive(cli_env, capsys):
+    cli_env.setattr(sys, "argv", ["backfill", "--from", "2010-01-01",
+                                  "--years", "2", "--end", "2026-07-10"])
+    with pytest.raises(SystemExit) as e:
+        backfill_main()
+    assert e.value.code == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_backfill_cli_from_after_end_is_rejected(cli_env, capsys):
+    cli_env.setattr(sys, "argv", ["backfill", "--from", "2026-07-11",
+                                  "--end", "2026-07-10"])
+    with pytest.raises(SystemExit) as e:
+        backfill_main()
+    assert e.value.code == 2
+    assert "after --end" in capsys.readouterr().err
+
+
 def test_backfill_cli_red_market_exits_two(cli_env, capsys):
     cli_env.setattr(sys, "argv", ["backfill", "--years", "0.013",
                                   "--end", "2024-07-15", "--market", "AU"])

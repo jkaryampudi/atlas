@@ -19,7 +19,7 @@ from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import (is_trading_day, previous_trading_day,
                                               recent_sessions)
 from atlas.dcp.market_data.models import Bar, GateStatus, Split
-from atlas.dcp.market_data.quality import GateResult, evaluate_gate
+from atlas.dcp.market_data.quality import GateResult, evaluate_gate, inception_map
 
 
 def seed_instruments(session: Session, csv_path: Path) -> int:
@@ -122,10 +122,14 @@ def ingest_day(*, session: Session, adapter: MarketDataAdapter, audit: PostgresA
             bars_by_day.setdefault(b.bar_date, []).append(b)
             upsert_bar(session, inst["id"], b, type(adapter).__name__)
 
+    # Rules v1.2: inception-filtered coverage, computed AFTER this day's upserts
+    # so a brand-new symbol's first stored bar defines its inception. A symbol
+    # with no stored bars at all stays fail-closed expected (honestly RED).
     gate = evaluate_gate(market=market, as_of=day, expected_days=expected_days,
                          bars_by_day=bars_by_day,
                          explained_symbols=frozenset(explained),
-                         expected_symbols=frozenset(i["symbol"] for i in instruments))
+                         expected_symbols=frozenset(i["symbol"] for i in instruments),
+                         inceptions=inception_map(session, market))
     write_gate(session, gate)
 
     audit.append(event_type="market.bars.ingested", entity_type="market", entity_id=market,

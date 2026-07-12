@@ -138,7 +138,9 @@ def test_daily_second_run_is_a_no_op(base_state):
 
 def test_daily_missing_instrument_day_goes_red(base_state, tmp_path):
     """A vendor hole for ONE instrument must red the day even though the other
-    seven are complete (per-instrument coverage, rules v1.1)."""
+    seven are complete (per-instrument coverage; rules v1.2: MSFT is LISTED —
+    it has stored bars before Monday — so inception filtering must not absorb
+    its absence)."""
     s = base_state
     root = tmp_path / "fixtures"
     (root / "bars").mkdir(parents=True)

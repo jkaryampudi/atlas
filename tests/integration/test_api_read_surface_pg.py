@@ -19,7 +19,8 @@ def client(monkeypatch, clean_audit):
     s = clean_audit
     # seed a dedicated instrument + bar; REMOVED at teardown — a lingering
     # active instrument with no bars would (correctly) RED every US gate in
-    # the rest of the suite (per-instrument coverage rules v1.1)
+    # the rest of the suite (per-instrument coverage; still fail-closed for
+    # bar-less instruments under rules v1.2)
     s.execute(text("INSERT INTO market.instruments (symbol, exchange, market, "
                    "instrument_type, name, currency) VALUES "
                    "('TAPI','NYSE','US','stock','Test Api Corp','USD') "

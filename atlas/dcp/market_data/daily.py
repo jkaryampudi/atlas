@@ -49,7 +49,7 @@ from atlas.dcp.market_data.fx import required_pairs, upsert_rate
 from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_split,
                                           upsert_bar, write_gate)
 from atlas.dcp.market_data.models import Bar, GateStatus
-from atlas.dcp.market_data.quality import evaluate_gate
+from atlas.dcp.market_data.quality import evaluate_gate, inception_map
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -151,19 +151,28 @@ def _gate_market(session: Session, market: str, days: list[date],
                  now: datetime) -> list[tuple[date, str]]:
     """Gate every fetched session (from stored bars, window = previous session +
     day, exactly as backfill gates) plus carry-forward gates for non-trading
-    days after the last completed session up to the exchange-local today."""
+    days after the last completed session up to the exchange-local today.
+
+    Rules v1.2: expected symbols are inception-filtered (a symbol is expected
+    only from its earliest STORED bar onward — quality.inception_map). For the
+    incremental path this is almost always a no-op (every gated day is recent),
+    but it keeps the three gate call sites on one rule set; an instrument with
+    NO stored bars stays fail-closed expected, so needs_backfill days still go
+    honestly RED."""
     written: list[tuple[date, str]] = []
     if days:
         lo = previous_trading_day(market, days[0])
         bars_by_day = _stored_bars(session, market, lo, days[-1])
         explained_by_day = _stored_splits(session, market, lo, days[-1])
+        inceptions = inception_map(session, market)
         for d in days:
             p = previous_trading_day(market, d)
             window = {p: bars_by_day.get(p, []), d: bars_by_day.get(d, [])}
             gate = evaluate_gate(market=market, as_of=d, expected_days=[d],
                                  bars_by_day=window,
                                  explained_symbols=frozenset(explained_by_day.get(d, set())),
-                                 expected_symbols=expected_symbols)
+                                 expected_symbols=expected_symbols,
+                                 inceptions=inceptions)
             write_gate(session, gate)
             written.append((d, gate.status.value))
     d = last_completed + timedelta(days=1)
