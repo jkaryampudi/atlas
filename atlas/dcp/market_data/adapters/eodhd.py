@@ -18,7 +18,10 @@ from atlas.dcp.market_data.models import Bar, Split
 BASE = "https://eodhd.com/api"
 
 
-_US_EXCHANGES = frozenset({"NYSE", "NASDAQ", "NYSEARCA", "BATS", "AMEX"})
+# "US" is EODHD's own umbrella venue code (index-component payloads label
+# constituents that way); it is unambiguous for the .US suffix rule, and the
+# symbol-map collision check still rejects dual listings.
+_US_EXCHANGES = frozenset({"NYSE", "NASDAQ", "NYSEARCA", "BATS", "AMEX", "US"})
 
 
 def vendor_symbol(symbol: str, exchange: str) -> str:
@@ -31,6 +34,23 @@ def vendor_symbol(symbol: str, exchange: str) -> str:
         return f"{symbol}.US"
     raise ValueError(f"no EODHD suffix mapping for exchange {exchange!r} ({symbol}); "
                      "add it to _US_EXCHANGES or map it explicitly")
+
+
+def symbol_map_from_universe(json_path: Path) -> dict[str, str]:
+    """Canonical symbol -> EODHD vendor code, from the ADR-0007 universe
+    manifest (seeds/universe.json) — the manifest is the canonical universe;
+    the seed CSV remains for the original nine. Same strict rules: unknown
+    exchange fails loudly, dual-listed collisions refuse."""
+    import json as _json
+    out: dict[str, str] = {}
+    for entry in _json.loads(json_path.read_text()):
+        sym = entry["symbol"]
+        code = vendor_symbol(sym, entry["exchange"])
+        if sym in out and out[sym] != code:
+            raise ValueError(f"dual-listed symbol {sym!r}: {out[sym]} vs {code} — "
+                             "symbol-map keys must be unambiguous")
+        out[sym] = code
+    return out
 
 
 def symbol_map_from_seeds(csv_path: Path) -> dict[str, str]:

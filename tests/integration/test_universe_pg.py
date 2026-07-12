@@ -23,9 +23,11 @@ MANIFEST = ROOT / "seeds" / "universe.json"
 
 
 def test_sync_is_a_no_op_over_freshly_seeded_instruments(pg_session):
+    # the SMALL fixture (the nine originals): the production manifest now
+    # carries the full ADR-0007 universe and would legitimately insert 103
     s = pg_session
     seed_instruments(s, ROOT / "seeds" / "instruments_seed.csv")
-    res = sync_universe(s, MANIFEST)
+    res = sync_universe(s, ROOT / "tests" / "fixtures" / "universe_small.json")
     assert res.inserted == ()
     assert res.updated == ()
     assert res.unchanged == 9
@@ -102,7 +104,12 @@ def test_universe_cli_syncs_and_audits(monkeypatch, pg_session, capsys):
     s.commit()  # the CLI opens its own connection and must see the seeds
     monkeypatch.setenv("ATLAS_DATABASE_URL", URL)
     reset_app_engine()
-    monkeypatch.setattr(sys, "argv", ["universe"])
+    # a SMALL fixture manifest: the real one now carries the full ADR-0007
+    # universe, and committing 103 barless instruments into atlas_test would
+    # red-gate every later test (observed) — the CLI contract is what is
+    # under test, not the production universe
+    small = ROOT / "tests" / "fixtures" / "universe_small.json"
+    monkeypatch.setattr(sys, "argv", ["universe", "--path", str(small)])
     universe_main()  # no SystemExit on success (fx.py convention)
     reset_app_engine()
     assert "unchanged=9" in capsys.readouterr().out
