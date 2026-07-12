@@ -1,12 +1,20 @@
-"""Atlas API — Phase 1 read-only surface (Doc 06).
+"""Atlas API — the single control surface (Doc 06).
 
-Also serves the Atlas Console (single-file HTML ops UI, pure API client) at
+Serves the Atlas Console (single-file HTML ops UI, pure API client) at
 /console — same origin as the API it reads. Deviation from Doc 07's Streamlit
 choice, recorded here: same 'pure API client' constraint, better surface.
+
+With ATLAS_INPROC_SCHEDULER=1 this process ALSO fires the daily cycle and
+backup on schedule (atlas.ops.scheduler) — the Mac interim where launchd is
+TCC-blocked; Linux/systemd deployments leave it unset (the timers own it).
 """
 from __future__ import annotations
 
+import asyncio
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
@@ -24,7 +32,20 @@ from atlas.api.routers import (
 
 _CONSOLE = Path(__file__).resolve().parents[1] / "dashboard" / "console.html"
 
-app = FastAPI(title="Atlas AI Capital", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    task: asyncio.Task[None] | None = None
+    if os.environ.get("ATLAS_INPROC_SCHEDULER") == "1":
+        from atlas.ops.scheduler import scheduler_loop
+
+        task = asyncio.create_task(scheduler_loop())
+    yield
+    if task is not None:
+        task.cancel()
+
+
+app = FastAPI(title="Atlas AI Capital", version="0.1.0", lifespan=_lifespan)
 
 
 @app.get("/", include_in_schema=False)

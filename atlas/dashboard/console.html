@@ -151,8 +151,11 @@
       <div class="plane-tags"><span class="r">REASONING</span><span class="d">DETERMINISTIC</span></div>
       <div id="brief" style="margin-top:20px"></div>
       <div id="gates-alerts" style="margin-top:14px"></div>
-      <h2>Daily Cycle — Jobs Board</h2>
-      <div class="note">One row per pipeline run (T0 ingest → T8 report). Green = the machine ran itself; red names the step that stopped it.</div>
+      <h2 style="display:flex;align-items:center;gap:14px">Daily Cycle — Jobs Board
+        <button id="run-cycle-btn" style="background:none;border:1px solid rgba(53,217,138,0.5);color:var(--green);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer;letter-spacing:0.1em">RUN CYCLE NOW</button>
+        <span id="sched-status" class="note" style="margin:0"></span>
+      </h2>
+      <div class="note">One row per pipeline run (T0 ingest → T9 report). Green = the machine ran itself; red names the step that stopped it. The cycle also fires itself daily at 09:30 — the button is for whenever you don't want to wait.</div>
       <div class="card" id="jobs-board"><div class="quiet">awaiting data</div></div>
       <h2>Performance — Monthly Attribution</h2>
       <div class="note" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
@@ -992,8 +995,27 @@ document.getElementById("settle-btn").onclick = async()=>{
   renderTrading(true);
 };
 
-/* ---------- jobs board: pipeline runs ---------- */
+/* ---------- jobs board: pipeline runs + the one-click cycle ---------- */
+document.getElementById("run-cycle-btn").onclick = async()=>{
+  const b = document.getElementById("run-cycle-btn");
+  b.disabled = true; b.textContent = "STARTING…";
+  const r = await postFull("/v1/system/run-daily", {});
+  b.textContent = r.data && r.data.started ? "CYCLE RUNNING…" : "ALREADY RUNNING";
+  setTimeout(()=>{ b.disabled = false; b.textContent = "RUN CYCLE NOW"; renderJobs(); }, 4000);
+};
+
 async function renderJobs(){
+  const st = await get("/v1/system/scheduler");
+  const sel = document.getElementById("sched-status");
+  if(st.data){
+    const s = st.data, last = s.last || {};
+    sel.textContent = s.cycle_running
+      ? "cycle running now…"
+      : `next auto-run ${ts(s.next_cycle_utc)} UTC` +
+        (last.finished_at ? ` · last: ${last.ok ? "ok" : "FAILED"} ${rel(last.finished_at)}` : "");
+    sel.style.color = last.ok === false ? "var(--red)" : "";
+  } else sel.textContent = "";
+
   const el = document.getElementById("jobs-board");
   const r = await get("/v1/system/pipeline-runs?limit=10");
   if(r.err) return deg(el, r.err);

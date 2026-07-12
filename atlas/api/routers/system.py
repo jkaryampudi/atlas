@@ -56,3 +56,25 @@ def pipeline_runs(limit: int = 14) -> list[dict[str, object]]:
                  "completed_at": r["completed_at"].isoformat()
                  if r["completed_at"] else None,
                  "nodes": nodes[r["run_id"]]} for r in runs]
+
+
+@router.get("/scheduler")
+def scheduler_status() -> dict[str, object]:
+    """The in-process scheduler's view: is a cycle running, when do the next
+    cycle/backup fire, how did the last one end."""
+    from atlas.ops.scheduler import status
+
+    return status()
+
+
+@router.post("/run-daily")
+def run_daily() -> dict[str, object]:
+    """One-click T0-T9 cycle from the console — the Principal's no-terminal
+    path. Returns started=False (409-free, honest) when one is already
+    running; the jobs board shows the result either way."""
+    from atlas.ops.scheduler import start_cycle
+
+    started = start_cycle()
+    return {"started": started,
+            "note": "cycle running — watch the jobs board" if started
+            else "a cycle is already running — nothing fired twice"}
