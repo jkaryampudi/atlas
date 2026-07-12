@@ -1,0 +1,574 @@
+symbol,exchange,market,instrument_type,name,sector_gics,currency,economic_exposure
+A,US,US,stock,Agilent Technologies Inc,,USD,US
+AAL,US,US,stock,American Airlines Group,,USD,US
+AAP,US,US,stock,Advance Auto Parts Inc,,USD,US
+ABMD,US,US,stock,ABIOMED Inc,,USD,US
+ABNB,US,US,stock,Airbnb Inc,,USD,US
+ACGL,US,US,stock,Arch Capital Group Ltd.,,USD,US
+ADI,US,US,stock,Analog Devices Inc,,USD,US
+ADM,US,US,stock,Archer-Daniels-Midland Company,,USD,US
+ADNT,US,US,stock,Adient PLC,,USD,US
+ADP,US,US,stock,Automatic Data Processing Inc,,USD,US
+ADSK,US,US,stock,Autodesk Inc,,USD,US
+ADT,US,US,stock,ADT Inc,,USD,US
+AEE,US,US,stock,Ameren Corp,,USD,US
+AEP,US,US,stock,American Electric Power Co Inc,,USD,US
+AES,US,US,stock,The AES Corporation,,USD,US
+AFL,US,US,stock,Aflac Incorporated,,USD,US
+AGN,US,US,stock,Allergan plc,,USD,US
+AIG,US,US,stock,American International Group Inc,,USD,US
+AIRC,US,US,stock,Apartment Income REIT Corp,,USD,US
+AIZ,US,US,stock,"Assurant, Inc.",,USD,US
+AJG,US,US,stock,Arthur J Gallagher & Co,,USD,US
+AKAM,US,US,stock,Akamai Technologies Inc,,USD,US
+ALB,US,US,stock,Albemarle Corp,,USD,US
+ALGN,US,US,stock,Align Technology Inc,,USD,US
+ALK,US,US,stock,Alaska Air Group Inc,,USD,US
+ALL,US,US,stock,The Allstate Corporation,,USD,US
+ALLE,US,US,stock,Allegion PLC,,USD,US
+ALXN,US,US,stock,Alexion Pharmaceuticals Inc,,USD,US
+AMCR,US,US,stock,Amcor PLC,,USD,US
+AME,US,US,stock,Ametek Inc,,USD,US
+AMG,US,US,stock,"Affiliated Managers Group, Inc.",,USD,US
+AMP,US,US,stock,Ameriprise Financial Inc,,USD,US
+AMTM,US,US,stock,Amentum Holdings Inc.,,USD,US
+ANET,US,US,stock,Arista Networks,,USD,US
+ANR,US,US,stock,Alpha Natural Resources Inc,,USD,US
+ANSS,US,US,stock,ANSYS Inc,,USD,US
+AON,US,US,stock,Aon PLC,,USD,US
+AOS,US,US,stock,Smith AO Corporation,,USD,US
+APA,US,US,stock,APA Corporation,,USD,US
+APD,US,US,stock,Air Products and Chemicals Inc,,USD,US
+APH,US,US,stock,Amphenol Corporation,,USD,US
+APO,US,US,stock,Apollo Global Management LLC Class A,,USD,US
+APP,US,US,stock,Applovin Corp,,USD,US
+APTV,US,US,stock,Aptiv PLC,,USD,US
+ARE,US,US,stock,Alexandria Real Estate Equities Inc,,USD,US
+ARES,US,US,stock,Ares Management LP,,USD,US
+ARG,US,US,stock,Airgas Inc,,USD,US
+ARNC,US,US,stock,Arconic Corporation,,USD,US
+ASIX,US,US,stock,AdvanSix Inc,,USD,US
+ATO,US,US,stock,Atmos Energy Corporation,,USD,US
+ATVI,US,US,stock,Activision Blizzard Inc,,USD,US
+AVB,US,US,stock,AvalonBay Communities Inc,,USD,US
+AVY,US,US,stock,Avery Dennison Corp,,USD,US
+AWK,US,US,stock,American Water Works,,USD,US
+AXON,US,US,stock,Axon Enterprise Inc.,,USD,US
+AYI,US,US,stock,Acuity Brands Inc,,USD,US
+AZO,US,US,stock,AutoZone Inc,,USD,US
+BALL,US,US,stock,Ball Corporation,,USD,US
+BAX,US,US,stock,Baxter International Inc,,USD,US
+BBWI,US,US,stock,Bath & Body Works Inc.,,USD,US
+BBY,US,US,stock,Best Buy Co. Inc,,USD,US
+BDX,US,US,stock,Becton Dickinson and Company,,USD,US
+BEN,US,US,stock,Franklin Resources Inc,,USD,US
+BF-B,US,US,stock,Brown-Forman Corporation,,USD,US
+BFH,US,US,stock,"Bread Financial Holdings, Inc.",,USD,US
+BG,US,US,stock,Bunge Global SA,,USD,US
+BHF,US,US,stock,"Brighthouse Financial, Inc.",,USD,US
+BIIB,US,US,stock,Biogen Inc,,USD,US
+BIO,US,US,stock,Bio-Rad Laboratories Inc,,USD,US
+BIVV,US,US,stock,Bioverativ Inc,,USD,US
+BKR,US,US,stock,Baker Hughes Co,,USD,US
+BLDR,US,US,stock,Builders FirstSource Inc,,USD,US
+BR,US,US,stock,Broadridge Financial Solutions Inc,,USD,US
+BRO,US,US,stock,Brown & Brown Inc,,USD,US
+BSX,US,US,stock,Boston Scientific Corp,,USD,US
+BWA,US,US,stock,BorgWarner Inc,,USD,US
+BX,US,US,stock,Blackstone Group Inc,,USD,US
+BXLT,US,US,stock,Baxalta Inc,,USD,US
+BXP,US,US,stock,"BXP, Inc.",,USD,US
+CAG,US,US,stock,"Conagra Brands, Inc.",,USD,US
+CAH,US,US,stock,Cardinal Health Inc,,USD,US
+CARR,US,US,stock,Carrier Global Corp,,USD,US
+CARS,US,US,stock,Cars.com Inc,,USD,US
+CASY,US,US,stock,Caseys General Stores Inc,,USD,US
+CB,US,US,stock,Chubb Ltd,,USD,US
+CBE,US,US,stock,Cooper Industries plc,,USD,US
+CBOE,US,US,stock,Cboe Global Markets Inc,,USD,US
+CBRE,US,US,stock,CBRE Group Inc Class A,,USD,US
+CCI,US,US,stock,Crown Castle,,USD,US
+CCL,US,US,stock,Carnival Corporation,,USD,US
+CDNS,US,US,stock,Cadence Design Systems Inc,,USD,US
+CDW,US,US,stock,CDW Corp,,USD,US
+CE,US,US,stock,Celanese Corporation,,USD,US
+CEG,US,US,stock,Constellation Energy Corp,,USD,US
+CERN,US,US,stock,Cerner Corp,,USD,US
+CF,US,US,stock,CF Industries Holdings Inc,,USD,US
+CFG,US,US,stock,"Citizens Financial Group, Inc.",,USD,US
+CHD,US,US,stock,Church & Dwight Company Inc,,USD,US
+CHRW,US,US,stock,CH Robinson Worldwide Inc,,USD,US
+CHTR,US,US,stock,Charter Communications Inc,,USD,US
+CHX,US,US,stock,ChampionX Corporation,,USD,US
+CI,US,US,stock,Cigna Corp,,USD,US
+CIEN,US,US,stock,Ciena Corp,,USD,US
+CINF,US,US,stock,Cincinnati Financial Corporation,,USD,US
+CLF,US,US,stock,Cleveland-Cliffs Inc,,USD,US
+CLX,US,US,stock,The Clorox Company,,USD,US
+CMA,US,US,stock,Comerica Incorporated,,USD,US
+CMCSK,US,US,stock,Comcast Corp,,USD,US
+CME,US,US,stock,CME Group Inc,,USD,US
+CMG,US,US,stock,Chipotle Mexican Grill Inc,,USD,US
+CMI,US,US,stock,Cummins Inc,,USD,US
+CMS,US,US,stock,CMS Energy Corporation,,USD,US
+CNC,US,US,stock,Centene Corp,,USD,US
+CNDT,US,US,stock,Conduent Inc,,USD,US
+CNP,US,US,stock,CenterPoint Energy Inc,,USD,US
+COHR,US,US,stock,Coherent Inc,,USD,US
+COIN,US,US,stock,Coinbase Global Inc,,USD,US
+COO,US,US,stock,"The Cooper Companies, Inc",,USD,US
+COR,US,US,stock,Cencora Inc.,,USD,US
+COTY,US,US,stock,Coty Inc,,USD,US
+COV,US,US,stock,Covidien plc,,USD,US
+CPAY,US,US,stock,Corpay Inc,,USD,US
+CPB,US,US,stock,Campbell’s Co,,USD,US
+CPGX,US,US,stock,Columbia Pipeline Group Inc,,USD,US
+CPRI,US,US,stock,Capri Holdings Ltd,,USD,US
+CPRT,US,US,stock,Copart Inc,,USD,US
+CPT,US,US,stock,Camden Property Trust,,USD,US
+CRH,US,US,stock,CRH PLC ADR,,USD,US
+CRL,US,US,stock,Charles River Laboratories,,USD,US
+CRWD,US,US,stock,Crowdstrike Holdings Inc,,USD,US
+CSGP,US,US,stock,CoStar Group Inc,,USD,US
+CSRA,US,US,stock,CSRA Inc,,USD,US
+CSX,US,US,stock,CSX Corporation,,USD,US
+CTAS,US,US,stock,Cintas Corporation,,USD,US
+CTLT,US,US,stock,Catalent Inc,,USD,US
+CTRA,US,US,stock,Coterra Energy Inc,,USD,US
+CTSH,US,US,stock,Cognizant Technology Solutions Corp Class A,,USD,US
+CTVA,US,US,stock,Corteva Inc,,USD,US
+CVC,US,US,stock,Cablevision Systems Corp,,USD,US
+CVET,US,US,stock,Covetrus Inc,,USD,US
+CVNA,US,US,stock,Carvana Co,,USD,US
+CXO,US,US,stock,Concho Resources Inc,,USD,US
+CZR,US,US,stock,Caesars Entertainment Corporation,,USD,US
+D,US,US,stock,Dominion Energy Inc,,USD,US
+DAL,US,US,stock,Delta Air Lines Inc,,USD,US
+DASH,US,US,stock,"DoorDash, Inc. Class A Common Stock",,USD,US
+DAY,US,US,stock,Dayforce Inc.,,USD,US
+DD,US,US,stock,Dupont De Nemours Inc,,USD,US
+DDOG,US,US,stock,Datadog Inc,,USD,US
+DECK,US,US,stock,Deckers Outdoor Corporation,,USD,US
+DELL,US,US,stock,Dell Technologies Inc,,USD,US
+DFS,US,US,stock,Discover Financial Services,,USD,US
+DG,US,US,stock,Dollar General Corporation,,USD,US
+DGX,US,US,stock,Quest Diagnostics Incorporated,,USD,US
+DHI,US,US,stock,DR Horton Inc,,USD,US
+DINO,US,US,stock,HF Sinclair Corp,,USD,US
+DISH,US,US,stock,DISH Network Corporation,,USD,US
+DLPH,US,US,stock,Delphi Technologies PLC,,USD,US
+DLR,US,US,stock,Digital Realty Trust Inc,,USD,US
+DLTR,US,US,stock,Dollar Tree Inc,,USD,US
+DOC,US,US,stock,Healthpeak Properties Inc,,USD,US
+DOV,US,US,stock,Dover Corporation,,USD,US
+DOW,US,US,stock,Dow Inc,,USD,US
+DPZ,US,US,stock,Domino's Pizza Inc Common Stock,,USD,US
+DRE,US,US,stock,Duke Realty Corporation,,USD,US
+DRI,US,US,stock,Darden Restaurants Inc,,USD,US
+DTE,US,US,stock,DTE Energy Company,,USD,US
+DTM,US,US,stock,DT Midstream Inc,,USD,US
+DVA,US,US,stock,DaVita HealthCare Partners Inc,,USD,US
+DVN,US,US,stock,Devon Energy Corporation,,USD,US
+DXC,US,US,stock,DXC Technology Co,,USD,US
+DXCM,US,US,stock,DexCom Inc,,USD,US
+E,US,US,stock,Eni SpA ADR,,USD,US
+EA,US,US,stock,Electronic Arts Inc,,USD,US
+EBAY,US,US,stock,eBay Inc,,USD,US
+ECL,US,US,stock,Ecolab Inc,,USD,US
+ED,US,US,stock,Consolidated Edison Inc,,USD,US
+EFX,US,US,stock,Equifax Inc,,USD,US
+EG,US,US,stock,Everest Group Ltd,,USD,US
+EIX,US,US,stock,Edison International,,USD,US
+EL,US,US,stock,Estee Lauder Companies Inc,,USD,US
+ELV,US,US,stock,Elevance Health Inc,,USD,US
+EMBC,US,US,stock,Embecta Corp,,USD,US
+EME,US,US,stock,EMCOR Group Inc,,USD,US
+EMN,US,US,stock,Eastman Chemical Company,,USD,US
+ENDP,US,US,stock,Endo International PLC,,USD,US
+ENPH,US,US,stock,Enphase Energy Inc,,USD,US
+EOG,US,US,stock,EOG Resources Inc,,USD,US
+EPAM,US,US,stock,EPAM Systems Inc,,USD,US
+EQIX,US,US,stock,Equinix Inc,,USD,US
+EQR,US,US,stock,Equity Residential,,USD,US
+EQT,US,US,stock,EQT Corporation,,USD,US
+ERIE,US,US,stock,Erie Indemnity Company,,USD,US
+ES,US,US,stock,Eversource Energy,,USD,US
+ESRX,US,US,stock,Express Scripts Holding Co,,USD,US
+ESS,US,US,stock,Essex Property Trust Inc,,USD,US
+ETN,US,US,stock,Eaton Corporation PLC,,USD,US
+ETR,US,US,stock,Entergy Corporation,,USD,US
+ETSY,US,US,stock,"Etsy, Inc.",,USD,US
+EVHC,US,US,stock,Envision Healthcare Holdings,,USD,US
+EVRG,US,US,stock,"Evergy, Inc.",,USD,US
+EW,US,US,stock,Edwards Lifesciences Corp,,USD,US
+EXC,US,US,stock,Exelon Corporation,,USD,US
+EXE,US,US,stock,Expand Energy Corporation,,USD,US
+EXPD,US,US,stock,"Expeditors International of Washington, Inc.",,USD,US
+EXPE,US,US,stock,Expedia Group Inc.,,USD,US
+EXR,US,US,stock,Extra Space Storage Inc,,USD,US
+F,US,US,stock,Ford Motor Company,,USD,US
+FANG,US,US,stock,Diamondback Energy Inc,,USD,US
+FAST,US,US,stock,Fastenal Company,,USD,US
+FBIN,US,US,stock,Fortune Brands Innovations Inc.,,USD,US
+FCPT,US,US,stock,Four Corners Property Trust Inc,,USD,US
+FCX,US,US,stock,Freeport-McMoran Copper & Gold Inc,,USD,US
+FDS,US,US,stock,FactSet Research Systems Inc,,USD,US
+FDXF,US,US,stock,"FedEx Freight Holding Company, Inc.",,USD,US
+FE,US,US,stock,FirstEnergy Corporation,,USD,US
+FFIV,US,US,stock,F5 Networks Inc,,USD,US
+FICO,US,US,stock,Fair Isaac Corporation,,USD,US
+FIS,US,US,stock,Fidelity National Information Services Inc,,USD,US
+FISV,US,US,stock,"Fiserv, Inc.",,USD,US
+FITB,US,US,stock,Fifth Third Bancorp,,USD,US
+FIX,US,US,stock,Comfort Systems USA Inc,,USD,US
+FL,US,US,stock,Foot Locker Inc,,USD,US
+FLEX,US,US,stock,Flex Ltd,,USD,US
+FMC,US,US,stock,FMC Corporation,,USD,US
+FOSL,US,US,stock,Fossil Group Inc,,USD,US
+FOX,US,US,stock,Fox Corp Class B,,USD,US
+FOXA,US,US,stock,Fox Corp Class A,,USD,US
+FRC,US,US,stock,First Republic Bank,,USD,US
+FRT,US,US,stock,Federal Realty Investment Trust,,USD,US
+FSLR,US,US,stock,First Solar Inc,,USD,US
+FTI,US,US,stock,TechnipFMC PLC,,USD,US
+FTNT,US,US,stock,Fortinet Inc,,USD,US
+FTRE,US,US,stock,Fortrea Holdings Inc.,,USD,US
+FTV,US,US,stock,Fortive Corp,,USD,US
+GAS,US,US,stock,AGL Resources Inc,,USD,US
+GDDY,US,US,stock,Godaddy Inc,,USD,US
+GEHC,US,US,stock,GE HealthCare Technologies Inc.,,USD,US
+GEN,US,US,stock,Gen Digital Inc.,,USD,US
+GG,US,US,stock,Goldcorp Inc,,USD,US
+GGP,US,US,stock,General Growth Properties Inc,,USD,US
+GIS,US,US,stock,General Mills Inc,,USD,US
+GL,US,US,stock,Globe Life Inc,,USD,US
+GLW,US,US,stock,Corning Incorporated,,USD,US
+GMCR,US,US,stock,Green Mountain Coffee Roasters Inc,,USD,US
+GME,US,US,stock,GameStop Corp.,,USD,US
+GNRC,US,US,stock,Generac Holdings Inc,,USD,US
+GPC,US,US,stock,Genuine Parts Co,,USD,US
+GPN,US,US,stock,Global Payments Inc,,USD,US
+GRMN,US,US,stock,Garmin Ltd,,USD,US
+GTX,US,US,stock,Garrett Motion Inc,,USD,US
+GWW,US,US,stock,WW Grainger Inc,,USD,US
+HAL,US,US,stock,Halliburton Company,,USD,US
+HAS,US,US,stock,Hasbro Inc,,USD,US
+HBAN,US,US,stock,Huntington Bancshares Incorporated,,USD,US
+HBI,US,US,stock,Hanesbrands Inc,,USD,US
+HCA,US,US,stock,"HCA Healthcare, Inc.",,USD,US
+HES,US,US,stock,Hess Corporation,,USD,US
+HIG,US,US,stock,Hartford Financial Services Group,,USD,US
+HII,US,US,stock,Huntington Ingalls Industries Inc,,USD,US
+HLT,US,US,stock,Hilton Worldwide Holdings Inc,,USD,US
+HOLX,US,US,stock,Hologic Inc,,USD,US
+HON,US,US,stock,Honeywell International Inc,,USD,US
+HOOD,US,US,stock,Robinhood Markets Inc,,USD,US
+HP,US,US,stock,Helmerich and Payne Inc,,USD,US
+HPE,US,US,stock,Hewlett Packard Enterprise Co,,USD,US
+HPQ,US,US,stock,HP Inc,,USD,US
+HRL,US,US,stock,Hormel Foods Corporation,,USD,US
+HSIC,US,US,stock,Henry Schein Inc,,USD,US
+HST,US,US,stock,Host Hotels & Resorts Inc,,USD,US
+HSY,US,US,stock,Hershey Co,,USD,US
+HUBB,US,US,stock,Hubbell Inc,,USD,US
+HUM,US,US,stock,Humana Inc,,USD,US
+HWM,US,US,stock,Howmet Aerospace Inc,,USD,US
+IBKR,US,US,stock,Interactive Brokers Group Inc,,USD,US
+ICE,US,US,stock,Intercontinental Exchange Inc,,USD,US
+IDXX,US,US,stock,IDEXX Laboratories Inc,,USD,US
+IEX,US,US,stock,IDEX Corporation,,USD,US
+IFF,US,US,stock,International Flavors & Fragrances Inc,,USD,US
+IILGV,US,US,stock,IILGV,,USD,US
+ILMN,US,US,stock,Illumina Inc,,USD,US
+INCY,US,US,stock,Incyte Corporation,,USD,US
+INFO_old1,US,US,stock,Ihs Markit Ltd,,USD,US
+INVH,US,US,stock,Invitation Homes Inc,,USD,US
+IP,US,US,stock,International Paper,,USD,US
+IPG,US,US,stock,Interpublic Group of Companies Inc,,USD,US
+IPGP,US,US,stock,IPG Photonics Corporation,,USD,US
+IQV,US,US,stock,IQVIA Holdings Inc,,USD,US
+IR,US,US,stock,Ingersoll Rand Inc,,USD,US
+IRM,US,US,stock,Iron Mountain Incorporated,,USD,US
+IT,US,US,stock,Gartner Inc,,USD,US
+ITW,US,US,stock,Illinois Tool Works Inc,,USD,US
+IVZ,US,US,stock,Invesco Plc,,USD,US
+J,US,US,stock,Jacobs Solutions Inc.,,USD,US
+JBGS,US,US,stock,JBG SMITH Properties,,USD,US
+JBHT,US,US,stock,JB Hunt Transport Services Inc,,USD,US
+JBL,US,US,stock,Jabil Circuit Inc,,USD,US
+JCI,US,US,stock,Johnson Controls International PLC,,USD,US
+JKHY,US,US,stock,Jack Henry & Associates Inc,,USD,US
+JNPR,US,US,stock,Juniper Networks Inc,,USD,US
+K,US,US,stock,Kellanova,,USD,US
+KD,US,US,stock,Kyndryl Holdings Inc,,USD,US
+KDP,US,US,stock,Keurig Dr Pepper Inc,,USD,US
+KEY,US,US,stock,KeyCorp,,USD,US
+KEYS,US,US,stock,Keysight Technologies Inc,,USD,US
+KHC,US,US,stock,Kraft Heinz Co,,USD,US
+KIM,US,US,stock,Kimco Realty Corporation,,USD,US
+KKR,US,US,stock,KKR & Co. Inc.,,USD,US
+KLAC,US,US,stock,KLA Corporation,,USD,US
+KLG,US,US,stock,WK Kellogg Co,,USD,US
+KMB,US,US,stock,Kimberly-Clark Corporation,,USD,US
+KMI,US,US,stock,Kinder Morgan Inc,,USD,US
+KMX,US,US,stock,CarMax Inc,,USD,US
+KR,US,US,stock,Kroger Company,,USD,US
+KSU,US,US,stock,Kansas City Southern,,USD,US
+KTB,US,US,stock,Kontoor Brands Inc,,USD,US
+KVUE,US,US,stock,Kenvue Inc.,,USD,US
+L,US,US,stock,Loews Corp,,USD,US
+LDOS,US,US,stock,Leidos Holdings Inc,,USD,US
+LEN,US,US,stock,Lennar Corporation,,USD,US
+LEN-N,US,US,stock,Lennar Corp.-Class B Temporary Placeholder Security (TPS),,USD,US
+LH,US,US,stock,Laboratory Corporation of America Holdings,,USD,US
+LHX,US,US,stock,L3Harris Technologies Inc,,USD,US
+LII,US,US,stock,Lennox International Inc,,USD,US
+LITE,US,US,stock,Lumentum Holdings Inc,,USD,US
+LKQ,US,US,stock,LKQ Corporation,,USD,US
+LNT,US,US,stock,Alliant Energy Corp,,USD,US
+LO,US,US,stock,Lorillard Inc,,USD,US
+LTHM,US,US,stock,Livent Corp,,USD,US
+LULU,US,US,stock,Lululemon Athletica Inc.,,USD,US
+LUV,US,US,stock,Southwest Airlines Company,,USD,US
+LVLT,US,US,stock,Level 3 Communications Inc,,USD,US
+LVS,US,US,stock,Las Vegas Sands Corp,,USD,US
+LW,US,US,stock,Lamb Weston Holdings Inc,,USD,US
+LYB,US,US,stock,LyondellBasell Industries NV,,USD,US
+LYV,US,US,stock,Live Nation Entertainment Inc,,USD,US
+MAA,US,US,stock,Mid-America Apartment Communities Inc,,USD,US
+MAC,US,US,stock,Macerich Company,,USD,US
+MAR,US,US,stock,Marriott International Inc,,USD,US
+MAS,US,US,stock,Masco Corporation,,USD,US
+MBC,US,US,stock,MasterBrand Inc.,,USD,US
+MBGL,US,US,stock,Mobility Global Inc.,,USD,US
+MCHP,US,US,stock,Microchip Technology Inc,,USD,US
+MCK,US,US,stock,McKesson Corporation,,USD,US
+MCO,US,US,stock,Moodys Corporation,,USD,US
+MET,US,US,stock,MetLife Inc,,USD,US
+MGM,US,US,stock,MGM Resorts International,,USD,US
+MHK,US,US,stock,Mohawk Industries Inc,,USD,US
+MJN,US,US,stock,Mead Johnson Nutrition CO,,USD,US
+MKC,US,US,stock,McCormick & Company Incorporated,,USD,US
+MKTX,US,US,stock,MarketAxess Holdings Inc,,USD,US
+MLM,US,US,stock,Martin Marietta Materials Inc,,USD,US
+MNK,US,US,stock,Mallinckrodt plc,,USD,US
+MNST,US,US,stock,Monster Beverage Corp,,USD,US
+MOH,US,US,stock,Molina Healthcare Inc,,USD,US
+MOS,US,US,stock,The Mosaic Company,,USD,US
+MPC,US,US,stock,Marathon Petroleum Corp,,USD,US
+MPWR,US,US,stock,Monolithic Power Systems Inc,,USD,US
+MRNA,US,US,stock,Moderna Inc,,USD,US
+MRO,US,US,stock,Marathon Oil Corporation,,USD,US
+MRP_old,US,US,stock,Millrose Properties Inc CL A,,USD,US
+MRSH,US,US,stock,"Marsh & McLennan Companies, Inc.",,USD,US
+MRVL,US,US,stock,Marvell Technology Group Ltd,,USD,US
+MSCI,US,US,stock,MSCI Inc,,USD,US
+MSI,US,US,stock,Motorola Solutions Inc,,USD,US
+MTB,US,US,stock,M&T Bank Corporation,,USD,US
+MTCH,US,US,stock,Match Group Inc,,USD,US
+MTD,US,US,stock,Mettler-Toledo International Inc,,USD,US
+MXIM,US,US,stock,Maxim Integrated Products Inc,,USD,US
+NAVI,US,US,stock,Navient Corp,,USD,US
+NCLH,US,US,stock,Norwegian Cruise Line Holdings Ltd,,USD,US
+NDAQ,US,US,stock,Nasdaq Inc,,USD,US
+NDSN,US,US,stock,Nordson Corporation,,USD,US
+NEM,US,US,stock,Newmont Goldcorp Corp,,USD,US
+NFX_old,US,US,stock,Newfield Exploration Company,,USD,US
+NGVT,US,US,stock,Ingevity Corp,,USD,US
+NI,US,US,stock,NiSource Inc,,USD,US
+NKTR,US,US,stock,Nektar Therapeutics,,USD,US
+NLSN,US,US,stock,Nielsen Holdings PLC,,USD,US
+NOC,US,US,stock,Northrop Grumman Corporation,,USD,US
+NRG,US,US,stock,NRG Energy Inc.,,USD,US
+NSC,US,US,stock,Norfolk Southern Corporation,,USD,US
+NTAP,US,US,stock,NetApp Inc,,USD,US
+NTRS,US,US,stock,Northern Trust Corporation,,USD,US
+NUE,US,US,stock,Nucor Corp,,USD,US
+NVR,US,US,stock,NVR Inc,,USD,US
+NVT,US,US,stock,nVent Electric PLC,,USD,US
+NWS,US,US,stock,News Corp B,,USD,US
+NWSA,US,US,stock,News Corp A,,USD,US
+NXPI,US,US,stock,NXP Semiconductors NV,,USD,US
+O,US,US,stock,Realty Income Corporation,,USD,US
+ODFL,US,US,stock,Old Dominion Freight Line Inc,,USD,US
+OGN,US,US,stock,Organon & Co,,USD,US
+OI,US,US,stock,O-I Glass Inc,,USD,US
+OKE,US,US,stock,ONEOK Inc,,USD,US
+OMC,US,US,stock,Omnicom Group Inc,,USD,US
+ON,US,US,stock,ON Semiconductor Corporation,,USD,US
+ONL,US,US,stock,Orion Office Reit Inc,,USD,US
+ORLY,US,US,stock,O’Reilly Automotive Inc,,USD,US
+OTIS,US,US,stock,Otis Worldwide Corp,,USD,US
+OXY,US,US,stock,Occidental Petroleum Corporation,,USD,US
+PANW,US,US,stock,Palo Alto Networks Inc,,USD,US
+PAYC,US,US,stock,"Paycom Software, Inc.",,USD,US
+PAYX,US,US,stock,Paychex Inc,,USD,US
+PCAR,US,US,stock,PACCAR Inc,,USD,US
+PCG,US,US,stock,PG&E Corp,,USD,US
+PEG,US,US,stock,Public Service Enterprise Group Inc,,USD,US
+PENN,US,US,stock,Penn National Gaming Inc,,USD,US
+PETM,US,US,stock,PetSmart Inc,,USD,US
+PFG,US,US,stock,Principal Financial Group Inc,,USD,US
+PGR,US,US,stock,Progressive Corp,,USD,US
+PH,US,US,stock,Parker-Hannifin Corporation,,USD,US
+PHIN,US,US,stock,PHINIA Inc.,,USD,US
+PHM,US,US,stock,PulteGroup Inc,,USD,US
+PKG,US,US,stock,Packaging Corp of America,,USD,US
+PLD,US,US,stock,Prologis Inc,,USD,US
+PNC,US,US,stock,PNC Financial Services Group Inc,,USD,US
+PNR,US,US,stock,Pentair PLC,,USD,US
+PNW,US,US,stock,Pinnacle West Capital Corp,,USD,US
+PODD,US,US,stock,Insulet Corporation,,USD,US
+POOL,US,US,stock,Pool Corporation,,USD,US
+PPG,US,US,stock,PPG Industries Inc,,USD,US
+PPL,US,US,stock,PPL Corporation,,USD,US
+PRGO,US,US,stock,Perrigo Company PLC,,USD,US
+PRSP,US,US,stock,Perspecta Inc,,USD,US
+PRU,US,US,stock,"Prudential Financial, Inc.",,USD,US
+PSA,US,US,stock,Public Storage,,USD,US
+PSKY,US,US,stock,Paramount Skydance Corporation Class B Common Stock,,USD,US
+PSX,US,US,stock,Phillips 66,,USD,US
+PTC,US,US,stock,PTC Inc,,USD,US
+PVH,US,US,stock,PVH Corp,,USD,US
+PWR,US,US,stock,Quanta Services Inc,,USD,US
+PXD,US,US,stock,Pioneer Natural Resources Co,,USD,US
+PYPL,US,US,stock,PayPal Holdings Inc,,USD,US
+Q,US,US,stock,"Qnity Electronics, Inc",,USD,US
+QCP,US,US,stock,Quality Care Properties Inc,,USD,US
+QEP,US,US,stock,QEP Resources Inc,,USD,US
+QRVO,US,US,stock,Qorvo Inc,,USD,US
+RAL_old,US,US,stock,Ralston Purina Co,,USD,US
+RCL,US,US,stock,Royal Caribbean Cruises Ltd,,USD,US
+REG,US,US,stock,Regency Centers Corporation,,USD,US
+REGN,US,US,stock,Regeneron Pharmaceuticals Inc,,USD,US
+REZI,US,US,stock,Resideo Technologies Inc,,USD,US
+RF,US,US,stock,Regions Financial Corporation,,USD,US
+RHI,US,US,stock,Robert Half International Inc,,USD,US
+RIG,US,US,stock,Transocean Ltd,,USD,US
+RJF,US,US,stock,Raymond James Financial Inc.,,USD,US
+RL,US,US,stock,Ralph Lauren Corp Class A,,USD,US
+RMD,US,US,stock,ResMed Inc,,USD,US
+ROK,US,US,stock,Rockwell Automation Inc,,USD,US
+ROL,US,US,stock,Rollins Inc,,USD,US
+ROP,US,US,stock,Roper Technologies Inc,,USD,US
+ROST,US,US,stock,Ross Stores Inc,,USD,US
+RRC,US,US,stock,Range Resources Corp,,USD,US
+RSG,US,US,stock,Republic Services Inc,,USD,US
+RVTY,US,US,stock,Revvity Inc.,,USD,US
+SATS,US,US,stock,EchoStar Corporation,,USD,US
+SBAC,US,US,stock,SBA Communications Corp,,USD,US
+SBNY,US,US,stock,Signature Bank,,USD,US
+SEDG,US,US,stock,SolarEdge Technologies Inc,,USD,US
+SHW,US,US,stock,Sherwin-Williams Co,,USD,US
+SIG,US,US,stock,Signet Jewelers Ltd,,USD,US
+SIVB,US,US,stock,SVB Financial Group,,USD,US
+SJM,US,US,stock,The J. M. Smucker Company,,USD,US
+SLB,US,US,stock,Schlumberger NV,,USD,US
+SLG,US,US,stock,SL Green Realty Corp,,USD,US
+SLVM,US,US,stock,Sylvamo Corp,,USD,US
+SMCI,US,US,stock,Super Micro Computer Inc,,USD,US
+SNA,US,US,stock,Snap-On Inc,,USD,US
+SNDK,US,US,stock,Sandisk Corp,,USD,US
+SNPS,US,US,stock,Synopsys Inc,,USD,US
+SOLS,US,US,stock,"Solstice Advanced Materials, Inc",,USD,US
+SOLV,US,US,stock,Solventum Corp.,,USD,US
+SPGI,US,US,stock,S&P Global Inc,,USD,US
+SRE,US,US,stock,Sempra Energy,,USD,US
+STE,US,US,stock,STERIS plc,,USD,US
+STLD,US,US,stock,Steel Dynamics Inc,,USD,US
+STT,US,US,stock,State Street Corp,,USD,US
+STX,US,US,stock,Seagate Technology PLC,,USD,US
+STZ,US,US,stock,Constellation Brands Inc Class A,,USD,US
+SW,US,US,stock,Smurfit WestRock plc,,USD,US
+SWK,US,US,stock,Stanley Black & Decker Inc,,USD,US
+SWKS,US,US,stock,Skyworks Solutions Inc,,USD,US
+SYF,US,US,stock,Synchrony Financial,,USD,US
+SYK,US,US,stock,Stryker Corporation,,USD,US
+SYY,US,US,stock,Sysco Corporation,,USD,US
+TAP,US,US,stock,Molson Coors Brewing Co Class B,,USD,US
+TDC,US,US,stock,Teradata Corp,,USD,US
+TDG,US,US,stock,Transdigm Group Incorporated,,USD,US
+TDY,US,US,stock,Teledyne Technologies Incorporated,,USD,US
+TECH,US,US,stock,Bio-Techne Corp,,USD,US
+TEL,US,US,stock,TE Connectivity Ltd,,USD,US
+TER,US,US,stock,Teradyne Inc,,USD,US
+TFC,US,US,stock,Truist Financial Corp,,USD,US
+TFCF,US,US,stock,Twenty-First Century Fox Inc,,USD,US
+TFX,US,US,stock,Teleflex Incorporated,,USD,US
+TGT,US,US,stock,Target Corporation,,USD,US
+TJX,US,US,stock,The TJX Companies Inc,,USD,US
+TKO,US,US,stock,"TKO Group Holdings, Inc.",,USD,US
+TPL,US,US,stock,Texas Pacific Land Corporation,,USD,US
+TPR,US,US,stock,Tapestry Inc,,USD,US
+TRGP,US,US,stock,Targa Resources Inc,,USD,US
+TRIP,US,US,stock,TripAdvisor Inc,,USD,US
+TRMB,US,US,stock,Trimble Inc,,USD,US
+TROW,US,US,stock,T. Rowe Price Group Inc,,USD,US
+TRV,US,US,stock,The Travelers Companies Inc,,USD,US
+TSCO,US,US,stock,Tractor Supply Company,,USD,US
+TSN,US,US,stock,Tyson Foods Inc,,USD,US
+TT,US,US,stock,Trane Technologies plc,,USD,US
+TTD,US,US,stock,Trade Desk Inc,,USD,US
+TTWO,US,US,stock,Take-Two Interactive Software Inc,,USD,US
+TWTR,US,US,stock,Twitter Inc,,USD,US
+TXT,US,US,stock,Textron Inc,,USD,US
+TYL,US,US,stock,Tyler Technologies Inc,,USD,US
+UA,US,US,stock,Under Armour Inc C,,USD,US
+UAA,US,US,stock,Under Armour Inc A,,USD,US
+UAL,US,US,stock,United Airlines Holdings Inc,,USD,US
+UDR,US,US,stock,UDR Inc,,USD,US
+UHS,US,US,stock,Universal Health Services Inc,,USD,US
+ULTA,US,US,stock,Ulta Beauty Inc,,USD,US
+URI,US,US,stock,United Rentals Inc,,USD,US
+VAL,US,US,stock,Valaris Ltd,,USD,US
+VEEV,US,US,stock,Veeva Systems Inc Class A,,USD,US
+VFC,US,US,stock,VF Corporation,,USD,US
+VGNT,US,US,stock,Versigent PLC,,USD,US
+VICI,US,US,stock,VICI Properties Inc,,USD,US
+VLO,US,US,stock,Valero Energy Corporation,,USD,US
+VLTO,US,US,stock,Veralto Corporation,,USD,US
+VMC,US,US,stock,Vulcan Materials Company,,USD,US
+VNT,US,US,stock,Vontier Corp,,USD,US
+VREX,US,US,stock,Varex Imaging Corp,,USD,US
+VRSK,US,US,stock,Verisk Analytics Inc,,USD,US
+VRSN,US,US,stock,VeriSign Inc,,USD,US
+VRT,US,US,stock,Vertiv Holdings Co,,USD,US
+VRTX,US,US,stock,Vertex Pharmaceuticals Inc,,USD,US
+VSCO,US,US,stock,Victoria's Secret & Co,,USD,US
+VSM,US,US,stock,Versum Materials Inc,,USD,US
+VSNT_old,US,US,stock,Versant Corp,,USD,US
+VST,US,US,stock,Vistra Corp.,,USD,US
+VTR,US,US,stock,Ventas Inc,,USD,US
+VTRS,US,US,stock,Viatris Inc,,USD,US
+WAB,US,US,stock,Westinghouse Air Brake Technologies Corp,,USD,US
+WAT,US,US,stock,Waters Corporation,,USD,US
+WBA,US,US,stock,Walgreens Boots Alliance Inc,,USD,US
+WBD,US,US,stock,Warner Bros Discovery Inc,,USD,US
+WCG,US,US,stock,WellCare Health Plans Inc,,USD,US
+WDAY,US,US,stock,Workday Inc,,USD,US
+WDC,US,US,stock,Western Digital Corporation,,USD,US
+WEC,US,US,stock,WEC Energy Group Inc,,USD,US
+WELL,US,US,stock,Welltower Inc,,USD,US
+WHR,US,US,stock,Whirlpool Corporation,,USD,US
+WM,US,US,stock,Waste Management Inc,,USD,US
+WMB,US,US,stock,Williams Companies Inc,,USD,US
+WPX,US,US,stock,WPX Energy Inc,,USD,US
+WRB,US,US,stock,W. R. Berkley Corp,,USD,US
+WSM,US,US,stock,Williams-Sonoma Inc,,USD,US
+WST,US,US,stock,West Pharmaceutical Services Inc,,USD,US
+WTW,US,US,stock,Willis Towers Watson PLC,,USD,US
+WY,US,US,stock,Weyerhaeuser Company,,USD,US
+WYNN,US,US,stock,Wynn Resorts Limited,,USD,US
+XEC,US,US,stock,Cimarex Energy Co,,USD,US
+XEL,US,US,stock,Xcel Energy Inc,,USD,US
+XRAY,US,US,stock,Dentsply Sirona Inc,,USD,US
+XYL,US,US,stock,Xylem Inc,,USD,US
+XYZ,US,US,stock,"Block, Inc",,USD,US
+YHOO,US,US,stock,Yahoo! Inc,,USD,US
+YUM,US,US,stock,Yum! Brands Inc,,USD,US
+YUMC,US,US,stock,Yum China Holdings Inc,,USD,US
+ZBH,US,US,stock,Zimmer Biomet Holdings Inc,,USD,US
+ZBRA,US,US,stock,Zebra Technologies Corporation,,USD,US
+ZIMV,US,US,stock,ZimVie Inc,,USD,US
+ZION,US,US,stock,Zions Bancorporation,,USD,US
+ZTS,US,US,stock,Zoetis Inc,,USD,US
