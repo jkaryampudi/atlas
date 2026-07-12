@@ -152,6 +152,12 @@
       <h2>Daily Cycle — Jobs Board</h2>
       <div class="note">One row per pipeline run (T0 ingest → T8 report). Green = the machine ran itself; red names the step that stopped it.</div>
       <div class="card" id="jobs-board"><div class="quiet">awaiting data</div></div>
+      <h2>Performance — Monthly Attribution</h2>
+      <div class="note" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <span>Doc 04 §14 — realised shortfall is a standing line. Positive shortfall = implementation cost (fill worse than decision).</span>
+        <input type="month" id="attr-month" style="padding:5px 9px;font-size:11px">
+      </div>
+      <div class="card" id="attribution"><div class="quiet">awaiting data</div></div>
       <h2>Data Freshness</h2>
       <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
       <h2>Quality Gates — Latest Per Market</h2>
@@ -928,12 +934,43 @@ async function renderJobs(){
   good(el);
 }
 
+/* ---------- monthly attribution (Doc 04 §14) ---------- */
+async function renderAttribution(){
+  const el = document.getElementById("attribution");
+  const inp = document.getElementById("attr-month");
+  if(!inp.value) inp.value = new Date().toISOString().slice(0,7);  // default: current month
+  const r = await get(`/v1/portfolio/attribution/${encodeURIComponent(inp.value)}`);
+  if(r.err) return deg(el, r.err);
+  const d = r.data;
+  /* exact-figure strings from the API; +v only for display formatting */
+  const money = v => v==null ? "—" : `${+v<0?"−":""}A$${Math.abs(+v).toFixed(2)}`;
+  const signed = v => v==null ? `<span style="color:var(--faint)">—</span>`
+    : `<span class="${+v<0?"num-neg":"num-pos"}">${esc(money(v))}</span>`;
+  const drag = line => line.fills
+    ? `${esc(line.fills)} fill(s) · ${esc(line.qty)} sh · ${esc((+line.avg_bps).toFixed(1))} bps avg ·
+       <span class="${+line.cost_aud>0?"num-neg":"num-pos"}">${esc(money(line.cost_aud))} ${+line.cost_aud>0?"cost":+line.cost_aud<0?"gain":"flat"}</span>`
+    : `<span style="color:var(--faint)">no fills</span>`;
+  el.innerHTML = `<table>
+    <tr><th>LINE — ${esc(d.period)}</th><th>VALUE</th><th></th></tr>
+    <tr><td>REALISED P&amp;L (lots disposed)</td><td>${signed(d.realised_pnl_aud)}</td>
+      <td style="color:var(--faint)">${esc(d.lots_closed)} lot(s) closed · ${esc(d.trades_buy)} buy / ${esc(d.trades_sell)} sell fill(s)</td></tr>
+    <tr><td>ENTRY SHORTFALL (fill vs decision price)</td><td colspan="2">${drag(d.entry_shortfall)}</td></tr>
+    <tr><td>EXIT SHORTFALL (fill vs authorized stop / exit close)</td><td colspan="2">${drag(d.exit_shortfall)}</td></tr>
+    <tr><td>NAV SWING (boundary snapshots)</td><td>${signed(d.unrealised_swing_aud)}</td>
+      <td style="color:var(--faint)">${d.nav_start_aud!=null?`${esc(money(d.nav_start_aud))} → ${esc(money(d.nav_end_aud))}`:"needs ≥2 snapshots in/adjacent to the month"}</td></tr>
+    <tr><td>LLM SPEND (cost drag)</td><td>$${esc((+d.llm_spend_usd).toFixed(4))} USD</td>
+      <td style="color:var(--faint)">research.agent_runs — never enters the AUD ledger</td></tr>
+  </table>`;
+  good(el);
+}
+document.getElementById("attr-month").addEventListener("change", ()=>renderAttribution());
+
 /* ---------- refresh loop ---------- */
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
-                   renderJobs, renderTrading, renderResearch, renderProgress,
-                   renderRuns, renderQuant, renderRisk, renderMarket];
+                   renderJobs, renderAttribution, renderTrading, renderResearch,
+                   renderProgress, renderRuns, renderQuant, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")
