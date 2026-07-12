@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +42,18 @@ class FixtureAdapter:
                         out.append(Split(symbol=symbol, action_date=d,
                                          ratio=Decimal(row["ratio"])))
         return out
+
+    def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
+        """fundamentals/{symbol}.json, whole. LookupError when absent — same
+        contract as the vendor: a missing document is a recorded failure."""
+        path = self._root / "fundamentals" / f"{symbol}.json"
+        if not path.exists():
+            raise LookupError(f"no fundamentals fixture for {symbol!r}")
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict) or not data:
+            raise LookupError(f"fundamentals fixture for {symbol!r} is not a "
+                              f"non-empty JSON object")
+        return dict(data)
 
     def fetch_fx(self, base: str, quote: str, on: date) -> Decimal | None:
         path = self._root / "fx.csv"

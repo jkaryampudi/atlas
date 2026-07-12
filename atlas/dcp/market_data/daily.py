@@ -26,10 +26,20 @@ stored rate through the last completed weekday (EODHD FOREX rates are final at
 22:00 UTC). A weekday gap is a failure — FOREX holidays are rare enough that a
 human should look. A required pair with no stored rates at all is a failure,
 not a silent skip.
+
+Fundamentals refresh (after bars/FX): every ACTIVE instrument whose latest
+market.fundamentals snapshot is older than FUNDAMENTALS_STALE_DAYS (or absent)
+gets ONE new snapshot row — the raw vendor document, whole, as_of = the
+clock's UTC date. Snapshots are append-style (ON CONFLICT DO NOTHING): a
+stored payload is never updated. A per-instrument vendor failure is recorded
+in report.failures and the run continues (fail-soft, like bars). NOTE: the
+payload contains vendor free-text — a prompt-injection surface; only the
+whitelist extractor in fundamentals.py may turn it into agent evidence.
 """
 from __future__ import annotations
 
 import argparse
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -55,6 +65,10 @@ ROOT = Path(__file__).resolve().parents[3]
 
 FX_EOD_UTC = time(22, 0)  # EODHD FOREX end-of-day rolls at 22:00 UTC (5pm New York)
 
+# a fundamentals snapshot this many days old (or younger) is still fresh;
+# older (or absent) is refetched — weekly cadence with daily opportunity
+FUNDAMENTALS_STALE_DAYS = 7
+
 
 @dataclass(frozen=True)
 class MarketDaily:
@@ -77,9 +91,17 @@ class FxPairDaily:
 
 
 @dataclass(frozen=True)
+class FundamentalsDaily:
+    fetched: tuple[str, ...]  # snapshot inserted this run (stale or absent before)
+    fresh: tuple[str, ...]    # skipped: latest snapshot within FUNDAMENTALS_STALE_DAYS
+    failed: tuple[str, ...]   # vendor failure (also recorded in report.failures)
+
+
+@dataclass(frozen=True)
 class DailyIngestReport:
     markets: dict[str, MarketDaily]
     fx: dict[str, FxPairDaily]
+    fundamentals: FundamentalsDaily
     failures: tuple[str, ...]  # vendor failures + required FX pairs with no history
 
     @property
@@ -274,14 +296,55 @@ def _ingest_fx(session: Session, adapter: MarketDataAdapter, now: datetime,
     return out
 
 
+def _refresh_fundamentals(session: Session, adapter: MarketDataAdapter,
+                          now: datetime, failures: list[str]) -> FundamentalsDaily:
+    """One append-style snapshot per ACTIVE instrument whose latest snapshot
+    is stale or absent (all markets, like FX — fundamentals have no exchange
+    calendar). as_of is the injected clock's UTC date, so a same-day re-run
+    finds every refreshed instrument fresh and is a no-op; ON CONFLICT DO
+    NOTHING keeps even a racing re-run append-only, never an update."""
+    source = type(adapter).__name__
+    today = now.astimezone(UTC).date()
+    rows = session.execute(text(
+        "SELECT i.id, i.symbol, "
+        "       (SELECT max(f.as_of) FROM market.fundamentals f "
+        "        WHERE f.instrument_id = i.id) AS latest "
+        "FROM market.instruments i WHERE i.is_active "
+        "ORDER BY i.symbol")).mappings().all()
+    fetched: list[str] = []
+    fresh: list[str] = []
+    failed: list[str] = []
+    for inst in rows:
+        if (inst["latest"] is not None
+                and (today - inst["latest"]).days <= FUNDAMENTALS_STALE_DAYS):
+            fresh.append(inst["symbol"])
+            continue
+        try:
+            payload = adapter.fetch_fundamentals(inst["symbol"])
+        except Exception as exc:  # vendor failure: report + exit 2, refresh the rest
+            failures.append(f"fundamentals {inst['symbol']}: vendor fetch failed: {exc}")
+            failed.append(inst["symbol"])
+            continue
+        session.execute(text(
+            "INSERT INTO market.fundamentals (instrument_id, as_of, payload, source) "
+            "VALUES (:iid, :d, CAST(:p AS jsonb), :src) "
+            "ON CONFLICT (instrument_id, as_of) DO NOTHING"),
+            {"iid": inst["id"], "d": today, "p": json.dumps(payload), "src": source})
+        fetched.append(inst["symbol"])
+    return FundamentalsDaily(fetched=tuple(fetched), fresh=tuple(fresh),
+                             failed=tuple(failed))
+
+
 def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter, *,
                      markets: tuple[str, ...] = ("US", "AU")) -> DailyIngestReport:
     now = clock.now()
     failures: list[str] = []
     results = {m: _ingest_market(session, adapter, m, now, failures) for m in markets}
     fx = _ingest_fx(session, adapter, now, failures)
+    fundamentals = _refresh_fundamentals(session, adapter, now, failures)
 
-    report = DailyIngestReport(markets=results, fx=fx, failures=tuple(failures))
+    report = DailyIngestReport(markets=results, fx=fx, fundamentals=fundamentals,
+                               failures=tuple(failures))
     PostgresAuditLog(session, clock).append(
         event_type="market.daily_ingest.completed", entity_type="market",
         entity_id=",".join(markets), actor_type="scheduler", actor_id="daily_ingest",
@@ -295,7 +358,10 @@ def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  "fx": {pair: {"rows": f.rows,
                                "missing_weekdays": [d.isoformat()
                                                     for d in f.missing_weekdays]}
-                        for pair, f in fx.items()}})
+                        for pair, f in fx.items()},
+                 "fundamentals": {"fetched": list(fundamentals.fetched),
+                                  "fresh": list(fundamentals.fresh),
+                                  "failed": list(fundamentals.failed)}})
     return report
 
 
@@ -329,6 +395,10 @@ def main() -> None:
         print(f"fx {pair}: {f.rows} row(s)"
               + (f", MISSING WEEKDAYS: {[d.isoformat() for d in f.missing_weekdays]}"
                  if f.missing_weekdays else ""))
+    fnd = report.fundamentals
+    print(f"fundamentals: {len(fnd.fetched)} fetched, {len(fnd.fresh)} fresh, "
+          f"{len(fnd.failed)} failed"
+          + (f" ({list(fnd.failed)})" if fnd.failed else ""))
     for msg in report.failures:
         print(f"FAILURE: {msg}")
     print("daily ingest via " + type(adapter).__name__ + ": "

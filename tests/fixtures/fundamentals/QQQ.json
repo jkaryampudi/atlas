@@ -1,0 +1,33 @@
+{
+  "General": {
+    "Code": "QQQ",
+    "Type": "ETF",
+    "Name": "Invesco QQQ Trust",
+    "Exchange": "NASDAQ",
+    "CurrencyCode": "USD",
+    "Description": "Invesco QQQ Trust tracks an index."
+  },
+  "ETF_Data": {
+    "TotalAssets": "301415012352.00",
+    "NetExpenseRatio": "0.20",
+    "Yield": "0.62",
+    "Sector_Weights": {
+      "Technology": {
+        "Equity_%": "50.34",
+        "Relative_to_Category": "50.34"
+      },
+      "Communication Services": {
+        "Equity_%": "15.71",
+        "Relative_to_Category": "15.71"
+      },
+      "Consumer Cyclicals": {
+        "Equity_%": "12.88",
+        "Relative_to_Category": "12.88"
+      },
+      "Healthcare": {
+        "Equity_%": "5.92",
+        "Relative_to_Category": "5.92"
+      }
+    }
+  }
+}

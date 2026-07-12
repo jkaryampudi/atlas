@@ -15,3 +15,11 @@ class MarketDataAdapter(Protocol):
     def fetch_fx(self, base: str, quote: str, on: date) -> Decimal | None: ...
     def fetch_fx_series(self, base: str, quote: str, start: date,
                         end: date) -> dict[date, Decimal]: ...
+
+    def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
+        """The vendor's RAW fundamentals document (stored whole for audit).
+        Raises LookupError when the vendor has nothing for the symbol.
+        SECURITY: the document contains vendor free-text (description, officer
+        names) — a prompt-injection surface. Only the whitelist extractor in
+        atlas/dcp/market_data/fundamentals.py may turn it into agent evidence."""
+        ...

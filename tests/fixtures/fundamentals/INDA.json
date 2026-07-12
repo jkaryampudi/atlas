@@ -1,0 +1,33 @@
+{
+  "General": {
+    "Code": "INDA",
+    "Type": "ETF",
+    "Name": "iShares MSCI India ETF",
+    "Exchange": "NASDAQ",
+    "CurrencyCode": "USD",
+    "Description": "iShares MSCI India ETF tracks an index."
+  },
+  "ETF_Data": {
+    "TotalAssets": "9384501248.00",
+    "NetExpenseRatio": "0.62",
+    "Yield": "1.02",
+    "Sector_Weights": {
+      "Financial Services": {
+        "Equity_%": "24.11",
+        "Relative_to_Category": "24.11"
+      },
+      "Technology": {
+        "Equity_%": "12.03",
+        "Relative_to_Category": "12.03"
+      },
+      "Consumer Cyclicals": {
+        "Equity_%": "11.45",
+        "Relative_to_Category": "11.45"
+      },
+      "Energy": {
+        "Equity_%": "9.87",
+        "Relative_to_Category": "9.87"
+      }
+    }
+  }
+}

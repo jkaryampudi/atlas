@@ -1,0 +1,30 @@
+{
+  "General": {
+    "Code": "IBN",
+    "Type": "Common Stock",
+    "Name": "ICICI Bank ADR",
+    "Exchange": "NYSE",
+    "CurrencyCode": "USD",
+    "Sector": "Financial Services",
+    "Industry": "Banks - Regional",
+    "Description": "ICICI Bank ADR operates internationally."
+  },
+  "Highlights": {
+    "MarketCapitalization": 108637241344,
+    "PERatio": 19.8873,
+    "EarningsShare": 1.55,
+    "ReturnOnEquityTTM": 0.1721,
+    "ProfitMargin": 0.2933,
+    "RevenueTTM": 28417000448,
+    "QuarterlyRevenueGrowthYOY": 0.1188,
+    "DividendYield": 0.0089
+  },
+  "Valuation": {
+    "TrailingPE": 19.8873
+  },
+  "Technicals": {
+    "52WeekHigh": 33.05,
+    "52WeekLow": 23.21
+  },
+  "InsiderTransactions": {}
+}

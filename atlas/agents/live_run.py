@@ -25,9 +25,10 @@ from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.indicators.core import rolling_return, sma
+from atlas.dcp.market_data.fundamentals import extract_fundamentals_evidence
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT / "docs" / "reports" / "first-real-backtest-momentum-v1.md"
+REPORT = ROOT / "docs" / "reports" / "decision-grade-momentum-v1.md"
 
 
 def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
@@ -71,11 +72,20 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
             ev_quant = (f"Quant validation report (momentum v1, real data, verbatim "
                         f"excerpt): {' '.join(m.group(0).split())[:1200]}")
 
-    return [
+    evidence = [
         (f"dcp:bars:{symbol}:{last_date}", ev_bars),
         (f"dcp:indicators:{symbol}:{last_date}", ev_ind),
         (f"quant:report:momentum-v1:{symbol}", ev_quant),
     ]
+
+    # Fundamentals: DCP-side whitelist extraction (numeric + closed-vocabulary
+    # facts only — vendor free text is a prompt-injection surface and never
+    # enters evidence). None = no snapshot as of the bar date; the desk keeps
+    # the evidence set above rather than fabricating a line.
+    fundamentals = extract_fundamentals_evidence(s, symbol, on=rows[-1].bar_date)
+    if fundamentals is not None:
+        evidence.append(fundamentals)
+    return evidence
 
 
 def main() -> None:

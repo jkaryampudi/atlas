@@ -1,0 +1,30 @@
+{
+  "General": {
+    "Code": "MSFT",
+    "Type": "Common Stock",
+    "Name": "Microsoft Corp",
+    "Exchange": "NYSE",
+    "CurrencyCode": "USD",
+    "Sector": "Technology",
+    "Industry": "Software - Infrastructure",
+    "Description": "Microsoft Corp operates internationally."
+  },
+  "Highlights": {
+    "MarketCapitalization": 3401419194368,
+    "PERatio": 36.1204,
+    "EarningsShare": 12.42,
+    "ReturnOnEquityTTM": 0.3261,
+    "ProfitMargin": 0.3543,
+    "RevenueTTM": 261802000384,
+    "QuarterlyRevenueGrowthYOY": 0.1527,
+    "DividendYield": 0.0072
+  },
+  "Valuation": {
+    "TrailingPE": 36.1204
+  },
+  "Technicals": {
+    "52WeekHigh": 468.35,
+    "52WeekLow": 344.79
+  },
+  "InsiderTransactions": {}
+}

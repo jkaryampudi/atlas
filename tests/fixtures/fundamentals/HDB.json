@@ -1,0 +1,30 @@
+{
+  "General": {
+    "Code": "HDB",
+    "Type": "Common Stock",
+    "Name": "HDFC Bank ADR",
+    "Exchange": "NYSE",
+    "CurrencyCode": "USD",
+    "Sector": "Financial Services",
+    "Industry": "Banks - Regional",
+    "Description": "HDFC Bank ADR operates internationally."
+  },
+  "Highlights": {
+    "MarketCapitalization": 158220222464,
+    "PERatio": 20.6642,
+    "EarningsShare": 3.05,
+    "ReturnOnEquityTTM": 0.1447,
+    "ProfitMargin": 0.2589,
+    "RevenueTTM": 42589999104,
+    "QuarterlyRevenueGrowthYOY": 0.1042,
+    "DividendYield": 0.0113
+  },
+  "Valuation": {
+    "TrailingPE": 20.6642
+  },
+  "Technicals": {
+    "52WeekHigh": 68.5,
+    "52WeekLow": 50.11
+  },
+  "InsiderTransactions": {}
+}

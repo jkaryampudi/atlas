@@ -95,6 +95,19 @@ class EodhdAdapter:
                              ratio=ratio))
         return out
 
+    def fetch_fundamentals(self, symbol: str) -> dict[str, object]:
+        """GET /api/fundamentals/{code}: the raw vendor document (General /
+        Highlights / Valuation / ... for stocks; ETF_Data for ETFs). Raises
+        LookupError when EODHD has nothing — a missing document must be a
+        recorded failure upstream, never a silent empty snapshot."""
+        r = self._client.get(f"{BASE}/fundamentals/{self._sym(symbol)}",
+                             params={"api_token": self._key, "fmt": "json"})
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict) or not data:
+            raise LookupError(f"EODHD has no fundamentals for {symbol!r}")
+        return dict(data)
+
     def fetch_fx(self, base: str, quote: str, on: date) -> Decimal | None:
         rows = self._get(f"/eod/{base}{quote}.FOREX",
                          **{"from": on.isoformat(), "to": on.isoformat()})

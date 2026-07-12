@@ -90,6 +90,38 @@ def test_fetch_fx_series_parses_range_and_sends_bounds():
                       date(2024, 7, 11): Decimal("1.51")}
 
 
+def test_fetch_fundamentals_hits_vendor_path_with_mapped_code():
+    seen: list[str] = []
+    params: list[dict] = []
+    payload = {"General": {"Code": "AVGO"}, "Highlights": {"PERatio": 39.7}}
+    a = EodhdAdapter("test-key", client=httpx.Client(
+        transport=_url_capturing_transport(payload, seen, params)),
+        symbol_map={"AVGO": "AVGO.US"})
+    doc = a.fetch_fundamentals("AVGO")
+    assert seen == ["/api/fundamentals/AVGO.US"]  # vendor sees the mapped code
+    assert params[0]["api_token"] == "test-key"
+    assert doc["General"]["Code"] == "AVGO"       # raw document, whole
+
+
+def test_fetch_fundamentals_empty_document_raises_lookup_error():
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport({})))
+    with pytest.raises(LookupError, match="no fundamentals"):
+        a.fetch_fundamentals("AVGO.US")
+
+
+def test_fetch_fundamentals_non_object_raises_lookup_error():
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport([])))
+    with pytest.raises(LookupError, match="no fundamentals"):
+        a.fetch_fundamentals("AVGO.US")
+
+
+def test_fetch_fundamentals_unmapped_symbol_refuses_bare_passthrough():
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport({})),
+                     symbol_map={"NDIA": "NDIA.AU"})
+    with pytest.raises(ValueError, match="not in vendor symbol map"):
+        a.fetch_fundamentals("SPY")
+
+
 def test_unmapped_symbol_with_map_refuses_bare_passthrough():
     a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport([])),
                      symbol_map={"NDIA": "NDIA.AU"})

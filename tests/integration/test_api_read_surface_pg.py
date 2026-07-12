@@ -117,7 +117,8 @@ def test_quant_gate_report_surfaces_the_real_fail(client):
     assert d["available"] is True
     avgo = next(x for x in d["symbols"] if x["symbol"] == "AVGO")
     assert avgo["verdict"] == "FAIL"
-    assert avgo["null_p"] == 0.059 and avgo["dsr"] == 0.257
+    # decision-grade report (16y window) — the verbatim recorded numbers
+    assert avgo["null_p"] == 0.126 and avgo["dsr"] == 0.443
     assert "ADR-0004" in d["warning"]
 
 

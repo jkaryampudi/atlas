@@ -1,0 +1,33 @@
+{
+  "General": {
+    "Code": "NDIA",
+    "Type": "ETF",
+    "Name": "Global X India Nifty 50 ETF",
+    "Exchange": "NASDAQ",
+    "CurrencyCode": "AUD",
+    "Description": "Global X India Nifty 50 ETF tracks an index."
+  },
+  "ETF_Data": {
+    "TotalAssets": "712403968.00",
+    "NetExpenseRatio": "0.69",
+    "Yield": "1.34",
+    "Sector_Weights": {
+      "Financial Services": {
+        "Equity_%": "33.92",
+        "Relative_to_Category": "33.92"
+      },
+      "Technology": {
+        "Equity_%": "13.17",
+        "Relative_to_Category": "13.17"
+      },
+      "Energy": {
+        "Equity_%": "11.28",
+        "Relative_to_Category": "11.28"
+      },
+      "Consumer Defensive": {
+        "Equity_%": "7.44",
+        "Relative_to_Category": "7.44"
+      }
+    }
+  }
+}

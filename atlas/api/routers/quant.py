@@ -13,7 +13,7 @@ from atlas.core.db import session_scope
 router = APIRouter()
 
 _REPORT = Path(__file__).resolve().parents[2].parent / "docs" / "reports" / \
-    "first-real-backtest-momentum-v1.md"
+    "decision-grade-momentum-v1.md"
 
 
 def _f(pattern: str, text_: str) -> float | None:

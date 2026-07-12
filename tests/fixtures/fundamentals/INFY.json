@@ -1,0 +1,30 @@
+{
+  "General": {
+    "Code": "INFY",
+    "Type": "Common Stock",
+    "Name": "Infosys ADR",
+    "Exchange": "NYSE",
+    "CurrencyCode": "USD",
+    "Sector": "Technology",
+    "Industry": "Information Technology Services",
+    "Description": "Infosys ADR operates internationally."
+  },
+  "Highlights": {
+    "MarketCapitalization": 75923849216,
+    "PERatio": 21.9313,
+    "EarningsShare": 0.79,
+    "ReturnOnEquityTTM": 0.3129,
+    "ProfitMargin": 0.1697,
+    "RevenueTTM": 19277000704,
+    "QuarterlyRevenueGrowthYOY": 0.0381,
+    "DividendYield": 0.0261
+  },
+  "Valuation": {
+    "TrailingPE": 21.9313
+  },
+  "Technicals": {
+    "52WeekHigh": 23.63,
+    "52WeekLow": 15.51
+  },
+  "InsiderTransactions": {}
+}

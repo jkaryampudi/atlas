@@ -36,4 +36,4 @@ elif verr:
     st.warning(verr)
 else:
     st.info("No validation verdicts yet. The first real run's report lives at "
-            "docs/reports/first-real-backtest-momentum-v1.md (gates: FAIL, as recorded).")
+            "docs/reports/decision-grade-momentum-v1.md (gates: FAIL on 16y, decision-grade, as recorded).")
