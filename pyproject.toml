@@ -38,7 +38,7 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["atlas/core", "atlas/dcp"]
+files = ["atlas/core", "atlas/dcp", "atlas/fxlab"]
 
 [[tool.mypy.overrides]]
 module = "exchange_calendars.*"
