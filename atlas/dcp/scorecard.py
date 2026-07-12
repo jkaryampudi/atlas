@@ -33,6 +33,16 @@ MECHANICS:
   three are quantized to the 6dp column quantum (fwd/spy first, so excess is
   exact). Fail-closed skips: SPY missing either exact date, no resolvable
   single active instrument, no anchor bar, non-positive close at either end.
+- SPLIT-ADJUSTED, both legs (desk-review 2026-07 item 2): vendor bars are
+  stored RAW, so a split between anchor and forward would fabricate a phantom
+  outcome — a 10:1 split reads as a -90% "return" — and write it into the
+  append-only memo_outcomes forever. Every series (the instrument's AND
+  SPY's) is passed through the property-tested adjuster
+  (market_data/adjustment.py) before anchoring; only splits with action_date
+  on or before the clock's date apply (no look-ahead — a replay of an old
+  date computes what that date could have known). anchor_close/fwd_close are
+  therefore stored in split-adjusted (post-split) terms; returns are exact
+  either way when no split intervenes, and honest when one does.
 - No look-ahead, structurally (CLAUDE.md invariant 8): only bars dated at or
   before the injected clock's UTC date are ever read, so a deterministic
   replay of an old date computes exactly what that date could have known.
@@ -61,6 +71,8 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
+from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.models import Bar, Split
 
 HORIZONS: tuple[int, ...] = (20, 60)   # sessions; must match the 0016 CHECK
 BENCHMARK_SYMBOL = "SPY"               # ADR-0009: the fund's honest alternative
@@ -232,12 +244,28 @@ def _resolved_instrument_id(session: Session, symbol: str) -> str | None:
 def _load_series(session: Session, instrument_id: str,
                  through: date) -> list[tuple[date, Decimal]]:
     """The instrument's priceable session sequence: ascending vendor bars with
-    a non-NULL close, hard-capped at the clock's date (no look-ahead)."""
-    return [(r.bar_date, r.close) for r in session.execute(text(
+    a non-NULL close, hard-capped at the clock's date (no look-ahead), and
+    SPLIT-ADJUSTED on read (module docstring) using only splits recorded with
+    action_date <= `through`. Degenerate OHLC below exists solely to satisfy
+    the Bar invariant; only close is read back."""
+    rows = session.execute(text(
         "SELECT bar_date, close FROM market.price_bars_daily "
         "WHERE instrument_id = :iid AND source = :src "
         "  AND close IS NOT NULL AND bar_date <= :d ORDER BY bar_date"),
-        {"iid": instrument_id, "src": VENDOR_SOURCE, "d": through}).all()]
+        {"iid": instrument_id, "src": VENDOR_SOURCE, "d": through}).all()
+    splits = [Split(symbol=instrument_id, action_date=r.action_date,
+                    ratio=Decimal(r.ratio))
+              for r in session.execute(text(
+                  "SELECT action_date, ratio FROM market.corporate_actions "
+                  "WHERE instrument_id = :iid AND action_type = 'split' "
+                  "  AND action_date <= :d ORDER BY action_date"),
+                  {"iid": instrument_id, "d": through}).all()]
+    if not splits:
+        return [(r.bar_date, r.close) for r in rows]
+    bars = [Bar(symbol=instrument_id, bar_date=r.bar_date, open=r.close,
+                high=r.close, low=r.close, close=r.close, volume=0)
+            for r in rows]
+    return [(b.bar_date, b.close) for b in adjust_for_splits(bars, splits)]
 
 
 def compute_memo_outcomes(session: Session, clock: Clock) -> ScorecardReport:

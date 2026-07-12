@@ -7,7 +7,11 @@ import pytest
 from sqlalchemy import text
 
 from atlas.agents.roles.cio import committee_memo  # noqa: F401  (suite convention)
-from atlas.agents.runtime.grounding import grounding_violations, numeric_tokens
+from atlas.agents.runtime.grounding import (
+    corpus_numeric_tokens,
+    grounding_violations,
+    numeric_tokens,
+)
 from atlas.agents.runtime.llm import StubClient
 from atlas.agents.runtime.runner import AgentRunFailed, run_agent
 from atlas.agents.schemas.memo import CommitteeMemo
@@ -95,6 +99,60 @@ def test_numeric_token_extraction_unit():
     assert numeric_tokens("grew 47 percent in 2026 vs L8 cap") == ["47"]
     assert numeric_tokens("L11 and DD3 are rule ids") == []
     assert numeric_tokens("a 3.5 sigma move") == ["3.5"]
+
+
+# ---- token-boundary red team (desk-review 2026-07 item 4) ------------------
+# The exact bypass: substring matching let a narrative '20' ground against the
+# '20' inside 'SMA20', and small integers leak out of ISO dates. The verifier
+# now compares SET MEMBERSHIP over tokens from one shared boundary-aware
+# tokenizer. These tests pin the bypass DEAD and pin that legitimate
+# standalone numbers still ground.
+
+def test_redteam_bare_20_grounded_only_by_sma20_now_kills(clean_audit):
+    s = clean_audit
+    with pytest.raises(AgentRunFailed):
+        _run(s, _memo("Price sits above the 20 session average."),
+             evidence_body="SMA20 543.21 and rising.")
+    n = s.execute(text("SELECT count(*) FROM audit.decision_events "
+                       "WHERE event_type='agent.grounding.failed'")).scalar()
+    assert n == 2  # one per attempt, then fail closed — the cage held
+
+
+def test_legitimate_20_sessions_in_corpus_still_grounds(clean_audit):
+    s = clean_audit
+    memo, _ = _run(s, _memo("Price sits above the 20 session average."),
+                   evidence_body="Average over 20 sessions: 543.21 and rising.")
+    assert memo.recommendation == "WATCHLIST"
+
+
+def test_identifier_value_grounds_while_identifier_digits_do_not(clean_audit):
+    s = clean_audit
+    # the VALUE next to the identifier grounds fine (three decimals: the
+    # schema's execution-number gate rejects price-shaped 2dp decimals)...
+    memo, _ = _run(s, _memo("The average sits near 543.216 currently."),
+                   evidence_body="SMA20 543.216 and rising.")
+    assert memo.recommendation == "WATCHLIST"
+    # ...and a narrative identifier asserts no numeric claim at all
+    assert numeric_tokens("SMA20 crossed above SMA50") == []
+
+
+def test_redteam_date_component_leak_is_dead(clean_audit):
+    """'26' was substring-grounded by the '26' inside '2026-07-10'."""
+    s = clean_audit
+    with pytest.raises(AgentRunFailed):
+        _run(s, _memo("Roughly 26 names cleared the screen."),
+             evidence_body="Vendor window ending 2026-07-10.")
+
+
+def test_boundary_tokenizer_units():
+    assert numeric_tokens("SMA20 rising, hold 20 sessions") == ["20"]
+    assert numeric_tokens("v1.2 shipped a 3.5 sigma move") == ["3.5"]
+    assert numeric_tokens("priced at 20.5x earnings") == []   # never just '20'
+    assert corpus_numeric_tokens(
+        "SMA20 543.21 on 2026-07-10, over 20 sessions (p=0.830)") == frozenset(
+        {"543.21", "2026", "07", "10", "20", "0.830"})
+    # sentence-ending periods do not eat the token
+    assert corpus_numeric_tokens("closed at 543.21.") == frozenset({"543.21"})
 
 
 def test_grounding_violations_unit():

@@ -1,18 +1,18 @@
 """First live-model committee run (Phase 2 evals: 'are the memos actually good?').
 
-Assembles REAL evidence from the DCP (vendor bars, indicators, the momentum-v1
-gate verdict from the written report), runs the bull/bear debate, then the CIO
-committee memo — all through the full cage: schema gates, grounding verifier,
-budget breaker, audit chain. The memo lands in research.memos and appears on
-the dashboard's Research page for the Principal's Phase-2 review.
+Assembles REAL evidence from the DCP (vendor bars split-adjusted on read,
+indicators, and the registry-driven quant validation record), runs the
+bull/bear debate, then the CIO committee memo — all through the full cage:
+schema gates, grounding verifier, budget breaker, audit chain. The memo lands
+in research.memos and appears on the dashboard's Research page for the
+Principal's Phase-2 review.
 
 Usage: ATLAS_MODEL_DEFAULT=claude-opus-4-8 python -m atlas.agents.live_run --symbol AVGO
 """
 from __future__ import annotations
 
 import argparse
-import re
-from pathlib import Path
+from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -24,11 +24,11 @@ from atlas.agents.runtime.registry import build_client, resolve_model
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.backtest.quant_evidence import build_quant_evidence
 from atlas.dcp.indicators.core import rolling_return, sma
+from atlas.dcp.market_data.adjustment import adjust_for_splits
 from atlas.dcp.market_data.fundamentals import extract_fundamentals_evidence
-
-ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT / "docs" / "reports" / "decision-grade-momentum-v1.md"
+from atlas.dcp.market_data.models import Bar, Split
 
 
 def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
@@ -40,10 +40,28 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
     if len(rows) < 51:
         raise LookupError(f"not enough real bars for {symbol} — run the backfill first")
     rows = list(reversed(rows))
-    closes = [float(r.close) for r in rows]
     last_date = rows[-1].bar_date.isoformat()
 
-    ev_bars = (f"{symbol} daily closes (EODHD vendor bars): latest close "
+    # Split-adjust on read (desk-review 2026-07 item 2): vendor bars are stored
+    # RAW (backfill convention), so a split inside the 60-session window would
+    # fabricate a phantom move — a 10:1 split reads as a -90% "drop" — and the
+    # cage would groundedly argue from it. Only splits known on or before the
+    # last bar date apply (no look-ahead); closes-only path, so the degenerate
+    # OHLC below only satisfies the Bar invariant and is never read back.
+    splits = [Split(symbol=symbol, action_date=r.action_date,
+                    ratio=Decimal(r.ratio))
+              for r in s.execute(text(
+                  "SELECT ca.action_date, ca.ratio FROM market.corporate_actions ca "
+                  "JOIN market.instruments i ON i.id = ca.instrument_id "
+                  "WHERE i.symbol = :sym AND ca.action_type = 'split' "
+                  "  AND ca.action_date <= :d ORDER BY ca.action_date"),
+                  {"sym": symbol, "d": rows[-1].bar_date}).all()]
+    bars = [Bar(symbol=symbol, bar_date=r.bar_date, open=r.close, high=r.close,
+                low=r.close, close=r.close, volume=0) for r in rows]
+    closes = [float(b.close) for b in adjust_for_splits(bars, splits)]
+
+    ev_bars = (f"{symbol} daily closes (EODHD vendor bars, split-adjusted): "
+               f"latest close "
                f"{closes[-1]:.2f} on {last_date}, previous close {closes[-2]:.2f}, "
                f"20 sessions ago {closes[-21]:.2f}. Window: {len(closes)} sessions "
                f"ending {last_date}.")
@@ -55,27 +73,16 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
               f"SMA50 {s50:.2f}, 20-day return {r20 * 100:.2f} percent, last close "
               f"{closes[-1]:.2f}.")
 
-    # The written gate-verdict artifact, quoted verbatim for the symbol's section
-    # (checkpoint 3's report) — the strongest honest evidence we hold. Symbols
-    # without a section get the honest family-level statement instead: a
-    # digit-free fallback starves the debate of grounded numbers and guarantees
-    # grounding kills (observed live on IBN).
-    ev_quant = (f"No symbol-specific quant validation exists for {symbol}. "
-                f"Family-level fact: momentum v1 was validated on real data for "
-                f"SPY and AVGO only and FAILED every gate on both (null-model, "
-                f"buy-and-hold, deflated Sharpe). No validated strategy covers "
-                f"{symbol}; any momentum thesis on it is untested, not merely "
-                f"unproven.")
-    if REPORT.exists():
-        m = re.search(rf"## {symbol} — (.*?)(?=\n## |\Z)", REPORT.read_text(), re.S)
-        if m:
-            ev_quant = (f"Quant validation report (momentum v1, real data, verbatim "
-                        f"excerpt): {' '.join(m.group(0).split())[:1200]}")
-
+    # Block 3 — the quant validation record, rendered deterministically from
+    # quant.trial_registry + recorded gate verdicts (desk-review 2026-07 item
+    # 1). Never a scraped report file: see dcp/backtest/quant_evidence.py for
+    # the provenance and the reviewed suspension constants. The render carries
+    # grounded numbers per family, so the debate is never starved of digits
+    # (the digit-free-fallback grounding kills observed live on IBN).
     evidence = [
         (f"dcp:bars:{symbol}:{last_date}", ev_bars),
         (f"dcp:indicators:{symbol}:{last_date}", ev_ind),
-        (f"quant:report:momentum-v1:{symbol}", ev_quant),
+        build_quant_evidence(s, symbol),
     ]
 
     # Fundamentals: DCP-side whitelist extraction (numeric + closed-vocabulary

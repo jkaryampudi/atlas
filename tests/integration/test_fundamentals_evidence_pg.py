@@ -106,7 +106,7 @@ def test_build_evidence_appends_fundamentals_when_snapshot_exists(clean_fundamen
     refs = [ref for ref, _ in evidence]
     assert refs == [f"dcp:bars:ZFND:{last.isoformat()}",
                     f"dcp:indicators:ZFND:{last.isoformat()}",
-                    "quant:report:momentum-v1:ZFND",
+                    "dcp:quant:verdicts:v1:ZFND",
                     f"dcp:fundamentals:ZFND:{last.isoformat()}"]
     body = evidence[3][1]
     assert "market cap 1252470423552" in body
@@ -120,4 +120,4 @@ def test_build_evidence_without_snapshot_keeps_current_evidence_set(clean_fundam
     assert [ref for ref, _ in evidence] == [
         f"dcp:bars:ZFNE:{last.isoformat()}",
         f"dcp:indicators:ZFNE:{last.isoformat()}",
-        "quant:report:momentum-v1:ZFNE"]
+        "dcp:quant:verdicts:v1:ZFNE"]

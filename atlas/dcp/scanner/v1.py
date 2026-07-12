@@ -52,6 +52,17 @@ Documented resolutions (v1, deliberate):
   (fail-closed) — a nonsense base must never rank, high or low.
 - One ineligibility reason per symbol, first failing check in a fixed order
   (no calendar -> no bars -> stale -> thin -> unpriceable).
+- Split adjustment on read (desk-review 2026-07 item 2): vendor bars are
+  stored RAW (backfill convention), so a split inside the 60-session window
+  fabricates a phantom move — a 10:1 split reads as a -90% "return" and a
+  10x volume surge, hijacking both attention components. Every series is
+  passed through the property-tested adjuster (market_data/adjustment.py:
+  prices divided, volumes multiplied, pre-split bars only, splits compound)
+  before scoring. Only splits with action_date on or before the market's
+  cutoff are applied — a future-recorded split must not change today's scan
+  (the same no-look-ahead structure as the bar query). The Bar objects are
+  built with degenerate OHLC (open=high=low=close) purely to satisfy the
+  value-object invariant; only close and volume are ever read back.
 - Held/in-flight names are shortlisted even when INELIGIBLE (components
   None) and even when the instrument is no longer active: the book outranks
   every filter. Eligible held names carry their real score components but
@@ -64,6 +75,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import text
@@ -71,7 +83,9 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
+from atlas.dcp.market_data.adjustment import adjust_for_splits
 from atlas.dcp.market_data.calendars import last_completed_session
+from atlas.dcp.market_data.models import Bar, Split
 
 CRITERIA_VERSION = "1.0"
 LOOKBACK_SESSIONS = 60  # stored history required; volume-surge baseline window
@@ -92,6 +106,15 @@ SELECT symbol, bar_date, close, volume FROM (
   WHERE i.is_active AND i.market = :m AND pb.source = '{VENDOR_SOURCE}'
     AND pb.close IS NOT NULL AND pb.bar_date <= :cutoff
 ) w WHERE rn <= :lookback ORDER BY symbol, bar_date
+"""
+
+_SPLITS_SQL = """
+SELECT i.symbol, ca.action_date, ca.ratio
+FROM market.corporate_actions ca
+JOIN market.instruments i ON i.id = ca.instrument_id
+WHERE i.is_active AND i.market = :m AND ca.action_type = 'split'
+  AND ca.action_date <= :cutoff
+ORDER BY i.symbol, ca.action_date
 """
 
 _HELD_SQL = f"""
@@ -240,13 +263,19 @@ def scan(session: Session, clock: Clock, *, top_n: int = 5) -> ScanReport:
 
     # last LOOKBACK_SESSIONS vendor bars per instrument, hard-capped at each
     # market's last completed session — the structural no-look-ahead guarantee
-    hist: dict[str, list[tuple[float, int]]] = {}
+    hist: dict[str, list[tuple[date, Decimal, int]]] = {}
     latest: dict[str, date] = {}
+    splits: dict[str, list[Split]] = {}
     for m, cutoff in sorted(sessions.items()):
         for r in session.execute(text(_BARS_SQL), {"m": m, "cutoff": cutoff,
                                                    "lookback": LOOKBACK_SESSIONS}):
-            hist.setdefault(r.symbol, []).append((float(r.close), int(r.volume)))
+            hist.setdefault(r.symbol, []).append(
+                (r.bar_date, Decimal(r.close), int(r.volume)))
             latest[r.symbol] = r.bar_date  # rows ascend, last write is newest
+        for r in session.execute(text(_SPLITS_SQL), {"m": m, "cutoff": cutoff}):
+            splits.setdefault(r.symbol, []).append(Split(
+                symbol=r.symbol, action_date=r.action_date,
+                ratio=Decimal(r.ratio)))
 
     ineligible: list[tuple[str, str]] = []
     series: dict[str, tuple[list[float], list[int]]] = {}
@@ -268,12 +297,18 @@ def scan(session: Session, clock: Clock, *, top_n: int = 5) -> ScanReport:
             ineligible.append((sym, f"thin history: {len(rows)} "
                                     f"< {LOOKBACK_SESSIONS} stored sessions"))
             continue
-        closes = [c for c, _ in rows]
+        # split-adjust on read (module docstring): the raw stored series lies
+        # across a split; both attention components must see adjusted bars
+        adjusted = adjust_for_splits(
+            [Bar(symbol=sym, bar_date=d, open=c, high=c, low=c, close=c,
+                 volume=v) for d, c, v in rows],
+            splits.get(sym, []))
+        closes = [float(b.close) for b in adjusted]
         if closes[-(RETURN_SESSIONS + 1)] <= 0:
             ineligible.append((sym, f"unpriceable: non-positive close "
                                     f"{RETURN_SESSIONS} sessions back"))
             continue
-        series[sym] = (closes, [v for _, v in rows])
+        series[sym] = (closes, [b.volume for b in adjusted])
 
     scores = score_cross_section(series)
     by_symbol = {sc.symbol: sc for sc in scores}

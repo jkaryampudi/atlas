@@ -29,6 +29,25 @@ def test_fetch_fx_series_empty_outside_data():
     assert a.fetch_fx_series("USD", "AUD", date(2020, 1, 1), date(2020, 12, 31)) == {}
 
 
+def test_fetch_dividends_reads_csv_and_filters_range(tmp_path):
+    (tmp_path / "dividends.csv").write_text(
+        "symbol,date,amount,currency\n"
+        "SPY,2024-03-15,1.60,USD\n"
+        "SPY,2024-06-21,1.75,USD\n"
+        "SPY,2023-12-15,1.90,USD\n"     # outside window: filtered
+        "AAA,2024-03-15,0.50,\n")       # other symbol: filtered
+    a = FixtureAdapter(tmp_path)
+    divs = a.fetch_dividends("SPY", date(2024, 1, 1), date(2024, 12, 31))
+    assert [(d.ex_date, d.amount, d.currency) for d in divs] == [
+        (date(2024, 3, 15), Decimal("1.60"), "USD"),
+        (date(2024, 6, 21), Decimal("1.75"), "USD")]
+
+
+def test_fetch_dividends_missing_file_is_empty():
+    assert FixtureAdapter(FIXTURES / "nowhere").fetch_dividends(
+        "SPY", date(2024, 1, 1), date(2024, 12, 31)) == []
+
+
 def test_fetch_fundamentals_reads_fixture_json_whole():
     doc = FixtureAdapter(FIXTURES).fetch_fundamentals("AVGO")
     assert doc["General"]["Code"] == "AVGO"

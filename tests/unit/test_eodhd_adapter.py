@@ -129,6 +129,66 @@ def test_unmapped_symbol_with_map_refuses_bare_passthrough():
         a.fetch_bars("SPY", date(2026, 7, 1), date(2026, 7, 11))
 
 
+def test_fetch_dividends_parses_ex_date_and_raw_amount():
+    """The vendor's `date` is the ex-date; `unadjustedValue` (raw declared
+    cash) is authoritative — `value` is retroactively split-rewritten and must
+    NOT be stored when the raw figure exists (AAPL 2019: raw 0.73 vs
+    adjusted 0.1825 after the 2020 4:1 split)."""
+    seen: list[str] = []
+    params: list[dict] = []
+    payload = [
+        {"date": "2019-05-10", "declarationDate": "2019-04-30",
+         "recordDate": "2019-05-13", "paymentDate": "2019-05-16",
+         "period": "Quarterly", "value": 0.1925, "unadjustedValue": 0.77,
+         "currency": "USD"},
+        {"date": "2019-02-08", "value": 0.1825, "unadjustedValue": 0.73,
+         "currency": "USD"},
+    ]
+    a = EodhdAdapter("test-key", client=httpx.Client(
+        transport=_url_capturing_transport(payload, seen, params)),
+        symbol_map={"AAPL": "AAPL.US"})
+    divs = a.fetch_dividends("AAPL", date(2019, 1, 1), date(2019, 12, 31))
+    assert seen == ["/api/div/AAPL.US"]          # vendor sees the mapped code
+    assert params[0]["from"] == "2019-01-01"     # range must reach the vendor
+    assert params[0]["to"] == "2019-12-31"
+    assert [d.ex_date for d in divs] == [date(2019, 2, 8), date(2019, 5, 10)]
+    assert divs[0].amount == Decimal("0.73")     # raw, never the adjusted 0.1825
+    assert divs[0].symbol == "AAPL"              # canonical symbol kept
+    assert divs[0].currency == "USD"
+
+
+def test_fetch_dividends_falls_back_to_value_and_skips_noise():
+    """Old rows sometimes lack a positive unadjustedValue -> fall back to
+    `value`; rows with neither positive are vendor noise and are skipped
+    (Dividend refuses non-positive amounts by construction)."""
+    payload = [
+        {"date": "2012-03-01", "value": 0.5, "unadjustedValue": 0,
+         "currency": "USD"},                       # fallback to value
+        {"date": "2012-06-01", "value": 0.25, "currency": None},  # no unadjusted key
+        {"date": "2012-09-01", "value": 0, "unadjustedValue": None},  # noise
+        {"date": "2012-12-01"},                                       # noise
+    ]
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport(payload)))
+    divs = a.fetch_dividends("AAPL.US", date(2012, 1, 1), date(2012, 12, 31))
+    assert [(d.ex_date, d.amount) for d in divs] == [
+        (date(2012, 3, 1), Decimal("0.5")), (date(2012, 6, 1), Decimal("0.25"))]
+    assert divs[1].currency is None
+
+
+def test_fetch_dividends_empty_history_is_empty_list():
+    """Fetched-successfully-but-none is a NORMAL state (many names never
+    paid) — an empty list, never an error."""
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport([])))
+    assert a.fetch_dividends("BRK-B.US", date(2010, 1, 1), date(2026, 1, 1)) == []
+
+
+def test_fetch_dividends_unmapped_symbol_refuses_bare_passthrough():
+    a = EodhdAdapter("test-key", client=httpx.Client(transport=_transport([])),
+                     symbol_map={"NDIA": "NDIA.AU"})
+    with pytest.raises(ValueError, match="not in vendor symbol map"):
+        a.fetch_dividends("SPY", date(2026, 7, 1), date(2026, 7, 11))
+
+
 def test_vendor_symbol_unknown_exchange_raises():
     with pytest.raises(ValueError, match="no EODHD suffix mapping"):
         vendor_symbol("RELIANCE", "NSE")
