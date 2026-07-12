@@ -69,6 +69,8 @@
   .eent{flex:1;overflow:hidden;text-overflow:ellipsis;color:var(--dim)}
   .etime{color:var(--faint);flex:none}
 
+  .recon-box{display:none;border-left:2px solid var(--blue);background:rgba(90,167,255,0.03);margin:4px 0 12px;padding:12px 16px}
+
   .memo{background:var(--card);border:1px solid var(--line);padding:0;position:relative;overflow:hidden}
   .memo-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
   .rec{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:0.06em;padding:5px 14px;border:1.5px solid}
@@ -722,7 +724,7 @@ const ttl = s => {
 };
 const num = v => v==null ? "—" : (+v).toFixed(4).replace(/\.?0+$/,"");
 
-function checkGrid(check){
+function checkGrid(check, tail=" — ADVISORY; the fresh check at click decides"){
   if(!check) return `<div class="quiet">no check recorded</div>`;
   const rows = (check.results||[]).map(r=>{
     const pct = (r.value!=null && r.limit) ? Math.min(100, Math.abs(r.value/r.limit)*100) : null;
@@ -737,7 +739,68 @@ function checkGrid(check){
   return `<div style="font-family:var(--mono);font-size:9.5px;letter-spacing:0.14em;color:var(--dim);margin-bottom:6px">
     ${esc(check.check_kind||"").toUpperCase()} CHECK · ${check.verdict==="PASS"
       ? `<span style="color:var(--green)">PASS</span>` : `<span style="color:var(--red)">FAIL</span>`}
-    · LIMIT SET v${esc(check.limit_set_version)} · ${esc(ts(check.created_at))} — ADVISORY; the fresh check at click decides</div>${rows}`;
+    · LIMIT SET v${esc(check.limit_set_version)} · ${esc(ts(check.created_at))}${esc(tail)}</div>${rows}`;
+}
+
+/* ---------- decision reconstruction (Doc 01 §8: reconstructible forever) ---------- */
+const reconOpen = new Set();   /* proposal ids expanded in the Decided list —
+                                  survives the 30s refresh loop */
+function reconTree(d){
+  const p = d.proposal || {}, m = d.memo || {}, run = m.agent_run, rev = m.review;
+  const head = `<div style="font-family:var(--mono);font-size:11px;color:var(--txt);margin-bottom:8px">
+    ${esc(p.symbol||"—")} ${esc((p.action||"").toUpperCase())} ${esc(p.position_size)} sh
+    · entry ${num(p.entry_price)} · stop ${num(p.stop_loss)} · target ${num(p.target_price)}
+    · A$${(+p.position_value_aud||0).toFixed(2)}
+    · <span style="letter-spacing:0.1em">${esc((p.state||"").toUpperCase())}</span>
+    · proposal ${esc((p.id||"").slice(0,8))}</div>`;
+  const memoBlock = `<div class="sect-label">MEMO — THE REASONING</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.9">
+      <span class="pill ${m.recommendation==="BUY"?"g":(m.recommendation==="REJECT"||m.recommendation==="EXIT")?"r":"bl"}">${esc(m.recommendation||"—")}</span>
+      CONVICTION ${esc(m.conviction||"—")} · memo ${esc((m.id||"").slice(0,8))}<br>
+      ${esc(String(m.thesis||"—").split(/\r?\n/)[0])}<br>
+      ${(m.kill_criteria||[]).length} kill criteria ·
+      ${rev ? `reviewed — ${esc(String(rev.verdict).toUpperCase())} ${esc(ts(rev.reviewed_at))}`
+            : `<span style="color:var(--gold)">UNREVIEWED</span>`}
+      ${run ? ` · ${esc(run.model)} · ${run.tokens_in??"—"}/${run.tokens_out??"—"} tok
+               · $${(+run.cost_usd||0).toFixed(4)} · tpl ${esc(run.template_hash_prefix||"—")}${run.shadow?` · <span style="color:var(--gold)">SHADOW</span>`:""}` : ""}
+    </div>`;
+  const checks = `<div class="sect-label" style="margin-top:12px">RISK CHECKS — AS RECORDED</div>` +
+    ((d.risk_checks||[]).map(c=>checkGrid({...c, check_kind:c.kind}, "")).join("")
+      || `<div class="quiet">no checks recorded</div>`);
+  const approvals = `<div class="sect-label" style="margin-top:12px">HUMAN SEAL</div>` +
+    ((d.approvals||[]).map(a=>`<div style="font-family:var(--mono);font-size:11px;color:var(--gold);padding:2px 0">
+        ${esc((a.decision||"").toUpperCase())} — ${esc(a.approver)} via ${esc(a.auth_method||"—")}
+        @ ${esc(ts(a.decided_at))} · fresh check ${esc((a.approval_time_risk_check_id||"").slice(0,8))}</div>`).join("")
+      || `<div class="quiet">no approval recorded — the decision never reached the seal</div>`);
+  const orders = `<div class="sect-label" style="margin-top:12px">ORDERS → EXECUTIONS → LOTS</div>` +
+    ((d.orders||[]).map(o=>`<div style="font-family:var(--mono);font-size:11px;color:var(--dim);padding:2px 0">
+        ORDER ${esc((o.id||"").slice(0,8))} · ${esc(o.side||"—")} ${esc(o.qty)} · ${esc(o.order_type||"—")} · ${esc(o.broker||"—")}
+        · <span style="color:${o.state==="filled"?"var(--green)":o.state==="cancelled"?"var(--dim)":"var(--gold)"}">${esc(o.state)}</span>
+        · created ${esc(ts(o.created_at))}${o.submitted_at?` · submitted ${esc(ts(o.submitted_at))}`:""}${o.closed_at?` · closed ${esc(ts(o.closed_at))}`:""}</div>` +
+      (o.executions||[]).map(e=>`<div style="font-family:var(--mono);font-size:11px;color:var(--dim);padding:2px 0 2px 20px">
+          └ FILL ${esc(e.fill_qty)} @ ${num(e.fill_price)} · fees ${num(e.fees)} · fx ${num(e.fx_rate_used)}
+          · decision ${num(e.decision_price)} · <span style="color:${+e.shortfall_bps>0?"var(--red)":"var(--green)"}">${num(e.shortfall_bps)} bps</span>
+          · ${esc(ts(e.executed_at))}</div>` +
+        (e.tax_lots||[]).map(t=>`<div style="font-family:var(--mono);font-size:11px;color:var(--faint);padding:2px 0 2px 40px">
+          └ LOT ${esc(t.qty)} sh · cost A$${(+t.cost_aud||0).toFixed(2)} · acquired ${esc(ts(t.acquired_at))}${t.disposed_at?` · disposed ${esc(ts(t.disposed_at))} · proceeds A$${(+t.proceeds_aud||0).toFixed(2)}`:""}</div>`).join("")
+      ).join("")).join("")
+      || `<div class="quiet">no orders — the decision ended before execution</div>`);
+  const events = `<div class="sect-label" style="margin-top:12px">AUDIT CHAIN — THE DECISION'S OWN ACCOUNT (${(d.events||[]).length} EVENTS)</div>
+    <div class="ledger">` +
+    ((d.events||[]).map(e=>`<div class="ledger-row">
+      <span class="seq">#${e.seq}</span><span class="etype">${esc(e.event_type)}</span>
+      <span class="eent">${esc(e.actor_type)} · ${esc(e.actor_id||"—")}</span>
+      <span class="etime">${esc(ts(e.created_at))}</span></div>`).join("")
+      || `<div class="quiet">no events — this should be impossible for a real decision</div>`) + `</div>`;
+  return head + memoBlock + checks + approvals + orders + events;
+}
+async function renderRecon(box, pid){
+  box.style.display = "block";
+  if(!box.innerHTML) box.innerHTML = `<div class="quiet">reconstructing…</div>`;
+  const r = await get(`/v1/audit/decisions/${encodeURIComponent(pid)}/reconstruct`);
+  /* errors render inline in the box — an expansion must fail visibly, not vanish */
+  if(r.err){ box.innerHTML = `<div class="unreachable">◌ RECONSTRUCTION FAILED — ${esc(r.err)}</div>`; return; }
+  box.innerHTML = reconTree(r.data);
 }
 
 async function renderTrading(force){
@@ -898,7 +961,24 @@ async function renderTrading(force){
         <span style="color:${col(p.state)};letter-spacing:0.1em">${esc(p.state.toUpperCase())}</span>
         <span>${esc(p.symbol||"—")}</span>
         <span style="color:var(--dim)">${esc(p.position_size)} sh · A$${(+p.position_value_aud||0).toFixed(2)}</span>
-        <span style="color:var(--dim);margin-left:auto">${esc(ts(p.created_at))}</span></div>`).join("");
+        <span style="color:var(--dim);margin-left:auto">${esc(ts(p.created_at))}</span>
+        <button class="tr-recon" data-pid="${esc(p.id)}" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;padding:2px 8px;cursor:pointer">${reconOpen.has(p.id)?"COLLAPSE":"RECONSTRUCT"}</button></div>
+        <div class="recon-box" data-pid="${esc(p.id)}"></div>`).join("");
+      del.querySelectorAll("button.tr-recon").forEach(b=>b.onclick=async()=>{
+        const pid = b.dataset.pid;
+        const box = del.querySelector(`.recon-box[data-pid="${pid}"]`);
+        if(reconOpen.has(pid)){   // second click collapses
+          reconOpen.delete(pid); box.style.display = "none"; box.innerHTML = "";
+          b.textContent = "RECONSTRUCT"; return;
+        }
+        reconOpen.add(pid); b.textContent = "COLLAPSE";
+        await renderRecon(box, pid);
+      });
+      /* re-expand what the principal had open before this refresh re-render */
+      reconOpen.forEach(pid=>{
+        const box = del.querySelector(`.recon-box[data-pid="${pid}"]`);
+        if(box) renderRecon(box, pid); else reconOpen.delete(pid);
+      });
       good(del);
     }
   }
