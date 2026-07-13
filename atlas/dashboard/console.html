@@ -285,6 +285,9 @@
         voids the action permanently. There is no override, and this desk is not a rubber stamp.
       </div>
       <div id="trade-action-banner"></div>
+      <h2>Strategy — Paper Book (ADR-0010)</h2>
+      <div class="note">The approved recipe behind the sleeve. Bands are machine-enforced daily: a breach demotes to SUSPENDED and latches — re-promotion is a Principal signature, never code.</div>
+      <div class="card" id="strategy-card"><div class="quiet">awaiting data</div></div>
       <h2>Awaiting Your Approval</h2>
       <div id="approval-queue"><div class="quiet">awaiting data</div></div>
       <h2>Open Positions</h2>
@@ -1184,6 +1187,40 @@ async function renderRecon(box, pid){
   box.innerHTML = reconTree(r.data);
 }
 
+async function renderStrategy(){
+  /* STRATEGY card (ADR-0010): the approved paper recipe, its live signal
+     footprint and the daily band-check reading — all data-bound from
+     /v1/quant/strategies; a suspension must render, never be papered over */
+  const el = document.getElementById("strategy-card");
+  const r = await get("/v1/quant/strategies");
+  if(!r.data) return deg(el, r.err || "quant strategies unreachable");
+  good(el);
+  if(!r.data.length){
+    el.innerHTML = `<div class="quiet">no strategy in paper/live/suspended — the sleeve trades nothing by rule</div>`;
+    return;
+  }
+  el.innerHTML = r.data.map(s=>{
+    const tb = s.tolerance_bands || {};
+    const ddLim = tb.max_drawdown_from_sleeve_peak, exLim = tb.trailing_126_session_excess_vs_spy_tr_pp;
+    const b = s.band_status;
+    const dd = b && b.drawdown != null ? (b.drawdown*100).toFixed(2)+"%" : "n/a";
+    const ex = b && b.excess_126s_pp != null ? b.excess_126s_pp.toFixed(2)+"pp" : "dormant";
+    const ddBad = b && b.drawdown != null && ddLim != null && b.drawdown < ddLim;
+    const exBad = b && b.excess_126s_pp != null && exLim != null && b.excess_126s_pp < exLim;
+    const pill = s.state === "suspended"
+      ? `<span class="pill r">SUSPENDED — LATCHED</span>`
+      : `<span class="pill ${s.state==="live"?"g":"bl"}">${esc(s.state).toUpperCase()}</span>`;
+    return `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-family:var(--mono);font-size:11.5px;line-height:2">
+      <span style="color:var(--txt)">${esc(s.family)} v${esc(s.version)}</span> ${pill}
+      <span style="color:var(--dim)">approved by ${esc(s.approved_by||"—")} · ${esc((s.approved_at||"").slice(0,10)||"—")}</span>
+      <span style="color:var(--dim)">signals active <span style="color:var(--txt)">${esc(s.active_signals)}</span> · next rebalance ${esc(s.next_rebalance||"—")}</span>
+      <span style="color:var(--dim)">band DD <span class="${ddBad?"num-neg":""}">${esc(dd)}</span> vs ${ddLim!=null?(ddLim*100).toFixed(0)+"%":"—"}
+        · excess126 <span class="${exBad?"num-neg":""}">${esc(ex)}</span> vs ${exLim!=null?exLim.toFixed(0)+"pp":"—"}</span>
+      ${b?`<span style="color:var(--dim)">as of ${esc(b.session_date)}</span>`:`<span class="quiet">no band reading yet</span>`}
+    </div>`;
+  }).join("");
+}
+
 async function renderTrading(force){
   const qel = document.getElementById("approval-queue");
   /* mid-decision guard: the 30s refresh must never wipe half-ticked
@@ -1376,7 +1413,8 @@ document.getElementById("settle-btn").onclick = async()=>{
 /* ---------- live cycle: real-time animated pipeline ---------- */
 const LC_STAGES = [["t0_ingest","T0 INGEST"],["t1_verify_chain","T1 CHAIN"],
   ["t2_expire","T2 EXPIRE"],["t3_settle","T3 SETTLE"],["t4_stops","T4 STOPS"],
-  ["t5_snapshot","T5 SNAPSHOT"],["t6_reconcile","T6 RECONCILE"],
+  ["t5_snapshot","T5 SNAPSHOT"],["t5b_bands","T5b BANDS"],
+  ["t6_reconcile","T6 RECONCILE"],["t6b_signals","T6b SIGNALS"],
   ["t7_desk","T7 DESK"],["t8_bridge","T8 BRIDGE"],["t9_report","T9 REPORT"]];
 let lcTimer = null;
 
@@ -1506,9 +1544,9 @@ document.getElementById("attr-month").addEventListener("change", ()=>renderAttri
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
-                   renderJobs, renderAttribution, renderTrading, renderResearch,
-                   renderScorecard, renderProgress, renderRuns, renderQuant,
-                   renderRisk, renderMarket];
+                   renderJobs, renderAttribution, renderStrategy, renderTrading,
+                   renderResearch, renderScorecard, renderProgress, renderRuns,
+                   renderQuant, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")

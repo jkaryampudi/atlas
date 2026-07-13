@@ -214,7 +214,10 @@ def test_daily_cycle_routes_exactly_the_shortlist(clean_audit):
     results = run_daily_cycle(s, FrozenClock(T), FixtureAdapter(FIXTURES), desk=desk)
 
     assert captured["symbols"] == ["ZSCA", "ZSCB", "ZSCC", "ZSCP"]
-    assert results["t7_desk"] == ("scanned 9 -> desk 3 (+1 held) · memos 0 (none) "
+    # ADR-0010 wiring: the node line now leads with the (empty) signal lane
+    # and counts the merged shortlist
+    assert results["t7_desk"] == ("signals 0 + scanned 9 -> desk 4 (1 held) "
+                                  "· memos 0 (none) "
                                   "· cage holds 0 · spend today $0.00")
     assert results["t6_reconcile"] == "clean"  # the held book stayed recon-clean
     assert "desk FAILED" not in results["t9_report"]

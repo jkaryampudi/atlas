@@ -8,8 +8,17 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
   T3 settle       pending orders fill at their session opens
   T4 stops        protective stop scan — pre-authorized exits fire
   T5 snapshot     mark the book -> trading.portfolio_snapshots (+ breaker fold)
+  T5b bands       ADR-0010 tolerance-band check: record quant.sleeve_daily and
+                  demote a breaching paper strategy to 'suspended' (latching;
+                  atlas/dcp/trading/bands.py). Fail-soft: a band-check failure
+                  pages but never undoes the settled, protected book
   T6 reconcile    internal consistency: positions ≡ open lots, ledger cash
                   finite and NAV recomputable; writes trading.reconciliations
+  T6b signals     xsmom paper-strategy signal generation (ADR-0010, migration
+                  0020): monthly rebalance at the month-end session, one-time
+                  initiation after approval, quant.signals upsert
+                  (atlas/dcp/signals/xsmom/generate.py). Fail-soft like the
+                  desk — a signal failure must never kill settlement
   T7 desk         SCAN then DESK — one attention+analysis stage. The
                   deterministic scanner (ADR-0007, atlas/dcp/scanner/v1.py —
                   attention, not alpha) sweeps the FULL active universe for
@@ -79,6 +88,8 @@ from atlas.dcp.market_data.calendars import is_trading_day
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
+from atlas.dcp.signals.xsmom.generate import active_signal_symbols, generate_signals
+from atlas.dcp.trading.bands import check_bands
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -144,28 +155,43 @@ class ScannedDeskReport:
         return f"{self.scan_line} · {self.desk.summary()}"
 
 
+def merge_shortlist(priority: list[str], rest: list[str]) -> list[str]:
+    """Signal-first desk ordering (ADR-0010 wiring): the approved strategy's
+    active signal names lead, then the scanner's picks, deduped preserving
+    first occurrence. ORDER IS POLICY: the nightly budget breaker halts the
+    TAIL of the shortlist, so the paper sleeve's names must never be the ones
+    starved when the cap bites."""
+    return list(dict.fromkeys([*priority, *rest]))
+
+
 def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
                        desk_symbols: Callable[[Session], list[str]],
                        *, top_n: int = 5) -> Callable[[Session, Clock], ScannedDeskReport]:
-    """The T7 desk callable: deterministic scan first (ADR-0007), then the LLM
-    desk on exactly the shortlist. Fail-soft: if scanning raises, the desk
-    runs on the full eligible universe (desk_symbols) instead — the desk must
-    not go blind because ranking broke — and scan_failed=True makes the run
-    page like a desk failure. This covers ranking bugs, not a dead database:
-    a scan failure that aborts the transaction kills the run like any other
+    """The T7 desk callable: ACTIVE SIGNAL NAMES first (ADR-0010 — signals
+    with valid_until >= session and no non-expired proposal standing), then
+    the deterministic scan (ADR-0007), the LLM desk on exactly the merged
+    shortlist. Fail-soft: if scanning raises, the desk runs on signals + the
+    full eligible universe (desk_symbols) instead — the desk must not go
+    blind because ranking broke — and scan_failed=True makes the run page
+    like a desk failure. This covers ranking bugs, not a dead database: a
+    scan failure that aborts the transaction kills the run like any other
     node-level SQL failure."""
     def scanned_desk(session: Session, clock: Clock) -> ScannedDeskReport:
+        signal_names = active_signal_symbols(session, clock)
         try:
             report = scan(session, clock, top_n=top_n)
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
-            fallback = run_desk(session, clock, desk_symbols(session))
+            fallback = run_desk(session, clock,
+                                merge_shortlist(signal_names, desk_symbols(session)))
             return ScannedDeskReport(
                 scan_line=f"scan FAILED ({str(e)[:120]}) -> desk full eligible universe",
                 desk=fallback, scan_failed=True)
-        desk_report = run_desk(session, clock, [e.symbol for e in report.shortlist])
+        shortlist = merge_shortlist(signal_names,
+                                    [e.symbol for e in report.shortlist])
+        desk_report = run_desk(session, clock, shortlist)
         return ScannedDeskReport(
-            scan_line=(f"scanned {report.scanned} -> desk {report.n_scored} "
-                       f"(+{report.n_held} held)"),
+            scan_line=(f"signals {len(signal_names)} + scanned {report.scanned} "
+                       f"-> desk {len(shortlist)} ({report.n_held} held)"),
             desk=desk_report)
     return scanned_desk
 
@@ -212,8 +238,34 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["nav"] = snap.nav_aud
         return f"nav={snap.nav_aud}"
 
+    def t5b_bands() -> str:
+        # ADR-0010 accountability loop: the sleeve series lands every cycle
+        # and a breach demotes the strategy row (latching). Fail-soft exactly
+        # like the desk — the book is already settled and protected; a SQL
+        # failure that aborts the transaction still kills the run (same
+        # caveat as the scanner's).
+        try:
+            report = check_bands(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["bands_failed"] = True
+            return f"bands FAILED: {e}"[:300]
+        state["bands"] = report
+        return report.summary()
+
     def t6_reconcile() -> str:
         return _reconcile(session, clock)
+
+    def t6b_signals() -> str:
+        # xsmom paper signals (ADR-0010): runs BEFORE the desk so tonight's
+        # rebalance names reach tonight's shortlist with citable evidence.
+        # Fail-soft: a generation failure pages, the trading steps stand.
+        try:
+            report = generate_signals(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["signals_failed"] = True
+            return f"signals FAILED: {e}"[:300]
+        state["signals"] = report
+        return report.summary()
 
     def t7_desk() -> str:
         if desk is None:
@@ -271,14 +323,20 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         nav = state.get("nav", Decimal(0))
         desk_report = state.get("desk")
         bridge_report = state.get("bridge")
+        signals_report = state.get("signals")
+        bands_report = state.get("bands")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
-                  or bool(state.get("scorecard_failed", False)))
+                  or bool(state.get("scorecard_failed", False))
+                  or bool(state.get("signals_failed", False))
+                  or bool(state.get("bands_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
                  bridge_report.summary() if bridge_report is not None else "bridge idle",
+                 signals_report.summary() if signals_report is not None else "signals idle",
+                 bands_report.summary() if bands_report is not None else "bands idle",
                  scorecard_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
@@ -286,6 +344,10 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("desk FAILED — see log")
         if state.get("bridge_failed"):
             lines.append("bridge FAILED — see log")
+        if state.get("signals_failed"):
+            lines.append("signals FAILED — see log")
+        if state.get("bands_failed"):
+            lines.append("bands FAILED — see log")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -320,7 +382,9 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t3_settle", t3_settle),
         Node("t4_stops", t4_stops),
         Node("t5_snapshot", t5_snapshot),
+        Node("t5b_bands", t5b_bands),
         Node("t6_reconcile", t6_reconcile),
+        Node("t6b_signals", t6b_signals),
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
         Node("t9_report", t9_report),
@@ -355,7 +419,9 @@ def main() -> None:
     failed = ("failed=True" in ingest_line
               or "desk FAILED" in (results.get("t7_desk") or "")
               or "scan FAILED" in (results.get("t7_desk") or "")
-              or "bridge FAILED" in (results.get("t8_bridge") or ""))
+              or "bridge FAILED" in (results.get("t8_bridge") or "")
+              or "signals FAILED" in (results.get("t6b_signals") or "")
+              or "bands FAILED" in (results.get("t5b_bands") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 

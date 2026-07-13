@@ -8,7 +8,9 @@ from pathlib import Path
 from fastapi import APIRouter
 from sqlalchemy import text
 
+from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.signals.xsmom.generate import next_rebalance_session
 
 router = APIRouter()
 
@@ -54,6 +56,52 @@ def gate_report() -> dict[str, object]:
     return {"available": True, "strategy": "momentum v1",
             "warning": "ADR-0004: one-year window — indicative only, NOT decision-grade",
             "symbols": out}
+
+
+@router.get("/strategies")
+def strategies() -> list[dict[str, object]]:
+    """Approved-strategy register (ADR-0010): the strategy row, its live
+    signal footprint, and the latest band-check reading — read-only; the
+    console's STRATEGY card renders this verbatim. Excess reads 'dormant'
+    until 126 sleeve sessions exist (the band is a 126-session statistic)."""
+    today = SystemClock().now().date()
+    out: list[dict[str, object]] = []
+    with session_scope() as s:
+        rows = s.execute(text(
+            "SELECT id, family, name, version, state, approved_by, approved_at, "
+            "       tolerance_bands "
+            "FROM quant.strategies "
+            "WHERE state IN ('paper','live','suspended') "
+            "ORDER BY family, created_at")).mappings().all()
+        for r in rows:
+            n_signals = s.execute(text(
+                "SELECT count(*) FROM quant.signals "
+                "WHERE strategy_id = :sid AND valid_until >= :d"),
+                {"sid": r["id"], "d": today}).scalar()
+            band = s.execute(text(
+                "SELECT session_date, sleeve_value, drawdown, excess_126s_pp "
+                "FROM quant.sleeve_daily WHERE strategy_id = :sid "
+                "ORDER BY session_date DESC LIMIT 1"),
+                {"sid": r["id"]}).mappings().first()
+            out.append({
+                "id": str(r["id"]), "family": r["family"], "name": r["name"],
+                "version": r["version"], "state": r["state"],
+                "approved_by": r["approved_by"],
+                "approved_at": (r["approved_at"].isoformat()
+                                if r["approved_at"] else None),
+                "tolerance_bands": r["tolerance_bands"],
+                "active_signals": int(n_signals or 0),
+                "next_rebalance": next_rebalance_session(today).isoformat(),
+                "band_status": None if band is None else {
+                    "session_date": band["session_date"].isoformat(),
+                    "sleeve_value": (None if band["sleeve_value"] is None
+                                     else float(band["sleeve_value"])),
+                    "drawdown": (None if band["drawdown"] is None
+                                 else float(band["drawdown"])),
+                    "excess_126s_pp": (None if band["excess_126s_pp"] is None
+                                       else float(band["excess_126s_pp"])),
+                }})
+    return out
 
 
 @router.get("/trials")

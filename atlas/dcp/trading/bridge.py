@@ -51,11 +51,16 @@ Documented resolutions (ADR-0006 ambiguities, resolved conservatively):
   window fails closed — the bridge never reaches past an incomplete bar for
   an older complete one (that would derive volatility from a hand-picked
   history).
-- signal_ids are uuid5(NAMESPACE_URL, 'atlas:evidence:<ref>') per ADR-0006's
-  interim measure, deduplicated preserving order (uuid5 is deterministic, so
-  a duplicated ref IS the same signal; trade_proposals.signal_ids only
-  requires non-empty). The full ref->uuid mapping lands in the
-  trading.bridge.completed audit payload so lineage stays reconstructible.
+- signal_ids: an evidence ref that IS a quant signal ref
+  ('dcp:signal:xsmom:<uuid>:<date>', emitted only by
+  signals/xsmom/generate.extract_signal_evidence) resolves to the REAL
+  quant.signals UUID — verified to exist; a signal-shaped ref whose row is
+  missing fails the memo closed (a forged lineage must never silently become
+  a synthetic one). Every other ref keeps ADR-0006's interim
+  uuid5(NAMESPACE_URL, 'atlas:evidence:<ref>') convention — memos without
+  signals bridge exactly as before. Deduplicated preserving order; the full
+  ref->uuid mapping lands in the trading.bridge.completed audit payload so
+  lineage stays reconstructible.
 - A build_proposal risk FAIL (state 'rejected') is an HONEST outcome reported
   in BridgeReport.built with its verdict — the gate working is a deliverable,
   never an error (CLAUDE.md working style).
@@ -71,6 +76,7 @@ Documented resolutions (ADR-0006 ambiguities, resolved conservatively):
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -129,8 +135,39 @@ class BridgeReport:
 def evidence_signal_id(ref: str) -> uuid.UUID:
     """ADR-0006 interim signal identity: a deterministic UUIDv5 of the memo's
     DCP evidence ref — the same ref always maps to the same id, so the
-    audit-recorded mapping reconstructs lineage until quant.signals ships."""
+    audit-recorded mapping reconstructs lineage. Since migration 0020 this is
+    the FALLBACK for refs that are not quant signal refs (see
+    _resolve_signal_ids); memos without signals keep bridging on it."""
     return uuid.uuid5(uuid.NAMESPACE_URL, f"atlas:evidence:{ref}")
+
+
+# 'dcp:signal:xsmom:<quant.signals uuid>:<signal_date>' — emitted only by
+# signals/xsmom/generate.extract_signal_evidence, so the embedded uuid IS the
+# real signal identity the sleeve attribution joins on
+_SIGNAL_REF = re.compile(
+    r"^dcp:signal:xsmom:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{12}):\d{4}-\d{2}-\d{2}$")
+
+
+def _resolve_signal_ids(session: Session, refs: list[str]) -> dict[str, str]:
+    """{ref: uuid-str} preserving first-occurrence order: quant signal refs
+    resolve to their REAL quant.signals id (verified against the table — a
+    signal-shaped ref with no row raises _SkipMemo, fail closed), everything
+    else to the ADR-0006 interim uuid5."""
+    out: dict[str, str] = {}
+    for ref in dict.fromkeys(refs):
+        m = _SIGNAL_REF.match(ref)
+        if m is None:
+            out[ref] = str(evidence_signal_id(ref))
+            continue
+        sid = uuid.UUID(m.group(1))
+        if session.execute(text(
+                "SELECT 1 FROM quant.signals WHERE id = :sid"),
+                {"sid": sid}).first() is None:
+            raise _SkipMemo(f"memo cites quant signal {sid} but no such row "
+                            "exists — refusing to fabricate signal lineage")
+        out[ref] = str(sid)
+    return out
 
 
 def derive_prices(entry: Decimal, atr14: float) -> tuple[Decimal, Decimal]:
@@ -241,11 +278,11 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
             except RuntimeError as e:
                 raise _SkipMemo(str(e)) from e
             stop, target = derive_prices(entry, _atr14(session, inst.id, clock))
-            signal_ids = {r: str(evidence_signal_id(r))
-                          for r in dict.fromkeys(refs)}
+            signal_ids = _resolve_signal_ids(session, refs)
             res: ProposalResult = build_proposal(
                 session, clock, memo_id=memo_id, symbol=symbol,
-                signal_refs=list(signal_ids.values()), entry_price=entry,
+                signal_refs=list(dict.fromkeys(signal_ids.values())),
+                entry_price=entry,
                 stop_price=stop, target_price=target)
         except _SkipMemo as e:
             skipped.append(BridgeSkip(symbol=symbol, memo_id=memo_id,

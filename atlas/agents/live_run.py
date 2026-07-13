@@ -33,6 +33,7 @@ from atlas.dcp.market_data.desk_context import (extract_regime_evidence,
 from atlas.dcp.market_data.earnings import extract_earnings_evidence
 from atlas.dcp.market_data.fundamentals import extract_fundamentals_evidence
 from atlas.dcp.market_data.models import Bar, Split
+from atlas.dcp.signals.xsmom.generate import extract_signal_evidence
 
 QUESTION_TEMPLATE_REL_PATH = "question/default.md"
 
@@ -127,10 +128,15 @@ def build_evidence(s: Session, symbol: str) -> list[tuple[str, str]]:
     # 7. scanner context (item 10b): WHY the scanner routed this name —
     #    score components from the scanner.completed audit payload, labelled
     #    attention-not-prediction; None on analyze-box runs and stale scans
+    # 8. SIGNALS (ADR-0010): the active quant.signals row for the symbol from
+    #    the paper-approved strategy — rank, formation return, validity, and
+    #    the REAL signal UUID in the ref, so a BUY memo citing it is
+    #    constitutionally grounded and the bridge attaches the true lineage
     for block in (extract_fundamentals_evidence(s, symbol, on=on),
                   extract_earnings_evidence(s, symbol, on=on),
                   extract_regime_evidence(s, on=on),
-                  extract_scanner_context(s, symbol, on=on)):
+                  extract_scanner_context(s, symbol, on=on),
+                  extract_signal_evidence(s, symbol, on=on)):
         if block is not None:
             evidence.append(block)
     return evidence

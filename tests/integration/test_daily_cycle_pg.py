@@ -42,6 +42,12 @@ def _clean(s) -> None:
     s.execute(text("DELETE FROM workflow.workflow_node_results "
                    "WHERE run_id LIKE 'daily-%'"))
     s.execute(text("DELETE FROM workflow.workflow_runs WHERE run_id LIKE 'daily-%'"))
+    # ADR-0010 wiring debris from the signal/band suites: without this, a
+    # leftover paper strategy row makes t5b/t6b active and the exact node
+    # strings below drift
+    s.execute(text("DELETE FROM quant.sleeve_daily"))
+    s.execute(text("DELETE FROM quant.signals"))
+    s.execute(text("DELETE FROM quant.strategies WHERE family = 'xsmom-pit-tr'"))
     s.execute(text("DELETE FROM risk.limit_sets WHERE version > 1"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol LIKE 'ZCY%')"))
@@ -102,7 +108,12 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-        "t5_snapshot", "t6_reconcile", "t7_desk", "t8_bridge", "t9_report"]
+        "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals", "t7_desk",
+        "t8_bridge", "t9_report"]
+    # no approved strategy in this fixture: both ADR-0010 nodes idle honestly
+    assert results["t5b_bands"] == "bands idle (no banded strategy)"
+    assert results["t6b_signals"] == ("signals idle (no paper/live "
+                                      "xsmom-pit-tr strategy)")
     # the entry order fills at the 7/14 open AND the 7/15 bar fires the stop
     # in ONE cycle: settle runs before the scan precisely so a just-entered
     # position is never naked while its breaching bar is already ingested
