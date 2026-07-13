@@ -1,12 +1,20 @@
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from fixtures.synthetic import regime_series  # noqa: E402
 
-from atlas.dcp.backtest.approval import evaluate_approval, record_and_transition  # noqa: E402
+from atlas.core.audit_repo import PostgresAuditLog  # noqa: E402
+from atlas.core.clock import FrozenClock  # noqa: E402
+from atlas.dcp.backtest.approval import (  # noqa: E402
+    evaluate_approval,
+    record_and_transition,
+    transition_to_paper,
+)
 from atlas.dcp.backtest.registry import register_trial  # noqa: E402
 from atlas.dcp.backtest.validation import GateReport  # noqa: E402
 from atlas.dcp.backtest.walkforward import walk_forward  # noqa: E402
@@ -14,6 +22,8 @@ from atlas.dcp.signals.momentum.v1 import SPEC, momentum_v1  # noqa: E402
 from tests.conftest import requires_pg  # noqa: E402
 
 pytestmark = requires_pg
+
+CLOCK = FrozenClock(datetime(2026, 7, 13, 2, tzinfo=UTC))
 
 
 def _clean(s):
@@ -65,3 +75,96 @@ def test_full_package_approves_and_transitions(pg_session):
     assert s.execute(text("SELECT state FROM quant.strategies WHERE id=:i"),
                      {"i": sid}).scalar() == "validated"
     assert s.execute(text("SELECT verdict FROM quant.validation_reports")).scalar() == "approve"
+
+
+# ---------------------------------------------------------------------------
+# transition_to_paper — the Principal's signature (validated -> paper)
+# ---------------------------------------------------------------------------
+
+def _validated_strategy(s) -> str:
+    """A strategy that has legitimately reached 'validated' with an approve
+    report, via the same artifact path as the test above."""
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','backtested') RETURNING id"
+    )).scalar_one()
+    register_trial(s, family="momentum", spec=SPEC, metrics={"sharpe": 1.85})
+    wf = walk_forward(regime_series(), lambda b, t: momentum_v1,
+                      k=4, horizon=40, embargo=10, warmup=60)
+    gate = GateReport(strategy_return=1.02, bh_return=0.12, null_p_value=0.0,
+                      dsr=1.0, n_trials=1, passed=True, reasons=[])
+    d = evaluate_approval(s, family="momentum", gate=gate, wf=wf,
+                          oos_untouched_attested=True)
+    record_and_transition(s, strategy_id=str(sid), backtest_id=None, decision=d,
+                          checklist={})
+    return str(sid)
+
+
+def test_paper_transition_requires_validated_state(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','backtested') RETURNING id"
+    )).scalar_one()
+    audit = PostgresAuditLog(s, CLOCK)
+    with pytest.raises(ValueError, match="not 'validated'"):
+        transition_to_paper(s, audit, strategy_id=str(sid),
+                            approved_by="test principal",
+                            decision_ref="ADR-test", clock=CLOCK)
+
+
+def test_paper_transition_requires_approve_report(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()  # state forged by hand: no validation report exists
+    audit = PostgresAuditLog(s, CLOCK)
+    with pytest.raises(ValueError, match="refusing paper transition"):
+        transition_to_paper(s, audit, strategy_id=str(sid),
+                            approved_by="test principal",
+                            decision_ref="ADR-test", clock=CLOCK)
+
+
+def test_paper_transition_records_approver_and_audit_event(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = _validated_strategy(s)
+    audit = PostgresAuditLog(s, CLOCK)
+    transition_to_paper(s, audit, strategy_id=sid,
+                        approved_by="Jay Karyampudi (Principal)",
+                        decision_ref="ADR-0010", clock=CLOCK)
+    s.commit()
+    row = s.execute(text(
+        "SELECT state, approved_by, approved_at FROM quant.strategies "
+        "WHERE id=:i"), {"i": sid}).mappings().one()
+    assert row["state"] == "paper"
+    assert row["approved_by"] == "Jay Karyampudi (Principal)"
+    assert row["approved_at"] == CLOCK.now()
+    ev = s.execute(text(
+        "SELECT actor_type, actor_id, payload FROM audit.decision_events "
+        "WHERE event_type='quant.strategy.approved_paper' AND entity_id=:i"),
+        {"i": sid}).mappings().one()
+    assert ev["actor_type"] == "human"
+    assert ev["payload"]["decision_ref"] == "ADR-0010"
+    assert ev["payload"]["new_state"] == "paper"
+
+
+def test_paper_transition_refuses_rejected_strategy(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, '{}', 'reject', 'gate failed')"), {"sid": sid})
+    audit = PostgresAuditLog(s, CLOCK)
+    with pytest.raises(ValueError, match="refusing paper transition"):
+        transition_to_paper(s, audit, strategy_id=str(sid),
+                            approved_by="test principal",
+                            decision_ref="ADR-test", clock=CLOCK)

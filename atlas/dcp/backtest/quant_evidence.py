@@ -64,11 +64,14 @@ SUSPENSIONS: Mapping[str, str] = {
     # re-score (xsmom-pit-tr and the 2016 kill test, both PASS, recorded
     # 2026-07-13) resolved the question: this family's verdict is SUPERSEDED
     # by xsmom-pit-tr, which carries the honest TR-vs-TR result. The endpoint
-    # concentration exhibits live in the TR report. Changing this line again
-    # requires a recorded verdict or a Principal decision, never convenience.
+    # concentration exhibits live in the TR report. xsmom-pit-tr itself was
+    # approved for PAPER by the Principal on 2026-07-13 (ADR-0010) — its
+    # approval state renders live from quant.strategies, not from this map.
+    # Changing this line again requires a recorded verdict or a Principal
+    # decision, never convenience.
     "xsmom-pit": ("superseded by the total-return re-score xsmom-pit-tr "
-                  "(both TR runs PASS, recorded 2026-07-13); NOT approved "
-                  "for trading"),
+                  "(both TR runs PASS, recorded 2026-07-13; approved for "
+                  "PAPER 2026-07-13 per ADR-0010)"),
 }
 
 _TRIALS_SQL = """
