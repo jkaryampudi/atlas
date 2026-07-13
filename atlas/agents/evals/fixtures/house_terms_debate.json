@@ -1,0 +1,55 @@
+{
+  "bundle_id": "house_terms_debate",
+  "description": "The genuine prompt-conformant debate over hyphenated house terms (round-2 finding #5, the panel's repro verbatim): six DISTINCT arguments (bull: trend intact / style validated / institutional demand; bear: failed gates / outside winner decile / late-entry risk), each anchored to the same evidence corpus as the debate prompts require, naming figures in words per the NUMBER STYLE rule. Both sides necessarily name xsmom-pit, walk-forward folds, decision-grade PASS, twenty-day return and sixty-session window — 10 shared stem bigrams raw, which the old cap of 4 hard-floored to 0.0000 FAIL despite raw stem diversity of 0.7397. After excluding evidence-derived bigrams (both stems present in the bundle's own evidence bodies) only 3 non-evidence bigrams remain and the debate PASSES at 0.7397. The pin this fixture exists for: the bigram cap must never punish shared EVIDENCE vocabulary — a debate is not an echo for citing the corpus it was ordered to argue from.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital. The quant record is decisive: momentum-v1 failed its decision gates on real data with 0 of 4 folds passing, and while xsmom-pit holds a decision-grade PASS, AVGO sits outside the winner decile, so no validated strategy covers the name. Trend strength above both moving averages is noted but is not, by itself, a deployable edge.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance while the family PASS verdict still stands",
+      "The twenty-session return turns negative and the close falls below both the SMA20 and SMA50 levels"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "Strongest case against rejection: the desk is dodging a name its own point-in-time machinery is close to selecting, and a standing REJECT that flips at the next rebalance whipsaws the watchlist process while surrendering the entry that persistent trend structure already flags.",
+    "debate_summary": "The sides disagreed genuinely while citing the same record: the bull rested on trend persistence and the validated style, the bear on the failed family and the winner-decile exclusion, which carried the memo."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "Price holds above both moving averages across the whole sixty-session window and the twenty-day return in the indicators record is strongly positive, so the trend is intact",
+        "The xsmom-pit family holds a decision-grade PASS with four of four walk-forward folds, proving the fund can validate exactly this momentum style",
+        "Persistence of this length rarely appears without institutional accumulation, and the bars record shows steady upward closes"
+      ],
+      "weakest_opposing_point": "The bear reads the gate ledger and never the tape",
+      "concede": "Gate discipline is the mandate and it binds"
+    },
+    "bear": {
+      "strongest_points": [
+        "momentum-v1 FAILED its decision gates on real data with zero of four walk-forward folds passing, and the graveyard of failed variants is why the fund gates strategies",
+        "AVGO sits outside the xsmom-pit winner decile, so the family whose decision-grade PASS the desk cites declines to select this very name",
+        "A twenty-day return this strong at the end of a sixty-session window buys the top of the recent run, classic late-entry risk"
+      ],
+      "weakest_opposing_point": "Accumulation is inferred from price alone",
+      "concede": "The uptrend itself is real on the record"
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}

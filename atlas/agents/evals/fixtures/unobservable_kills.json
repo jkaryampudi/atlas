@@ -1,0 +1,34 @@
+{
+  "bundle_id": "unobservable_kills",
+  "description": "The vibes kill-criteria memo: both criteria are moods ('sentiment deteriorates', 'stops feeling durable') that no kill monitor could ever evaluate against DCP tables. The CIO template requires observable conditions; falsifiability theater must fail the observability metric.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital: the momentum family failed its decision gates on real data and the validated cross-sectional family does not select the name, so there is no covered edge to deploy.",
+    "kill_criteria": [
+      "Sentiment around the name deteriorates materially and the street sours on the story",
+      "The bull narrative no longer feels durable to the committee"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "A rejection built on gate verdicts alone ignores that validation lags the tape: persistent relative strength through a flat market is the profile the fund's own point-in-time machinery selects for, and waiting may surrender the whole entry.",
+    "debate_summary": ""
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": false,
+    "dissent_distinctness": true,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

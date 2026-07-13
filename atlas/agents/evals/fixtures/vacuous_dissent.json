@@ -1,0 +1,36 @@
+{
+  "bundle_id": "vacuous_dissent",
+  "description": "The restated dissent: the 'strongest case against' is the thesis read back with a softener bolted on. The scorecard grades dissent post-outcome as the complement of the call (dissent_right); a dissent that restates the thesis makes that grading circular, so the distinctness metric must fail.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO because no validated strategy covers the name: momentum-v1 failed its decision gates on real data and AVGO sits outside the xsmom-pit winner decile, so trend strength alone cannot justify deployment.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance while the family PASS verdict still stands",
+      "The twenty-session return turns negative and the close falls below both the SMA20 and SMA50 levels"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "Some would argue against rejecting AVGO, but no validated strategy covers the name: momentum-v1 failed its decision gates on real data, AVGO sits outside the xsmom-pit winner decile, and trend strength alone cannot justify deployment.",
+    "debate_summary": ""
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": false,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

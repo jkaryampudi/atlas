@@ -1,0 +1,32 @@
+{
+  "bundle_id": "missing_dissent",
+  "description": "The blank dissent on a directional call. Today's schema gate rejects this shape at run time, but --db mode scores persisted rows that may predate the gate — the harness must judge what is persisted, never assume the cage already did. The dissent metric must fail it as vacuous-by-absence.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "LOW",
+    "thesis": "The committee rejects AVGO: the momentum family failed its gates on real data and no validated strategy covers the name, so the desk has no basis for deployment.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance",
+      "The close falls below the SMA50 for five consecutive sessions"
+    ],
+    "evidence_refs": [
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "",
+    "debate_summary": ""
+  },
+  "evidence": [
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": false,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

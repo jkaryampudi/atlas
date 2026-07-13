@@ -1,0 +1,53 @@
+{
+  "bundle_id": "apex_bypass",
+  "description": "The adversarial reviewer's composite-bypass memo (eval-harness review 2026-07 finding #6, reconstructed verbatim): wrong on every axis, in ordinary prose, and it once swept all six metrics at 1.0000. The thesis INVERTS the quant record (attributes xsmom-pit's 4-of-4 folds, 0.998 deflated Sharpe and 0.000 null p to momentum-v1, which the cited evidence says FAILED 0 of 4) yet stays fully grounded — an INHERITED cage limit (presence-not-attribution, see grounding.py), pinned here honestly as a PASS. The kill criteria are sentiment vibes dressed in time words and a smuggled evidence digit (both must now FAIL observability), conviction is HIGH under thesaurus hedges ('looks', 'probably' — must now FAIL the rubric), the dissent is topical boilerplate engaging nothing (passes: lexical-novelty v1 limit, documented) and the debate bear is a thesaurus paraphrase of the bull (passes: semantic-echo v1 limit, documented). The pin this fixture exists for: THIS memo must FAIL kill_observability and conviction_conformance and the bundle must FAIL overall. Scope stated honestly (round-2 finding #2): the pin kills these two axes only — the axes that pass are the documented limits above, the panel's near-neighbor composite is pinned separately (apex_neighbor.json kills the noun-smuggled and trigger-fronted vibes legs via the round-4 anchor rule), and a composite built ENTIRELY from documented limits plus an out-of-lexicon mood subject can still sweep; that residual is recorded in the report caveats.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "HIGH",
+    "thesis": "The committee buys AVGO with full size: the momentum-v1 family passed its decision gates with 4 of 4 walk-forward folds and a deflated Sharpe of 0.998 at a null p of 0.000, the tape looks strong, and the market is probably underpricing the story.",
+    "kill_criteria": [
+      "Street sentiment on the name turns sour within a week",
+      "Sentiment drops materially over the next 20 sessions"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "Any long position carries downside when macro conditions worsen; volatility regimes shift without warning and prudent sizing plus disciplined risk limits remain essential.",
+    "debate_summary": "The bull and bear exchanged views and the committee found the bull case more persuasive on balance."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "The persistent trend shows institutional accumulation",
+        "Relative strength argues real demand"
+      ],
+      "weakest_opposing_point": "The bear ignores the tape",
+      "concede": "Entries late in a run carry drawdown exposure."
+    },
+    "bear": {
+      "strongest_points": [
+        "A durable uptrend reveals big-fund buying",
+        "Outperformance signals genuine appetite"
+      ],
+      "weakest_opposing_point": "Skeptics dismiss what screens plainly show",
+      "concede": "Tardy additions court deeper pullbacks."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": false,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": false,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

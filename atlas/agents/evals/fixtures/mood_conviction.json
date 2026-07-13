@@ -1,0 +1,34 @@
+{
+  "bundle_id": "mood_conviction",
+  "description": "The mood-conviction memo: a HIGH conviction label stapled to a hedge-saturated thesis (could / seems / appears / may / arguably). The rubric in cio/committee_memo.md defines HIGH as defensible unprompted; conviction is about to be graded against outcomes, so a mood label must fail rubric conformance before it poisons that series.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "HIGH",
+    "thesis": "This could be the moment the trend finally pays: the tape seems strong, the setup appears durable, and the market may still be underpricing the story, though the evidence is arguably thin beyond price itself.",
+    "kill_criteria": [
+      "The close falls below the SMA50 and the twenty-session return turns negative",
+      "AVGO misses its next quarterly earnings report and guidance is cut"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10"
+    ],
+    "dissent": "Nothing in the quant record supports deployment: momentum-v1 failed its gates outright, the validated family declines to select the name, and buying on tape-feel alone is exactly the unaccountable discretion the constitution exists to prevent.",
+    "debate_summary": ""
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."]
+  ],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": null,
+    "conviction_conformance": false,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

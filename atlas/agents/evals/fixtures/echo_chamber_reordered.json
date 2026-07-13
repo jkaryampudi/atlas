@@ -1,0 +1,55 @@
+{
+  "bundle_id": "echo_chamber_reordered",
+  "description": "KNOWN BYPASS, pinned to keep the leak visible (round-3 finding #2 — the same pattern as the out-of-lexicon vibes leak test): the echo_chamber_interleaved bear rewritten as clause-swapped passive-voice English in reverse point order — a word-level permutation of the pinned interleaved echo (identical lexemes bar two grammatical inflections), still verbatim-echoing 16 of the bull's 25 substance stems. Reordering destroys what the checks read: echoed adjacent bigrams 0 (the interleaved filler already killed adjacency), ordered-containment 0.2308 < cap 1/3 (the LCS assumes the copier preserves stem order — this copier does not), and the same filler clears the novel-stem floors, so debate_diversity scores 0.6923 and this bundle PASSES overall. That verdict is a FALSE PASS and this fixture pins it as expected=PASS deliberately: v1 is a deterministic lexical judge for ACCIDENTAL drift (threat model in __init__.py) and does not stack word-order machinery against a deliberately adversarial author — reordered partial-echo laundering is a documented v1 limit owned by the deferred LLM judge (shadow-mode first, ADR-0005 discipline), and it is stated on every rendered report. If this fixture ever starts to FAIL, a debate check got stricter: re-derive, re-calibrate against the genuine-debate corpus, and re-pin deliberately.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital: no validated strategy covers the name and the quant record says the momentum family fails on real data, so trend persistence alone does not justify deployment.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance while the family PASS verdict still stands",
+      "The twenty-session return turns negative and the close falls below both the SMA20 and SMA50 levels"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "The desk risks whipsawing its own watchlist: the point-in-time machinery is close to selecting this name, and a standing rejection that flips at the next rebalance surrenders the entry that persistent structure already flags.",
+    "debate_summary": "Both sides largely restated the same trend and accumulation case; genuine disagreement was thin and the committee noted the debate added little beyond the evidence itself."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "The persistent trend above both moving averages shows institutional accumulation in the name",
+        "Relative strength over the sixty-session window argues real demand for the name",
+        "The validated xsmom-pit family proves momentum edges exist in this market"
+      ],
+      "weakest_opposing_point": "The other side repeats the same trend and accumulation points without engaging them",
+      "concede": "Validated coverage for the name is absent today."
+    },
+    "bear": {
+      "strongest_points": [
+        "Surely nurturing tradable momentum type edges lasting decades is that thoroughly validated house xsmom style pit familiar family",
+        "Genuinely deep demand behind the name is what durable strength spanning the full session trading window frankly argues",
+        "Heavy institutional stealth accumulation surrounding the name is plainly shown by a persistent, deeply entrenched trend against steadily climbing gauges"
+      ],
+      "weakest_opposing_point": "The other side repeats the same trend and accumulation points without engaging them",
+      "concede": "Validated coverage for the name is absent today."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}

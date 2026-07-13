@@ -1,0 +1,28 @@
+{
+  "bundle_id": "buy_without_evidence",
+  "description": "The unaccountable BUY (eval-harness review 2026-07 finding #19): a BUY memo citing nothing, with no evidence corpus at all. Constitution 4 forbids this shape twice over ('BUY without evidence_refs is forbidden', 'BUY forbidden when no DCP evidence attached') and the pre-fix judge passed it 1.0000 on every metric. The re-checked BUY gates in refs_completeness must FAIL it: --db mode scores rows that may predate or bypass the cage, and the judge may never be weaker than the cage. The narrative is deliberately digit-free so this bundle isolates the Constitution-4 re-check.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "LOW",
+    "thesis": "The committee buys AVGO because the tape has been persistent and the desk believes the trend continues from here.",
+    "kill_criteria": [
+      "The close falls below the SMA50 for five consecutive sessions",
+      "The next quarterly report shows revenue declining from the prior year"
+    ],
+    "evidence_refs": [],
+    "dissent": "Buying an uncovered name with no persisted evidence corpus is precisely the unaccountable discretion the constitution forbids; without a validated strategy or cited record the desk cannot defend this entry to the Principal.",
+    "debate_summary": ""
+  },
+  "evidence": [],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": false,
+    "overall": false
+  }
+}

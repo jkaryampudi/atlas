@@ -1,0 +1,55 @@
+{
+  "bundle_id": "good_buy",
+  "description": "A grounded BUY: the passive-core case for SPY (the mandate's honest alternative, ADR-0009), HIGH conviction with an unhedged thesis, observable kill criteria, genuine dissent, diverse debate. The corpus must not be REJECT-only or the harness only ever grades one verdict shape.",
+  "symbol": "SPY",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "HIGH",
+    "thesis": "The committee approves SPY as the passive core: the mandate names buy-and-hold SPY the fund's honest alternative, price sits above both moving averages with a positive twenty-day return, and holding the benchmark carries no ungated-strategy risk while validated sleeves mature.",
+    "kill_criteria": [
+      "SPY closes below its SMA50 and stays below it for ten consecutive sessions",
+      "The portfolio drawdown from peak exceeds the DD2 band in the risk plan"
+    ],
+    "evidence_refs": [
+      "dcp:bars:SPY:2026-07-10",
+      "dcp:indicators:SPY:2026-07-10",
+      "quant:families:SPY:2026-07-10"
+    ],
+    "dissent": "The passive core concedes every active edge: if the validated cross-sectional family performs live as it did in the walk-forward record, capital parked in the benchmark forgoes that excess, and entering after a strong run risks anchoring the book to the top of the recent window.",
+    "debate_summary": "The bull carried the structural point that the benchmark is the mandated default; the bear's strongest argument was opportunity cost against the validated family, which the committee weighed and accepted knowingly."
+  },
+  "evidence": [
+    ["dcp:bars:SPY:2026-07-10", "SPY daily closes (EODHD vendor bars, split-adjusted): latest close 618.42 on 2026-07-10, previous close 615.20, 20 sessions ago 601.77. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:SPY:2026-07-10", "DCP indicators for SPY as of 2026-07-10: SMA20 611.03, SMA50 598.66, 20-day return 2.77 percent, last close 618.42."],
+    ["quant:families:SPY:2026-07-10", "Quant validation record as of 2026-07-10: family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000); SPY is the fund's benchmark and the designated passive-core alternative under ADR-0009."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "The mandate itself defines buy-and-hold SPY as the fund's honest alternative, so the burden of proof sits on NOT holding it",
+        "Price above both moving averages with a positive twenty-day return means the passive core is not fighting the tape",
+        "Holding the benchmark carries zero ungated-strategy risk while the quant pipeline matures"
+      ],
+      "weakest_opposing_point": "Opportunity cost against a family that has only a walk-forward record, not a live one, is speculative",
+      "concede": "A late entry after a strong run can still draw down hard from here."
+    },
+    "bear": {
+      "strongest_points": [
+        "Every dollar in the passive core is a dollar the validated cross-sectional family cannot compound",
+        "Entering after twenty sessions of strength buys the top of the recent window rather than a pullback",
+        "A benchmark position teaches the desk nothing and generates no attributable skill record"
+      ],
+      "weakest_opposing_point": "The bull treats the mandate's default as an argument when it is only a fallback",
+      "concede": "The mandate does name buy-and-hold SPY as the honest alternative."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "bundle_id": "mood_conviction_thesaurus",
+  "description": "The thesaurus-shifted mood-conviction memo (eval-harness review 2026-07 finding #10): the mood_conviction thesis rewritten one hedge at a time into the highest-frequency LLM hedging vocabulary (potentially / looks / suggests / probably / presumably). The pre-fix hedge lexicon counted ZERO hedges here and passed the HIGH label; the extended pinned lexicon must count five and FAIL rubric conformance — the pin that keeps the hedge lexicon covering the center of the distribution it guards.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "HIGH",
+    "thesis": "This is potentially the moment the trend finally pays: the tape looks strong, the setup suggests durability, and the market is probably still underpricing the story, though the evidence is presumably thin beyond price itself.",
+    "kill_criteria": [
+      "The close falls below the SMA50 and the twenty-session return turns negative",
+      "AVGO misses its next quarterly earnings report and guidance is cut"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10"
+    ],
+    "dissent": "Nothing in the quant record supports deployment: momentum-v1 failed its gates outright, the validated family declines to select the name, and buying on tape-feel alone is exactly the unaccountable discretion the constitution exists to prevent.",
+    "debate_summary": ""
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."]
+  ],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": null,
+    "conviction_conformance": false,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

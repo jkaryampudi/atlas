@@ -1,0 +1,32 @@
+{
+  "bundle_id": "pre_0013_evidence",
+  "description": "The honest pre-0013 shape (eval-harness review 2026-07 finding #16): a compliant memo whose run provably attached evidence (research.agent_runs.input_refs, mirrored here as run_attached_evidence) but whose bodies predate the memo_evidence table and were never backfilled. The pre-fix judge accused it of fabrication three ways (grounding 0.0000 'ungrounded number', refs 0.0000 'dangling', conviction 'low_without_evidence'). Grounding and refs must be n/a — not scoreable, counted in the report — and the conviction cap must not fire; the bundle passes overall. A memo with refs, no bodies and run_attached_evidence FALSE (fabricated refs) keeps failing closed — the unit suite pins that side.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital: the record shows 0 of 4 walk-forward folds passed for the momentum family, so no validated strategy covers the name.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance",
+      "The close falls below the SMA50 for five consecutive sessions"
+    ],
+    "evidence_refs": [
+      "quant:families:AVGO:2025-11-02",
+      "dcp:bars:AVGO:2025-11-02"
+    ],
+    "dissent": "Persistent relative strength argues the point-in-time machinery will select this name shortly, and a standing rejection that flips at the next rebalance whipsaws the watchlist while surrendering the entry.",
+    "debate_summary": ""
+  },
+  "evidence": [],
+  "run_attached_evidence": true,
+  "debate": null,
+  "expected": {
+    "grounding": null,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": null,
+    "overall": true
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "bundle_id": "insufficient_evidence",
+  "description": "The honest abstention: no evidence corpus, INSUFFICIENT_EVIDENCE with conviction N/A, empty refs, no kill criteria, no dissent, no debate. Most metrics are structurally not applicable and the bundle must PASS — the harness must never punish a desk for declining to argue what it cannot ground.",
+  "symbol": "TCS",
+  "memo": {
+    "recommendation": "INSUFFICIENT_EVIDENCE",
+    "conviction": "N/A",
+    "thesis": "No DCP evidence was provided for this candidate; the desk declines to argue a direction it cannot ground.",
+    "kill_criteria": [],
+    "evidence_refs": [],
+    "dissent": "",
+    "debate_summary": ""
+  },
+  "evidence": [],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": null,
+    "dissent_distinctness": null,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}

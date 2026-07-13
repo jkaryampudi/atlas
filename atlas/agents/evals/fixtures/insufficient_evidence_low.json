@@ -1,0 +1,25 @@
+{
+  "bundle_id": "insufficient_evidence_low",
+  "description": "The PRODUCTION-shaped honest abstention (round-2 findings #6/#7; dissent rule rescoped round-4 per round-3 finding #7): the CIO template (prompts/cio/committee_memo.md line 10) offers only LOW/MEDIUM/HIGH and instructs 'cap at LOW when evidence_available=false' — it never elicits N/A — so a prompt-conformant model abstains with conviction LOW and writes its empty dissent out loud as 'Not applicable.'. The old na_iff_insufficient XOR failed every such memo and the thin-dissent floor failed the NA marker; the round-2 fix matched five exact NA strings and still failed the same honest abstention phrased 'No dissent.' or 'N/A - no evidence to argue against.'. Round-4 grades no dissent text at all on an abstention: there is no direction to dissent against (the schema requires a dissent only on directional memos), so the column is n/a whatever the desk wrote. The pin this fixture exists for: INSUFFICIENT_EVIDENCE with conviction LOW conforms (conviction in {N/A, LOW}), its dissent is not graded, and the bundle must PASS — the harness must never punish a desk for declining to argue what it cannot ground.",
+  "symbol": "TCS",
+  "memo": {
+    "recommendation": "INSUFFICIENT_EVIDENCE",
+    "conviction": "LOW",
+    "thesis": "No DCP evidence was provided for this candidate; the desk declines to argue a direction it cannot ground.",
+    "kill_criteria": [],
+    "evidence_refs": [],
+    "dissent": "Not applicable.",
+    "debate_summary": ""
+  },
+  "evidence": [],
+  "debate": null,
+  "expected": {
+    "grounding": true,
+    "kill_observability": null,
+    "dissent_distinctness": null,
+    "debate_diversity": null,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}

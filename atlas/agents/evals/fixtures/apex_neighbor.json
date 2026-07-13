@@ -1,0 +1,56 @@
+{
+  "bundle_id": "apex_neighbor",
+  "description": "The round-2 panel's near-neighbor composite (round-2 finding #2) EXTENDED with the round-3 trigger-fronting bypasses (round-3 finding #1), pinned together: the apex_bypass memo rebuilt from the holes that survived round 1 — same inverted-attribution thesis (grounded misattribution, the documented inherited cage limit) minus the two hedge words, the same boilerplate dissent (documented lexical-novelty limit) and a thesaurus-paraphrase debate (documented semantic-echo limit) — now carrying FIVE kill criteria covering every in-lexicon vibes phrasing that has beaten a guard: the round-2 noun-smuggles ('The narrative around earnings turns sour', 'Investor mood on the name misses the vibe benchmark') and the round-3 variants that emptied the old leading-subject window by fronting the trigger or trailing the vibes word ('Falling sentiment on the name misses the vibe benchmark', 'Watch for turning sentiment against the earnings benchmark', 'The benchmark misses the prevailing mood on the street') — the last three scored OBSERVABLE under the round-2 guard and resurrected the full 1.0000 sweep. Under the round-4 anchor rule every one is unobservable: each carries a pinned vibes lexeme and none states a hard anchor (no relational numeric threshold, no positional comparison of a measurable quantity), so word order can never resurrect the sweep. The pin this fixture exists for: kill_observability must FAIL on ALL FIVE criteria (0.0000) and the bundle overall. The axes that still pass are the DOCUMENTED limits named above, plus the residual false-PASS direction recorded in the report caveats (a mood word outside the pinned vibes lexicon would still slip the rule).",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "BUY",
+    "conviction": "HIGH",
+    "thesis": "The committee buys AVGO with full size: the momentum-v1 family passed its decision gates with 4 of 4 walk-forward folds and a deflated Sharpe of 0.998 at a null p of 0.000; the tape is strong and the market underprices the story.",
+    "kill_criteria": [
+      "The narrative around earnings turns sour",
+      "Investor mood on the name misses the vibe benchmark",
+      "Falling sentiment on the name misses the vibe benchmark",
+      "Watch for turning sentiment against the earnings benchmark",
+      "The benchmark misses the prevailing mood on the street"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "Any long position carries downside when macro conditions worsen; volatility regimes shift without warning and prudent sizing plus disciplined risk limits remain essential.",
+    "debate_summary": "The bull and bear exchanged views and the committee found the bull case more persuasive on balance."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "The persistent trend shows institutional accumulation",
+        "Relative strength argues real demand"
+      ],
+      "weakest_opposing_point": "The bear ignores the tape",
+      "concede": "Entries late in a run carry drawdown exposure."
+    },
+    "bear": {
+      "strongest_points": [
+        "A durable uptrend reveals big-fund buying",
+        "Outperformance signals genuine appetite"
+      ],
+      "weakest_opposing_point": "Skeptics dismiss what screens plainly show",
+      "concede": "Tardy additions court deeper pullbacks."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": false,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

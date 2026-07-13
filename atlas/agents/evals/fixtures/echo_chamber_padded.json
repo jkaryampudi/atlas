@@ -1,0 +1,59 @@
+{
+  "bundle_id": "echo_chamber_padded",
+  "description": "The padded echo chamber (eval-harness review 2026-07 finding #7): the same verbatim-echo debate as echo_chamber, with two disjoint color sentences bolted onto each side's strongest_points. Under the old raw-jaccard measure the filler diluted the union and lifted the debate to a PASS while the three substantive bear points remained word-for-word copies of the bull's. Padding can only ADD bigrams, never remove shared ones, so the shared-bigram cap must still FAIL this bundle — the pin that keeps the laundering path dead.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital: no validated strategy covers the name and the quant record says the momentum family fails on real data, so trend persistence alone does not justify deployment.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance while the family PASS verdict still stands",
+      "The twenty-session return turns negative and the close falls below both the SMA20 and SMA50 levels"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "The desk risks whipsawing its own watchlist: the point-in-time machinery is close to selecting this name, and a standing rejection that flips at the next rebalance surrenders the entry that persistent structure already flags.",
+    "debate_summary": "Both sides largely restated the same trend and accumulation case; genuine disagreement was thin and the committee noted the debate added little beyond the evidence itself."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "The persistent trend above both moving averages shows institutional accumulation in the name",
+        "Relative strength over the sixty-session window argues real demand for the name",
+        "The validated xsmom-pit family proves momentum edges exist in this market",
+        "Semiconductor capex supercycles and hyperscaler budgets keep the demand backdrop unusually deep this cycle",
+        "Custom silicon roadmaps and networking attach rates broaden the franchise beyond any single product line"
+      ],
+      "weakest_opposing_point": "The other side repeats the same trend and accumulation points without engaging them",
+      "concede": "Validated coverage for the name is absent today."
+    },
+    "bear": {
+      "strongest_points": [
+        "The persistent trend above both moving averages shows institutional accumulation in the name, but accumulation can reverse",
+        "Relative strength over the sixty-session window argues real demand, though demand can fade",
+        "The validated xsmom-pit family proves momentum edges exist in this market, yet edges decay",
+        "Valuation multiples, crowded positioning and consensus enthusiasm stalk every widely held long",
+        "Rate volatility and a stretched tape leave scant cushion for disappointment anywhere"
+      ],
+      "weakest_opposing_point": "The other side repeats the same trend and accumulation points without engaging them",
+      "concede": "Validated coverage for the name is absent today."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": false,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": false
+  }
+}

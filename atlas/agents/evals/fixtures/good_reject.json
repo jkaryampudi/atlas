@@ -1,0 +1,55 @@
+{
+  "bundle_id": "good_reject",
+  "description": "The house-style good memo: a grounded REJECT arguing verbatim from the quant record (momentum-v1 FAIL, xsmom-pit PASS but name outside the winner decile), observable kill criteria, a genuine dissent, and a diverse bull/bear debate. Every metric should pass.",
+  "symbol": "AVGO",
+  "memo": {
+    "recommendation": "REJECT",
+    "conviction": "MEDIUM",
+    "thesis": "The committee rejects AVGO for new capital. The quant record is decisive: momentum-v1 failed its decision gates on real data with 0 of 4 folds passing, and while xsmom-pit holds a decision-grade PASS, AVGO sits outside the winner decile, so no validated strategy covers the name. Trend strength above both moving averages is noted but is not, by itself, a deployable edge.",
+    "kill_criteria": [
+      "AVGO enters the xsmom-pit winner decile at a monthly rebalance while the family PASS verdict still stands",
+      "The twenty-session return turns negative and the close falls below both the SMA20 and SMA50 levels"
+    ],
+    "evidence_refs": [
+      "dcp:bars:AVGO:2026-07-10",
+      "dcp:indicators:AVGO:2026-07-10",
+      "quant:families:AVGO:2026-07-10"
+    ],
+    "dissent": "Strongest case against rejection: the desk is dodging a name its own point-in-time machinery is close to selecting, and a standing REJECT that flips at the next rebalance whipsaws the watchlist process while surrendering the entry that persistent trend structure already flags.",
+    "debate_summary": "The sides disagreed genuinely: the bull rested on trend persistence, the bear on the absence of validated coverage; the bear point that AVGO sits outside the winner decile went unanswered and carried the memo."
+  },
+  "evidence": [
+    ["dcp:bars:AVGO:2026-07-10", "AVGO daily closes (EODHD vendor bars, split-adjusted): latest close 172.35 on 2026-07-10, previous close 170.10, 20 sessions ago 158.32. Window: 60 sessions ending 2026-07-10."],
+    ["dcp:indicators:AVGO:2026-07-10", "DCP indicators for AVGO as of 2026-07-10: SMA20 168.40, SMA50 161.75, 20-day return 8.86 percent, last close 172.35."],
+    ["quant:families:AVGO:2026-07-10", "Quant validation record as of 2026-07-10: family momentum-v1 FAILED decision gates on real data (null-model p 0.830, deflated Sharpe negative, 0 of 4 walk-forward folds passed); family xsmom-pit holds a decision-grade PASS on the S&P 500 point-in-time universe (4 of 4 folds, null p 0.000, deflated Sharpe 0.998). AVGO is not in the current xsmom-pit winner decile; no validated strategy currently covers AVGO."]
+  ],
+  "debate": {
+    "bull": {
+      "strongest_points": [
+        "Price has held above both moving averages for the whole sixty-session window, a persistence rarely seen without institutional accumulation",
+        "The twenty-session return is strongly positive while the broader tape has been flat, showing genuine relative strength",
+        "The xsmom-pit family PASS proves the fund can validate momentum-style edges, and AVGO exhibits exactly that profile"
+      ],
+      "weakest_opposing_point": "The bear leans entirely on gate verdicts and ignores that validation lags the tape by construction",
+      "concede": "No validated strategy currently covers the name, so any entry today rides an ungated thesis."
+    },
+    "bear": {
+      "strongest_points": [
+        "momentum-v1 failed every decision gate on real data, and the graveyard of failed variants is exactly why the fund gates strategies",
+        "AVGO is outside the xsmom-pit winner decile, so the one validated family the fund owns declines to select it",
+        "Buying trend strength without validated coverage is style drift the mandate forbids"
+      ],
+      "weakest_opposing_point": "The bull's accumulation story is inference from price alone with no flow evidence anywhere in the corpus",
+      "concede": "The trend structure is real and has persisted for the full window."
+    }
+  },
+  "expected": {
+    "grounding": true,
+    "kill_observability": true,
+    "dissent_distinctness": true,
+    "debate_diversity": true,
+    "conviction_conformance": true,
+    "refs_completeness": true,
+    "overall": true
+  }
+}
