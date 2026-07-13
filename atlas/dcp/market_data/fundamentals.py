@@ -17,17 +17,22 @@ enforced structurally here and unit-tested with a malicious fixture:
   taxonomy (``_VENDOR_SECTORS``), ISO-4217-shaped currency codes, and ISO
   dates. Free text NEVER reaches the body, whatever the payload contains.
 
-The readable payload paths are an explicit whitelist (``_STOCK_FACTS`` /
+The readable payload facts are an explicit whitelist (``_STOCK_FACTS`` /
 ``_ETF_FACTS``): a new vendor field can only reach agents by being added
-here, in a reviewed change. Numbers are rendered as plain decimal literals
-so the grounding verifier (atlas/agents/runtime/grounding.py) can match a
-memo's cited digits VERBATIM against this body — an agent quoting a value
-not present here fails closed.
+here, in a reviewed change. A fact is either a raw payload path read through
+``_number``, or one of two reviewed computed readers — ``_net_debt_mrq``
+(latest real-dated quarterly balance sheet) and ``_analyst_rating_count``
+(integer total over the closed rating-bucket vocabulary) — which apply the
+same choke points to nested/aggregated slots. Numbers are rendered as plain
+decimal literals so the grounding verifier
+(atlas/agents/runtime/grounding.py) can match a memo's cited digits VERBATIM
+against this body — an agent quoting a value not present here fails closed.
 """
 from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -40,29 +45,9 @@ INSIDER_WINDOW_DAYS = 182
 _DECIMAL_LITERAL = re.compile(r"-?\d+(?:\.\d+)?")
 _CURRENCY_CODE = re.compile(r"[A-Z]{3}")
 
-# The ONLY stock payload paths readable into evidence. Everything else —
-# General.Description, officer names, addresses, any narrative string — is
-# structurally unreachable (see module docstring).
-_STOCK_FACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("market cap", ("Highlights", "MarketCapitalization")),
-    ("trailing PE", ("Valuation", "TrailingPE")),
-    ("EPS (ttm)", ("Highlights", "EarningsShare")),
-    ("ROE", ("Highlights", "ReturnOnEquityTTM")),
-    ("profit margin", ("Highlights", "ProfitMargin")),
-    ("revenue (ttm)", ("Highlights", "RevenueTTM")),
-    ("revenue growth yoy", ("Highlights", "QuarterlyRevenueGrowthYOY")),
-    ("dividend yield", ("Highlights", "DividendYield")),
-    ("52-week high", ("Technicals", "52WeekHigh")),
-    ("52-week low", ("Technicals", "52WeekLow")),
-)
-
-# The ONLY ETF payload paths readable into evidence (plus Sector_Weights,
-# which goes through the closed sector vocabulary below).
-_ETF_FACTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("total assets", ("ETF_Data", "TotalAssets")),
-    ("expense ratio", ("ETF_Data", "NetExpenseRatio")),
-    ("yield", ("ETF_Data", "Yield")),
-)
+# EODHD's analyst-rating buckets — a CLOSED vocabulary of keys we count
+# across; the bucket NAMES never render, only their integer total does.
+_ANALYST_BUCKETS = ("StrongBuy", "Buy", "Hold", "Sell", "StrongSell")
 
 # EODHD's ETF sector taxonomy — a CLOSED vocabulary. A key not in this set is
 # dropped fail-closed: sector names are the only vendor strings allowed into
@@ -103,6 +88,105 @@ def _get(payload: dict[str, object], path: tuple[str, ...]) -> object:
             return None
         node = node.get(key)
     return node
+
+
+def _net_debt_mrq(payload: dict[str, object]) -> str | None:
+    """Most-recent-quarter net debt from the date-keyed balance sheet.
+
+    The vendor sends no debt-to-equity ratio field; netDebt on the latest
+    quarterly balance sheet is the closest RECORDED leverage fact (we render
+    vendor numbers verbatim, never ratios we derived ourselves). Quarter keys
+    must parse as real ISO dates — a hostile or malformed key is dropped
+    BEFORE max(), so it can neither render nor displace the true latest
+    quarter — and ONLY that latest quarter's netDebt is read: when it is
+    missing or fails the numeric whitelist the fact is omitted, never
+    silently substituted with an older quarter's figure presented as current.
+    """
+    quarters = _get(payload, ("Financials", "Balance_Sheet", "quarterly"))
+    if not isinstance(quarters, dict):
+        return None
+    latest: date | None = None
+    latest_row: object = None
+    for key, row in quarters.items():
+        try:
+            day = date.fromisoformat(key)
+        except (TypeError, ValueError):
+            continue
+        if latest is None or day > latest:
+            latest, latest_row = day, row
+    if not isinstance(latest_row, dict):
+        return None
+    return _number(latest_row.get("netDebt"))
+
+
+def _analyst_rating_count(payload: dict[str, object]) -> str | None:
+    """Total analyst ratings across the closed bucket vocabulary.
+
+    The memo's question is "how many analysts stand behind the target?", so
+    the total across StrongBuy/Buy/Hold/Sell/StrongSell is the fact rendered
+    (the same aggregation discipline as the insider share sum: arithmetic
+    over vendor numbers, never a judgement). A PRESENT bucket whose value is
+    not a non-negative integer poisons the total — fail closed, never publish
+    a partial sum as the consensus breadth; buckets the vendor did not send
+    at all are simply not counted, and no bucket at all means no fact."""
+    ratings = payload.get("AnalystRatings")
+    if not isinstance(ratings, dict):
+        return None
+    total, seen = 0, False
+    for bucket in _ANALYST_BUCKETS:
+        if bucket not in ratings:
+            continue
+        rendered = _number(ratings[bucket])
+        if rendered is None:
+            return None
+        count = Decimal(rendered)
+        if count < 0 or count != count.to_integral_value():
+            return None
+        total += int(count)
+        seen = True
+    return str(total) if seen else None
+
+
+# One readable stock fact: a label mapped to either a raw payload path (read
+# through the _number choke point) or one of the two reviewed computed
+# readers above — nothing else is a valid spec shape.
+_FactSpec = tuple[str, ...] | Callable[[dict[str, object]], str | None]
+
+# The ONLY stock payload facts readable into evidence, in render order. A new
+# vendor field can only reach agents by being added here, in a reviewed
+# change. Everything else — General.Description, officer names, addresses,
+# any narrative string — is structurally unreachable (see module docstring).
+_STOCK_FACTS: tuple[tuple[str, _FactSpec], ...] = (
+    ("market cap", ("Highlights", "MarketCapitalization")),
+    ("trailing PE", ("Valuation", "TrailingPE")),
+    ("forward PE", ("Valuation", "ForwardPE")),
+    ("EV/EBITDA", ("Valuation", "EnterpriseValueEbitda")),
+    ("price/sales (ttm)", ("Valuation", "PriceSalesTTM")),
+    ("revenue (ttm)", ("Highlights", "RevenueTTM")),
+    ("revenue growth yoy", ("Highlights", "QuarterlyRevenueGrowthYOY")),
+    # the vendor sends no gross-margin ratio field: GrossProfitTTM is the
+    # recorded fact, rendered verbatim rather than deriving a ratio the
+    # vendor never published
+    ("gross profit (ttm)", ("Highlights", "GrossProfitTTM")),
+    ("operating margin", ("Highlights", "OperatingMarginTTM")),
+    ("profit margin", ("Highlights", "ProfitMargin")),
+    ("ROE", ("Highlights", "ReturnOnEquityTTM")),
+    ("net debt (mrq)", _net_debt_mrq),
+    ("dividend yield", ("Highlights", "DividendYield")),
+    ("EPS (ttm)", ("Highlights", "EarningsShare")),
+    ("analyst target price", ("AnalystRatings", "TargetPrice")),
+    ("analyst ratings count", _analyst_rating_count),
+    ("52-week high", ("Technicals", "52WeekHigh")),
+    ("52-week low", ("Technicals", "52WeekLow")),
+)
+
+# The ONLY ETF payload paths readable into evidence (plus Sector_Weights,
+# which goes through the closed sector vocabulary below).
+_ETF_FACTS: tuple[tuple[str, _FactSpec], ...] = (
+    ("total assets", ("ETF_Data", "TotalAssets")),
+    ("expense ratio", ("ETF_Data", "NetExpenseRatio")),
+    ("yield", ("ETF_Data", "Yield")),
+)
 
 
 def _currency(payload: dict[str, object]) -> str | None:
@@ -177,8 +261,9 @@ def render_fundamentals_body(symbol: str, as_of: date,
     header += f", currency {currency})" if currency else ")"
 
     facts: list[str] = []
-    for label, path in (_ETF_FACTS if is_etf else _STOCK_FACTS):
-        rendered = _number(_get(payload, path))
+    for label, spec in (_ETF_FACTS if is_etf else _STOCK_FACTS):
+        rendered = (_number(_get(payload, spec)) if isinstance(spec, tuple)
+                    else spec(payload))
         if rendered is not None:
             facts.append(f"{label} {rendered}")
     if is_etf:
