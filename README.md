@@ -1,8 +1,36 @@
-# Atlas AI Capital — Phase 1 Foundation
+# Atlas AI Capital
 
-AI investment operating system. Architecture package in `docs/architecture/` (approved per ADR-0001).
+AI investment operating system — hypothetical A$100k, US + India equities, long-only,
+**paper mode**, capital preservation first. Architecture in `docs/architecture/`;
+signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
 
-## Status: Phase 1 exit criteria met per ADR-0004 — package v1.3 (ADR-0002 quant rigour, ADR-0003 learning loop, ADR-0004 1y-history amendment, ADR-0005 TradingAgents patterns)
+## Status (2026-07-13): Phases 1–5 built; first strategy approved to PAPER
+
+- **P1 data plane**: EODHD All-In-One, deep backfill 2010→2026, 693 instruments,
+  exchange calendars, FX, dividends (total-return capable), earnings calendar,
+  quality gates, nightly incremental ingest.
+- **P2 agents**: 5 roles + bull/bear debate (per-side model routing, all four
+  cases persisted), grounding cage (token-boundary, fail-closed), budget
+  sub-caps, red-team suite; committee memos graded by a scorecard (vs SPY at
+  20/60 sessions, dartboard baseline, dissent grading, per-source slices).
+- **P3 quant**: trial registry (28 trials, deflated Sharpe at true count),
+  1000-path null gate, purged walk-forward, point-in-time S&P 500 membership,
+  total-return scoring. Graveyard on record: momentum v1, trend/meanrev/breakout,
+  FX sandbox (ADR-0008) — all failed verbatim; gates never touched.
+- **P4 risk**: L1–L11, sizing, DD1–DD3 latched breakers, stress, factor overlap,
+  approval re-check; 100% branch coverage enforced (`make cov-risk`).
+- **P5 paper trading**: proposals→approval-with-recheck→next-open fills→FIFO
+  settlement→stops/exits→reconciliation; T0–T9 daily cycle (checkpointed,
+  atomic per day) on an in-process scheduler; console at `/console` (port 8001)
+  is the sole control surface; nightly backups.
+- **ADR-0010 (2026-07-13)**: `xsmom-pit-tr` (12-1 cross-sectional momentum,
+  monthly, winner decile) approved for **paper** on regenerated artifacts —
+  +737.31% vs SPY TR +593.89%, p=0.000, DSR 0.995, WF 4/4 — with caveats
+  accepted in ink and tighten-only demotion bands (DD −40%, 126-session excess
+  −25pp → latched `suspended`). Signals, desk lane, real signal lineage on
+  proposals, and the daily band check are live (migration 0020).
+
+Historical build log below (Phase-1-era detail kept for the record).
 
 ADR-0005 additions (TradingAgents patterns under Atlas governance):
 - **Bull/bear debate** (`agents/roles/debate.py`): 1 case + 1 rebuttal per side, forced concessions, stance integrity, exec-number guards; CIO memo gains `debate_summary`. Advisory only — red-team proves a unanimous debate cannot open a BUY without DCP evidence
@@ -30,7 +58,7 @@ Built and tested in this drop:
 ## Quick start
 ```bash
 pip install -e ".[dev]"
-pytest                    # 146 tests (PG tests isolated to atlas_test, auto-created)
+pytest                    # 935 tests (PG tests isolated to atlas_test, auto-created)
 docker compose up -d      # postgres + redis + api
 alembic upgrade head
 ```
@@ -42,5 +70,5 @@ alembic upgrade head
 - [x] Golden ingestion regression tests (fixture backfill week incl. split-explained move; honest-RED market test)
 - [x] Audit repository (Postgres-backed chain) + nightly verification job (`make verify-chain`, exits non-zero on any tamper/deletion; cron: `0 3 * * * cd <repo> && make verify-chain || <alert>`)
 - [x] `make replay DATE=…` end-to-end on fixtures (gate=green, chain verified)
-- [ ] `/v1/market/*`, `/v1/portfolio/snapshot` read endpoints
-- [ ] Streamlit Overview page (pure API client)
+- [x] `/v1/market/*`, `/v1/portfolio/snapshot` read endpoints (full read surface: market, portfolio, risk, research, quant, trading, audit, system)
+- [x] ~~Streamlit Overview page~~ superseded by the single-file console at `/console` (pure API client; decision flow, approval queue, live-cycle animation, scorecard, analyze box, strategy card)

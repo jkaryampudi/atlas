@@ -6,7 +6,7 @@ and gated behind human arming. Nothing here is investment advice.
 
 ## Read first
 - `docs/architecture/` — 9 design docs. 01 (system), 02 (Agent Constitution), 04 (risk), 05 (DB), 08 (roadmap) matter most.
-- `docs/adr/` — 3 signed decisions (small_aum limits, India via ETFs/ADRs, EODHD vendor, learning tiers).
+- `docs/adr/` — 10 signed decisions. Load-bearing: 0006 (stop derivation), 0007 (universe), 0009 (approval bar = beat SPY total return, absolute), 0010 (first paper approval: xsmom, with demotion bands).
 - `README.md` — phase-by-phase status checklists.
 
 ## Hard invariants — tests enforce these; NEVER violate
@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 300 passing (isolated to the atlas_test database)
+pytest             # currently 935 passing (isolated to the atlas_test database)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
@@ -37,13 +37,17 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 - **P3 Quant**: engine, momentum v1, null-model gate, walk-forward, regime classifier, artifact approval — all done on synthetic fixtures; overfit canary criterion PASSED. Real-data runs pending backfill.
 - **P4 Risk Engine**: DONE — L1–L11 `validate()`, sizing §4, DD1–DD3 breakers, stress §7,
   factor overlap §12, approval re-check §2.2; `make cov-risk` enforces 100% branch coverage.
-- **P5 Paper Trading**: core DONE on `phase-5-paper` (migration 0010 lifecycle schema,
-  PaperBroker next-session-open fills, build→approve-with-recheck→settle→snapshot in
-  `atlas/dcp/trading/proposals.py`), hardened by adversarial review (settle-time §2.3
-  lineage verification, advisory-lock serialisation, unique-index backstops vs double
-  fills/split positions, latched DD2/DD3 breaker fold, tighten-only stop merge,
-  FX + session-open fill gates). Next: `/v1/trading` API + console Approval Queue,
-  then sell/exit settlement and the T0–T9 daily pipeline.
+- **P5 Paper Trading**: DONE and merged to `main` (lifecycle schema 0010, PaperBroker
+  next-session-open fills, build→approve-with-recheck→settle→snapshot, exits + FIFO
+  sell settlement, T0–T9 daily cycle with in-process scheduler, reconciliation,
+  console as sole control surface on port 8001).
+- **First approved strategy (2026-07-13, ADR-0010)**: `xsmom-pit-tr` at state
+  **'paper'** — 12-1 cross-sectional momentum, monthly; approved on regenerated
+  artifacts (+737.31% vs SPY TR +593.89%, p=0.000, DSR 0.995, WF 4/4). Fully wired
+  (migration 0020): quant.signals generation in the cycle (t6b), signal-first desk
+  lane + SIGNALS evidence block, bridge resolves real signal UUIDs (fail-closed),
+  daily band check (t5b) demotes to latched 'suspended' on DD −40% / 126-session
+  excess −25pp. Caveats + tighten-only bands in the ADR.
 
 ## Task queue (priority order)
 1. ~~**P1 exit — real data**~~ DONE (calendars XNYS/XASX, FX job, backfill CLI; 1y history per ADR-0004, zero red gates under per-instrument coverage rules).
@@ -54,7 +58,8 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 6. ~~GitHub push + CI green~~ DONE (https://github.com/jkaryampudi/atlas).
 7. ~~**P5 trading API + console**~~ DONE (`atlas/api/routers/trading.py`, console TRADING page).
 8. ~~**P5 exits + daily pipeline**~~ DONE — GO-LIVE stack: exit engine (`atlas/dcp/trading/exits.py`: pre-authorized stop exits, discretionary close), sell settlement + FIFO lots, nightly incremental ingest (`atlas/dcp/market_data/daily.py` + `seeds/universe.json`), T0–T9 cycle (`atlas/ops/daily.py`, one atomic checkpointed transaction/day, settle-before-stops ordering), paper reconciliation (break = kill), alerts (`atlas/ops/alerts.py`, set `ATLAS_ALERT_URL`), launchd supervision + nightly `pg_dump` (`make install-ops`).
-9. **Next**: memo→proposal bridge (needs a deterministic stop-derivation policy — Principal decision; agents never produce prices, invariant 2); EODHD fundamentals into the evidence corpus; DD2/DD3 dual-confirm human clearing; monthly §14 attribution job.
+9. ~~**Memo→proposal bridge**~~ DONE (ADR-0006 stop derivation + ADR-0010 signal wiring; earnings calendar + regime + scanner context + SIGNALS in the evidence corpus; scorecard with dartboard baseline + source slices).
+10. **Next**: implementable-variant backtest (ADR-0010 obligation: validate the recipe on the ADR-0007 trading universe); approval-contract refinement (percentile bands + sleeve sub-accounting, board item 7); index-core allocation ADR (Principal); EODHD fundamentals into evidence; DD2/DD3 dual-confirm human clearing; monthly §14 attribution job; Linux-box migration (board #1; iCloud conflict-copy risk).
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.
