@@ -35,6 +35,17 @@ if not TEST_DB_NAME.startswith("atlas_test"):
 _prepared = False
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_client_cache():
+    """registry.build_client caches one LLM client per resolution for the
+    process (leak fix, 2026-07-14). That cache is global state; clear it around
+    every test so real-registry tests stay hermetic and order-independent."""
+    from atlas.agents.runtime.registry import reset_client_cache
+    reset_client_cache()
+    yield
+    reset_client_cache()
+
+
 def _reachable() -> bool:
     try:
         create_engine(ADMIN_URL).connect().close()

@@ -742,9 +742,16 @@ def _seed_two_lot_position(s, *, proposal_state: str, check_kind: str,
         "VALUES (:iid, 70, 100, 'USD', :at, 95, :memo) RETURNING id"),
         {"iid": iid, "at": datetime(2026, 7, 10, 13, 30, tzinfo=UTC),
          "memo": memo}).scalar()
+    # created_at pinned to acquired_at (not the DB now() default): the FIFO
+    # disposal stamps a split residual lot's created_at from the INJECTED clock
+    # (~T0), and ORDER BY acquired_at, created_at, id tie-breaks same-acquired_at
+    # lots on it. Leaving created_at to now() made the seed real-wall-clock
+    # dependent — it inverted once the real date rolled past the frozen T0
+    # (CLAUDE.md invariant 6: no wall clock in deterministic paths).
     s.execute(text(
-        "INSERT INTO trading.tax_lots (position_id, qty, cost_aud, acquired_at) VALUES "
-        "(:p, 30, 4500.00, :a1), (:p, 40, 6200.00, :a2)"),
+        "INSERT INTO trading.tax_lots (position_id, qty, cost_aud, acquired_at, "
+        " created_at) VALUES "
+        "(:p, 30, 4500.00, :a1, :a1), (:p, 40, 6200.00, :a2, :a2)"),
         {"p": position_id, "a1": datetime(2026, 7, 10, 13, 30, tzinfo=UTC),
          "a2": datetime(2026, 7, 11, 13, 30, tzinfo=UTC)})
     pid = s.execute(text(
