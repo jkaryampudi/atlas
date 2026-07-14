@@ -72,7 +72,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -84,7 +84,7 @@ from atlas.core.clock import Clock, FrozenClock, SystemClock
 from atlas.core.db import session_scope
 from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
-from atlas.dcp.market_data.calendars import is_trading_day
+from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
@@ -102,6 +102,64 @@ def _emit(node: str, status: str, result: str | None = None) -> None:
     print("@@CYCLE " + json.dumps(
         {"node": node, "status": status, "result": result,
          "at": datetime.now(UTC).isoformat()}), flush=True, file=sys.stdout)
+
+
+# Session-close guard (production defect 2026-07-13): a console "Run Cycle
+# now" click at 11:07 AEST created and COMPLETED the daily-2026-07-13
+# checkpoint before Monday's US session had traded a single bar (t0 ingested
+# 0 new bars). The run_id is one-per-date and resume-safe, so the evening
+# scheduler firing merely replayed the finished checkpoint: the desk debated
+# Friday's closes and the day's bridge slot was spent on stale data. The fix
+# is structural — the cycle REFUSES to start for a US (XNYS) session date
+# until that session has closed, per the exchange calendar and the injected
+# clock, BEFORE the checkpoint row exists, so a refused attempt never
+# consumes the day.
+#
+# WHY 30 minutes of grace: the closing bell is not the data — EODHD's
+# end-of-day file is never complete at 20:00:00 UTC sharp, and this guard is
+# deliberately structural (calendar + clock only, no vendor calls), so it
+# cannot ask whether the bars have actually landed. 30 minutes blunts the
+# "click right at the close" edge of the same defect (a 20:01 UTC click would
+# still ingest nothing) while staying far clear of the scheduled 23:30 UTC
+# firing: the latest XNYS close all year is 21:00 UTC (winter), and 21:30 <
+# 23:30 on every session — pinned across a full calendar year by
+# tests/unit/test_cycle_guard.py. It is a hedge, not a publication guarantee;
+# the t0 quality gates remain the authority on whether the bars arrived.
+CYCLE_EARLIEST_AFTER_CLOSE_MIN = 30
+
+# Distinct from 0 (clean day) and 2 (a node/ingest failure): "come back after
+# the close" is neither — the scheduler must not page FAILED for it, and cron/
+# launchd logs must still be able to tell the three apart.
+EXIT_REFUSED = 3
+
+
+class CycleRefusedError(RuntimeError):
+    """The cycle declined to START for this date. Raised before the
+    daily-<date> checkpoint row is created, so the day is NOT consumed:
+    a later, post-close invocation is a fresh full run."""
+
+
+def cycle_refusal(clock: Clock) -> str | None:
+    """Reason the daily cycle must not start yet, or None to proceed.
+
+    Structural only — exchange calendar + injected clock, never a vendor
+    call. For a US (XNYS) session date D, refuse until D's session close
+    plus CYCLE_EARLIEST_AFTER_CLOSE_MIN. Non-session days (weekends,
+    holidays) pass through unchanged: that path already runs and honestly
+    records "not a US session". The scheduler's own 23:30 UTC firing passes
+    trivially on every session of the year (early closes included).
+    """
+    now = clock.now().astimezone(UTC)
+    day = now.date()  # same derivation as the daily-<date> run_id
+    if not is_trading_day("US", day):
+        return None
+    close = session_close_utc("US", day)
+    earliest = close + timedelta(minutes=CYCLE_EARLIEST_AFTER_CLOSE_MIN)
+    if now >= earliest:
+        return None
+    return (f"cycle for {day} refused: US session not yet closed "
+            f"(closes {close:%H:%M} UTC + {CYCLE_EARLIEST_AFTER_CLOSE_MIN}min "
+            f"vendor grace); re-run after {earliest:%H:%M} UTC")
 
 
 def _reconcile(session: Session, clock: Clock) -> str:
@@ -200,7 +258,15 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                     desk: Callable[[Session, Clock], Any] | None = None,
                     ) -> dict[str, str | None]:
     """One day's full cycle under a single checkpointed run_id. Returns the
-    node-result map; raises on kill conditions (chain break, recon break)."""
+    node-result map; raises on kill conditions (chain break, recon break) and
+    CycleRefusedError when the run date's US session has not closed yet."""
+    # the guard sits ABOVE the WorkflowRunner on purpose: a refusal must leave
+    # no workflow.workflow_runs row behind, or the refused attempt would
+    # consume the one-per-date checkpoint exactly like the 2026-07-13 defect
+    refusal = cycle_refusal(clock)
+    if refusal is not None:
+        _emit("guard", "refused", refusal)
+        raise CycleRefusedError(refusal)
     day = clock.now().date().isoformat()
     state: dict[str, object] = {}
 
@@ -413,8 +479,17 @@ def main() -> None:
         # scan first (ADR-0007): the desk studies the scanner's shortlist,
         # never the full universe — breadth is the scanner's job, and it's free
         desk = build_scanned_desk(run_desk, desk_symbols)
-    with session_scope() as s:
-        results = run_daily_cycle(s, clock, adapter, desk=desk)
+    try:
+        with session_scope() as s:
+            results = run_daily_cycle(s, clock, adapter, desk=desk)
+    except CycleRefusedError as e:
+        # a polite, deliberate no-op: nothing was written (no checkpoint row,
+        # no audit event), the day is NOT consumed, and the distinct exit code
+        # keeps the scheduler from paging FAILED for a run that simply came
+        # before the close — the plain line below is what lands in the
+        # scheduler's status detail
+        print(f"REFUSED: {e}")
+        raise SystemExit(EXIT_REFUSED) from None
     ingest_line = results.get("t0_ingest") or ""
     failed = ("failed=True" in ingest_line
               or "desk FAILED" in (results.get("t7_desk") or "")

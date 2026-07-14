@@ -48,7 +48,10 @@ def _case(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
         template_rel_path=f"debate/{side.lower()}.md", context=context,
         output_model=DebateCase, input_refs=input_refs,
         extra_fields={"expected_stance": side},
-        evidence_bodies=evidence_bodies)  # grounding: numbers must exist in cited refs
+        evidence_bodies=evidence_bodies,  # grounding: numbers must exist in cited refs
+        max_tokens=2500)  # same headroom as the CIO memo: 1200 truncated live
+                          # (LRCX bull 2026-07-14, mid-JSON at ~4KB) once the
+                          # fundamentals block fattened the evidence
     return out  # type: ignore[return-value]
 
 

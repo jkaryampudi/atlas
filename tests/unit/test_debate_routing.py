@@ -95,3 +95,21 @@ def test_registry_env_routes_bear_to_local_while_bull_stays_anthropic(
     assert isinstance(bull_c, AnthropicClient)
     assert isinstance(bear_c, OpenAICompatClient)
     assert bull_reb_c is bull_c and bear_reb_c is bear_c   # rebuttal = own side
+
+
+def test_debate_seats_get_memo_grade_token_headroom(monkeypatch):
+    """LRCX 2026-07-14: a bull case truncated mid-JSON at the old 1200-token
+    default once the fundamentals block fattened the evidence — two schema
+    failures, cage held, no memo. Debate seats need the same headroom the CIO
+    memo got for the same reason ('1200 truncated live'). Regression pin: all
+    four seats must request >= 2500 output tokens."""
+    limits: list[int] = []
+
+    def fake_run_agent(*, extra_fields, max_tokens, **kw):
+        limits.append(max_tokens)
+        return _case(extra_fields["expected_stance"]), "run-id"
+
+    monkeypatch.setattr(debate_mod, "run_agent", fake_run_agent)
+    monkeypatch.setattr(debate_mod, "build_client", lambda role: object())
+    run_debate(session=None, audit=None, symbol="AVGO", evidence=EVIDENCE)
+    assert len(limits) == 4 and all(m >= 2500 for m in limits)

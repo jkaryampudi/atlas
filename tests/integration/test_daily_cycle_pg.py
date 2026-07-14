@@ -8,6 +8,10 @@ protected. Seeding mirrors test_exits_pg.py exactly.
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -20,7 +24,8 @@ from atlas.core.clock import FrozenClock
 from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
 from atlas.dcp.risk.seed_limits import seed_limit_set
 from atlas.dcp.trading.proposals import approve, build_proposal
-from atlas.ops.daily import run_daily_cycle
+from atlas.ops.daily import EXIT_REFUSED, CycleRefusedError, run_daily_cycle
+from tests.conftest import URL as TEST_DB_URL
 from tests.conftest import requires_pg
 
 pytestmark = requires_pg
@@ -214,3 +219,117 @@ def test_desk_skipped_on_non_us_session_day(clean_audit):
     # the bridge is NOT desk-gated: it runs (and finds no candidates) even on
     # a non-session day — a manually-run desk's memos must still bridge
     assert results["t8_bridge"] == "bridged 0 (none) · skipped 0"
+
+
+# ---- session-close guard (production defect 2026-07-13): a mid-session
+# console click must never consume the day's one-per-date checkpoint --------
+
+REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
+               "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
+NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
+         "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals", "t7_desk",
+         "t8_bridge", "t9_report"]
+
+
+def test_mid_session_start_is_refused_before_the_checkpoint_exists(
+        clean_audit, capsys):
+    """The defect instant (11:07 AEST = 01:07 UTC, Monday 2026-07-13): the
+    guard refuses BEFORE the daily-2026-07-13 checkpoint row is created —
+    no workflow rows, no audit event, nothing written anywhere."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(datetime(2026, 7, 13, 1, 7, tzinfo=UTC))
+    with pytest.raises(CycleRefusedError) as exc:
+        run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert str(exc.value) == REFUSED_MSG
+    assert s.execute(text("SELECT count(*) FROM workflow.workflow_runs "
+                          "WHERE run_id = 'daily-2026-07-13'")).scalar() == 0
+    assert s.execute(text("SELECT count(*) FROM workflow.workflow_node_results "
+                          "WHERE run_id = 'daily-2026-07-13'")).scalar() == 0
+    # the guard is a pure read of calendar + clock: no audit event either
+    assert s.execute(text(
+        "SELECT count(*) FROM audit.decision_events")).scalar() == 0
+    # the refusal rides the @@CYCLE stream so the console shows WHY
+    lines = [ln for ln in capsys.readouterr().out.splitlines()
+             if ln.startswith("@@CYCLE ")]
+    ev = json.loads(lines[-1][8:])
+    assert (ev["node"], ev["status"], ev["result"]) == (
+        "guard", "refused", REFUSED_MSG)
+
+
+def test_refused_attempt_then_after_close_run_is_fresh_and_complete(clean_audit):
+    """A refusal must not spend the day: the post-close invocation is a FRESH
+    full run — every node truly executes (skipped nodes emit no
+    workflow.node.completed audit event, so 12 events = nothing was
+    pre-consumed) and the day's checkpoint completes."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(datetime(2026, 7, 13, 1, 7, tzinfo=UTC))
+    with pytest.raises(CycleRefusedError):
+        run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    clock.advance_to(datetime(2026, 7, 13, 22, 0, tzinfo=UTC))  # close+grace passed
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert list(results.keys()) == NODES
+    assert s.execute(text("SELECT status FROM workflow.workflow_runs "
+                          "WHERE run_id = 'daily-2026-07-13'")).scalar() == "completed"
+    executed = s.execute(text(
+        "SELECT count(*) FROM audit.decision_events "
+        "WHERE event_type = 'workflow.node.completed'")).scalar()
+    assert executed == len(NODES)
+
+
+def test_scheduled_2330_utc_firing_runs_the_day(clean_audit):
+    """The scheduler's own 23:30 UTC firing time passes the guard trivially
+    for its target date (the structural property is pinned across a whole
+    year in tests/unit/test_cycle_guard.py)."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(datetime(2026, 7, 13, 23, 30, tzinfo=UTC))
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert list(results.keys()) == NODES
+    assert s.execute(text("SELECT status FROM workflow.workflow_runs "
+                          "WHERE run_id = 'daily-2026-07-13'")).scalar() == "completed"
+
+
+def test_weekend_mid_morning_keeps_not_a_session_behavior(clean_audit):
+    """The guard only speaks on US session dates: a Sunday run at the exact
+    mid-morning instant of the defect still runs the whole cycle and records
+    the existing 'not a US session' desk line — no regression."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(datetime(2026, 7, 12, 1, 7, tzinfo=UTC))
+    calls = {"n": 0}
+
+    def counting_desk(session, clk):
+        calls["n"] += 1
+
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES),
+                              desk=counting_desk)
+    assert results["t7_desk"] == "desk skipped (2026-07-12 is not a US session)"
+    assert calls["n"] == 0
+
+
+def test_cli_exits_with_the_distinct_refused_code(clean_audit):
+    """The scheduler's envelope, end to end: `python -m atlas.ops.daily`
+    mid-session exits EXIT_REFUSED (not 0 = clean, not 2 = failure), prints
+    the guard's @@CYCLE line for the console and the plain REFUSED line for
+    the status detail — and still creates no checkpoint row."""
+    s = clean_audit
+    _clean(s)
+    env = {**os.environ,
+           "ATLAS_DATABASE_URL": TEST_DB_URL,   # isolation, defense in depth:
+           #                        the guard fires before any DB statement
+           "ATLAS_EODHD_API_KEY": "",           # fixtures — never a vendor call
+           "ATLAS_ANTHROPIC_API_KEY": ""}       # desk off
+    r = subprocess.run([sys.executable, "-m", "atlas.ops.daily",
+                        "--now", "2026-07-13T01:07:00+00:00"],
+                       cwd=ROOT, env=env, capture_output=True, text=True,
+                       timeout=120)
+    assert r.returncode == EXIT_REFUSED, r.stdout + r.stderr
+    assert f"REFUSED: {REFUSED_MSG}" in r.stdout
+    guard_lines = [ln for ln in r.stdout.splitlines() if ln.startswith("@@CYCLE ")]
+    ev = json.loads(guard_lines[-1][8:])
+    assert (ev["node"], ev["status"], ev["result"]) == (
+        "guard", "refused", REFUSED_MSG)
+    assert s.execute(text("SELECT count(*) FROM workflow.workflow_runs "
+                          "WHERE run_id = 'daily-2026-07-13'")).scalar() == 0

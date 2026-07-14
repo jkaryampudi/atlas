@@ -10,7 +10,8 @@ export ATLAS_DATABASE_URL="${ATLAS_DATABASE_URL:-postgresql+psycopg://atlas:atla
 
 ./.venv/bin/python -m atlas.ops.daily
 rc=$?
-if [ $rc -ne 0 ]; then
+# exit 3 = pre-session guard refusal (polite, expected on early manual runs) — not a failure
+if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then
   ./.venv/bin/python - <<PY
 from atlas.ops.alerts import notify
 notify("Atlas daily pipeline FAILED", "exit code ${rc} — see ~/Library/Logs/atlas-daily.log", priority="high")

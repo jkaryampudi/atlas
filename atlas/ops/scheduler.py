@@ -30,7 +30,7 @@ _REPO = Path(__file__).resolve().parents[2]
 
 _cycle_lock = threading.Lock()
 _last: dict[str, object] = {"started_at": None, "finished_at": None,
-                            "ok": None, "detail": None}
+                            "ok": None, "refused": None, "detail": None}
 
 
 def next_fire(now: datetime, at: time) -> datetime:
@@ -49,11 +49,21 @@ def _run_cycle() -> None:
     is a single uncommitted transaction, so this stream is the ONLY live
     window into it); each line lands in _last['progress'] for the console's
     animated pipeline. The pipeline does its own alerting; this reports only
-    the envelope."""
+    the envelope.
+
+    EXIT_REFUSED is the one non-zero code that is NOT a failure: the cycle
+    politely declined to start because the date's US session has not closed
+    yet (atlas.ops.daily session-close guard — the WHY arrives as a @@CYCLE
+    'guard'/'refused' progress line and in the detail tail). No checkpoint
+    row was created, the day is not consumed, and nobody gets paged; the
+    scheduled 23:30 UTC firing always passes the guard, so a refusal can only
+    come from a manual click landing before the close."""
     import json as _json
 
+    from atlas.ops.daily import EXIT_REFUSED  # lazy: keep module import light
+
     _last.update(started_at=datetime.now(UTC).isoformat(), finished_at=None,
-                 ok=None, detail="running", progress=[])
+                 ok=None, refused=None, detail="running", progress=[])
     progress: list[dict[str, object]] = _last["progress"]  # type: ignore[assignment]
     try:
         proc = subprocess.Popen(
@@ -80,16 +90,18 @@ def _run_cycle() -> None:
                 tail.append(line)
                 del tail[:-30]
         proc.wait(timeout=3600)
-        ok = proc.returncode == 0
+        refused = proc.returncode == EXIT_REFUSED
+        ok = proc.returncode == 0 or refused
         detail = "\n".join(tail)[-500:]
         if not ok:
             notify("Atlas daily cycle FAILED",
                    f"exit {proc.returncode} — console jobs board has the step",
                    priority="high")
     except Exception as e:  # noqa: BLE001 — the scheduler must survive anything
-        ok, detail = False, f"cycle runner crashed: {e}"
+        ok, refused, detail = False, False, f"cycle runner crashed: {e}"
         notify("Atlas daily cycle CRASHED", str(e), priority="high")
-    _last.update(finished_at=datetime.now(UTC).isoformat(), ok=ok, detail=detail)
+    _last.update(finished_at=datetime.now(UTC).isoformat(), ok=ok,
+                 refused=refused, detail=detail)
 
 
 def start_cycle() -> bool:

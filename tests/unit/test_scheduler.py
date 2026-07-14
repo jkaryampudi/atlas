@@ -92,3 +92,60 @@ def test_status_progress_is_a_snapshot_copy():
     snap = scheduler.status()["last"]["progress"]
     snap[0]["status"] = "mutated"
     assert scheduler._last["progress"][0]["status"] == "running"
+
+
+class _FakeProc:
+    """Stand-in for the daily-cycle subprocess: canned stdout + exit code."""
+
+    def __init__(self, lines: list[str], returncode: int) -> None:
+        self.stdout = iter(lines)
+        self.returncode = returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+def _run_fake_cycle(monkeypatch, lines: list[str], returncode: int) -> list[tuple]:
+    """Drive _run_cycle against a fake subprocess; return the notify calls."""
+    pages: list[tuple] = []
+    monkeypatch.setattr(scheduler.subprocess, "Popen",
+                        lambda *a, **k: _FakeProc(lines, returncode))
+    monkeypatch.setattr(scheduler, "notify",
+                        lambda *a, **k: pages.append((a, k)))
+    scheduler._run_cycle()
+    return pages
+
+
+def test_refused_exit_code_is_a_polite_no_op_not_a_failure(monkeypatch):
+    """The session-close guard's EXIT_REFUSED: nobody gets paged, status says
+    ok (the envelope is healthy — the run deliberately declined to start),
+    refused=True is surfaced, and the guard's @@CYCLE line lands in progress
+    so the console shows WHY."""
+    import json
+
+    from atlas.ops.daily import EXIT_REFUSED
+
+    msg = ("cycle for 2026-07-13 refused: US session not yet closed "
+           "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
+    guard_line = ("@@CYCLE " + json.dumps(
+        {"node": "guard", "status": "refused", "result": msg,
+         "at": "2026-07-13T01:07:00+00:00"}))
+    pages = _run_fake_cycle(monkeypatch, [guard_line + "\n", f"REFUSED: {msg}\n"],
+                            EXIT_REFUSED)
+    assert pages == []                                # polite: no FAILED page
+    last = scheduler.status()["last"]
+    assert last["ok"] is True and last["refused"] is True
+    assert last["progress"] == [
+        {"node": "guard", "status": "refused", "result": msg,
+         "at": "2026-07-13T01:07:00+00:00"}]
+    assert msg in str(last["detail"])                 # the WHY, verbatim
+
+
+def test_failed_exit_code_still_pages(monkeypatch):
+    """EXIT_REFUSED must not soften real failures: exit 2 pages high."""
+    pages = _run_fake_cycle(monkeypatch, ["boom\n"], 2)
+    assert len(pages) == 1
+    assert pages[0][0][0] == "Atlas daily cycle FAILED"
+    assert pages[0][1].get("priority") == "high"
+    last = scheduler.status()["last"]
+    assert last["ok"] is False and last["refused"] is False
