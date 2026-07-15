@@ -23,10 +23,11 @@ cannot enter the ranking. See that module's header.
 
 EARNINGS PANEL. Alongside the price panel (load_pit_panel, reused verbatim —
 dead series kept, SPY outside the ranked universe) the runner builds an
-EarningsView over the SAME session calendar from market.earnings_surprises,
-split-adjusting EPS on read via the house convention. The panel is IDENTICAL in
-price and total-return modes (surprises are EPS facts, untouched by dividend
-reinvestment).
+EarningsView over the SAME session calendar from market.earnings_surprises.
+The vendor stores EPS backward-split-adjusted to one current basis, so
+surprises are used directly (no on-read adjustment — see signals/pead/v1.py).
+The panel is IDENTICAL in price and total-return modes (surprises are EPS
+facts, untouched by dividend reinvestment).
 
 TOTAL-RETURN MODE (--total-return): ADR-0009's binding benchmark is SPY TOTAL
 RETURN. The panel is transformed at load time (dividends reinvested at the
@@ -109,7 +110,6 @@ from atlas.dcp.market_data.index_membership import (
     MembershipRow,
     is_member_on,
 )
-from atlas.dcp.market_data.models import Split
 from atlas.dcp.signals.pead.v1 import (
     SPEC,
     STALENESS_SESSIONS,
@@ -153,8 +153,8 @@ def load_pead_signals(session: Session, symbols: list[str], dates: list[date],
                       members: Mapping[str, MembershipRow],
                       ) -> tuple[EarningsView, PeadCoverage]:
     """Build the point-in-time EarningsView over the panel's session calendar
-    from market.earnings_surprises (RAW EPS) and market.corporate_actions
-    splits (house adjust-on-read). Coverage is reported honestly."""
+    from market.earnings_surprises (EPS is vendor-backward-split-adjusted to a
+    single current basis, used directly). Coverage is reported honestly."""
     reports: dict[str, list[EarningsSurprise]] = {}
     for r in session.execute(text(
             "SELECT i.symbol, es.fiscal_period_end, es.report_date, "
@@ -171,16 +171,10 @@ def load_pead_signals(session: Session, symbols: list[str], dates: list[date],
             surprise_pct=(Decimal(r.surprise_pct)
                           if r.surprise_pct is not None else None),
             before_after_market=r.before_after_market, currency=None))
-    splits: dict[str, list[Split]] = {}
-    for r in session.execute(text(
-            "SELECT i.symbol, ca.action_date, ca.ratio "
-            "FROM market.corporate_actions ca "
-            "JOIN market.instruments i ON i.id = ca.instrument_id "
-            "WHERE ca.action_type = 'split' AND i.symbol = ANY(:syms)"),
-            {"syms": symbols}).all():
-        splits.setdefault(r.symbol, []).append(Split(
-            symbol=r.symbol, action_date=r.action_date, ratio=Decimal(r.ratio)))
-    view = build_earnings_view(reports, splits, dates)
+    # No split collection: EODHD stores EPS backward-split-adjusted to a single
+    # current basis (see signals/pead/v1.py SPLIT SAFETY), so surprises are
+    # directly comparable and re-adjusting would DOUBLE-adjust (audit 2026-07-15).
+    view = build_earnings_view(reports, dates)
     with_signal = sum(1 for s in view.symbols())
     delisted_with = sum(1 for s in reports
                         if members.get(s) is not None and members[s].is_delisted)
@@ -483,8 +477,11 @@ def render_pead_report(run: PeadPitRun, *, paths: int,
     verdict = "PASS" if g.passed else "FAIL"
     implication = (
         "earnings-surprise (SUE/PEAD) on the point-in-time S&P 500 — dead "
-        "companies included — clears the full gauntlet: a SECOND, orthogonal "
-        "alpha source is validated on honest membership"
+        "companies included — clears the binding full-window beat-SPY gate. "
+        "This is the gate result ONLY; robustness (endpoint concentration, the "
+        "pre-committed kill-only trial below, and orthogonality to existing "
+        "factors) must be weighed separately before approval — a full-window "
+        "PASS is necessary, not sufficient"
         if g.passed else
         "SUE/PEAD does not clear the fund's bar on honest point-in-time "
         "membership; the graveyard verdict is recorded verbatim and the factor "
@@ -523,8 +520,9 @@ def render_pead_report(run: PeadPitRun, *, paths: int,
         f"Pinned spec (textbook, zero search): SUE = (epsActual - epsEstimate) / "
         f"stdev(surprise over the prior {STANDARDIZE_WINDOW} reported quarters); "
         f">= {STANDARDIZE_MIN} priors required (else ineligible); drift-capture "
-        f"staleness window {STALENESS_SESSIONS} sessions; EPS split-adjusted on "
-        f"read (house convention, keyed on report_date). Winner portfolio is "
+        f"staleness window {STALENESS_SESSIONS} sessions; EPS is vendor "
+        f"backward-split-adjusted to the current basis and used directly (no "
+        f"on-read adjustment). Winner portfolio is "
         f"the top decile (max(10, n_eligible // {DECILE})), equal weight, "
         "monthly.",
         "",
@@ -595,7 +593,10 @@ def render_pead_report(run: PeadPitRun, *, paths: int,
             "",
             f"The identical run re-judged at the final date and each of the "
             f"prior {ENDPOINT_MONTHS} month-ends (exact truncation of the stored "
-            "curves). A robust edge survives the choice of endpoint.",
+            "curves). A ROBUST edge beats SPY at most endpoints; an edge that "
+            "beats SPY at only the terminal endpoints is time-concentrated and "
+            "fragile — read the count below against that standard, not as a "
+            "guarantee.",
             "",
             f"- endpoints passing the full gate: {n_pass}/{len(endpoints)}; "
             f"beating SPY: {n_beat}/{len(endpoints)}",

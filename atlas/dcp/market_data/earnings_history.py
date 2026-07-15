@@ -25,8 +25,11 @@ error) or a missing instrument row is recorded in ``failures`` and reported;
 the run continues. Honest coverage counts are the deliverable.
 
 ``fetched_at`` comes from the injected clock (CLAUDE.md invariant 6). EPS
-values are stored RAW (as reported); split adjustment happens on READ in the
-signal, exactly like price bars and dividends.
+values are stored AS THE VENDOR PROVIDES THEM — EODHD Earnings::History is
+backward-split-adjusted to the current share basis (the actual/estimate series
+is continuous across splits), so the signal uses them directly with NO on-read
+split adjustment (an earlier "adjust on read" assumption double-adjusted the
+data; corrected after an adversarial audit 2026-07-15).
 
 Usage:
   python -m atlas.dcp.market_data.earnings_history --symbols AAPL,MSFT,ATVI
@@ -55,8 +58,9 @@ _CURRENCY_CODE = re.compile(r"[A-Z]{3}")
 
 @dataclass(frozen=True)
 class EarningsSurprise:
-    """One completed quarterly report — a settled fact. eps values are RAW
-    (per-share, as reported; split-adjusted on read by the signal)."""
+    """One completed quarterly report — a settled fact. eps values are as the
+    vendor provides them: backward-split-adjusted to the current basis (used
+    directly, no on-read adjustment)."""
     symbol: str
     fiscal_period_end: date        # vendor Earnings::History key
     report_date: date              # announcement day; the look-ahead anchor

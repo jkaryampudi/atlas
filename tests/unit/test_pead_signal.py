@@ -19,7 +19,6 @@ from decimal import Decimal
 from atlas.dcp.backtest.portfolio import PanelView, PricePanel
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.market_data.earnings_history import EarningsSurprise
-from atlas.dcp.market_data.models import Split
 from atlas.dcp.signals.pead.v1 import (
     STALENESS_SESSIONS,
     STANDARDIZE_MIN,
@@ -62,7 +61,7 @@ def test_sue_golden_hand_derived():
     # estimate 1.00 throughout; actuals give surprises 0.10,-0.05,0.20,0.00,0.15
     # then the current 0.30. SUE_current = 0.30 / sample_stdev(prior five).
     reports = _quarterly("ZG", [1.10, 0.95, 1.20, 1.00, 1.15, 1.30])
-    series = compute_sue_reports(reports, [])
+    series = compute_sue_reports(reports)
 
     # hand arithmetic (independent of the production code):
     priors = [0.10, -0.05, 0.20, 0.00, 0.15]
@@ -75,58 +74,56 @@ def test_sue_golden_hand_derived():
     assert abs(series[-1].sue - 0.30 / statistics.stdev(priors)) < 1e-12
     # the split-adjusted surprise of the current report is the raw surprise
     # (no splits) — 0.30 up to float noise
-    assert abs(series[-1].adj_surprise - 0.30) < 1e-9
+    assert abs(series[-1].surprise - 0.30) < 1e-9
 
 
 def test_sue_undefined_below_min_priors():
     # 3 priors + current => current has only 3 priors (< STANDARDIZE_MIN=4)
     reports = _quarterly("ZM", [1.10, 0.95, 1.20, 1.30])
-    series = compute_sue_reports(reports, [])
+    series = compute_sue_reports(reports)
     assert STANDARDIZE_MIN == 4
     assert [s.sue for s in series[:STANDARDIZE_MIN]] == [None, None, None, None]
     # add one more prior => the 5th report (index 4) now has 4 priors and a SUE
     reports2 = _quarterly("ZM", [1.10, 0.95, 1.20, 1.00, 1.30])
-    series2 = compute_sue_reports(reports2, [])
+    series2 = compute_sue_reports(reports2)
     assert series2[4].sue is not None
 
 
 def test_sue_zero_stdev_is_undefined():
     # identical priors => zero dispersion => SUE undefined (never divide by zero)
     reports = _quarterly("ZZ", [1.10, 1.10, 1.10, 1.10, 1.30])
-    series = compute_sue_reports(reports, [])
+    series = compute_sue_reports(reports)
     assert series[-1].sue is None
 
 
 # ---------------------------------------------------------------------------
-# Split safety — a split between reports must not create a phantom SUE
+# Split safety — the vendor stores EPS backward-split-adjusted to ONE current
+# basis, so the stored series is CONTINUOUS across a split and SUE is computed
+# from it directly. The bug this test guards (found by the 2026-07-15 audit)
+# was a SECOND on-read adjustment that double-adjusted the already-adjusted
+# data and inflated the first post-split report's SUE by the split ratio.
 # ---------------------------------------------------------------------------
 
-def test_split_safety_sue_is_split_invariant():
-    # Version A: five reports, one basis, economic surprises
-    #   0.10, 0.12, 0.08, 0.11, current 0.20 (estimate 1.00).
-    econ_actuals = [1.10, 1.12, 1.08, 1.11, 1.20]
-    a = _quarterly("ZA", econ_actuals)
-    sue_a = compute_sue_reports(a, [])[-1].sue
-    assert sue_a is not None
+def test_split_safety_no_double_adjustment_on_preadjusted_data():
+    # Production-shape data: EODHD delivers EPS already on the current basis, so
+    # a name that split 4:1 mid-history shows a CONTINUOUS EPS series (no 4x
+    # jump), exactly like real AAPL (0.65 -> 0.73 across its 2020 4:1 split).
+    # SUE must be computed from these values verbatim — no re-scaling.
+    econ_actuals = [1.10, 1.12, 1.08, 1.11, 1.20]      # continuous, one basis
+    reports = _quarterly("ZA", econ_actuals)           # estimate 1.00 throughout
+    series = compute_sue_reports(reports)
+    sue = series[-1].sue
+    assert sue is not None
 
-    # Version B: identical economics, but the first four reports were filed
-    # PRE-split in pre-split $/share (2x), a 2:1 split lands before the current
-    # report, and the current report is post-split. Adjustment must divide the
-    # four priors by 2, restoring Version A exactly.
-    split_date = a[4].report_date - timedelta(days=10)     # just before current
-    b = [
-        _report("ZB", i, 2 * act, 2 * 1.00, report_date=a[i].report_date)
-        for i, act in enumerate(econ_actuals[:4])
-    ] + [_report("ZB", 4, 1.20, 1.00, report_date=a[4].report_date)]
-    split = [Split(symbol="ZB", action_date=split_date, ratio=Decimal(2))]
-    sue_b = compute_sue_reports(b, split)[-1].sue
-    assert sue_b is not None
-    assert abs(sue_b - sue_a) < 1e-12          # split is invisible to SUE
+    # Independent hand check: surprises 0.10,0.12,0.08,0.11 then current 0.20;
+    # SUE = 0.20 / sample_stdev of the four priors. No split factor anywhere.
+    priors = [0.10, 0.12, 0.08, 0.11]
+    assert abs(series[-1].surprise - 0.20) < 1e-12
+    assert abs(sue - 0.20 / statistics.stdev(priors)) < 1e-12
 
-    # control: WITHOUT the split adjustment, B is a phantom — the pre-split 2x
-    # surprises inflate the stdev and change the SUE materially
-    sue_b_raw = compute_sue_reports(b, [])[-1].sue
-    assert abs(sue_b_raw - sue_a) > 0.1
+    # And the corporate-actions table is NOT consulted: the signal takes no
+    # splits argument, so a split on this name cannot alter the (pre-adjusted)
+    # SUE — the double-adjustment path is gone by construction.
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +155,13 @@ def test_no_lookahead_future_report_cannot_move_signal_at_t():
     future = _report(sym, 5, 1.40, 1.00, report_date=dates[t + 10])
     reports = priors + [live, future]
 
-    view_before = build_earnings_view({sym: reports}, {}, dates)
+    view_before = build_earnings_view({sym: reports}, dates)
     sig_before = view_before.live(sym, t)
     assert sig_before is not None
 
     # FLIP the future report's numbers wildly (huge loss instead of a beat)
     future_flipped = _report(sym, 5, -99.0, 1.00, report_date=dates[t + 10])
-    view_after = build_earnings_view({sym: priors + [live, future_flipped]}, {}, dates)
+    view_after = build_earnings_view({sym: priors + [live, future_flipped]}, dates)
     sig_after = view_after.live(sym, t)
 
     assert sig_after == sig_before             # byte-identical at t
@@ -185,7 +182,7 @@ def _staleness_view(sym: str, dates: list[date], live_report_idx: int):
         _report(sym, 3, 0.95, 1.00, report_date=dates[20]),
     ]
     live = _report(sym, 4, 1.30, 1.00, report_date=dates[live_report_idx])
-    return build_earnings_view({sym: priors + [live]}, {}, dates)
+    return build_earnings_view({sym: priors + [live]}, dates)
 
 
 def test_staleness_boundary_63_fresh_64_stale():
@@ -224,7 +221,7 @@ def test_after_market_report_not_live_until_next_session():
         _report(sym, 3, 0.95, 1.00, report_date=dates[20]),
     ]
     live_am = _report(sym, 4, 1.30, 1.00, report_date=dates[100], when="AfterMarket")
-    view = build_earnings_view({sym: priors + [live_am]}, {}, dates)
+    view = build_earnings_view({sym: priors + [live_am]}, dates)
     # at the report_date's own session (100) the after-market print is NOT yet known
     assert view.live(sym, 100) is None
     # it becomes live the next session (101)

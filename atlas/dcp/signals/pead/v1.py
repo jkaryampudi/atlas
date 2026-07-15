@@ -40,18 +40,18 @@ parameters are textbook, not searched:
    can change any signal visible at t. Flipping a future report's numbers
    wildly leaves the ranking at t byte-identical — pinned by a structural test.
 
---- SPLIT SAFETY ---
+--- SPLIT SAFETY (corrected after adversarial audit, 2026-07-15) ---
 
-epsActual/epsEstimate are per-share and SPLIT-SENSITIVE. A single report's
-surprise is internally consistent at report time, but the rolling stdev mixes
-reports that may straddle a split. Before differencing/standardizing, every EPS
-value is put on a common split-adjusted basis using the HOUSE split convention
-(market_data.adjustment.adjust_for_splits, keyed on report_date — a value
-reported strictly before a split's action_date is divided by the ratio, exactly
-as a pre-split price bar is). A split OUTSIDE a report's window scales all of
-its reports equally and cancels in the ratio; a split INSIDE the window
-rescales the pre-split surprises correctly, so a split can never manufacture a
-phantom SUE — pinned by a split-safety test.
+The vendor (EODHD Earnings::History) stores EPS BACKWARD-SPLIT-ADJUSTED to the
+current share basis, so the actual/estimate series is already CONTINUOUS across
+every split (verified on real data: AAPL EPS runs 0.65 -> 0.73 across its 2020
+4:1 split, not a 4x jump). Every report therefore already shares one common
+per-share basis; the surprise (actual - estimate) and the rolling stdev are
+directly comparable and NO on-read adjustment is applied. An earlier version
+re-adjusted on read, which DOUBLE-adjusted the already-adjusted data and
+manufactured the very phantom it claimed to prevent (the first post-split
+report inflated by the split ratio). That path is removed; a split-safety test
+now models pre-adjusted production data.
 
 surprisePercent (the vendor's split-neutral ratio) is offered as a SECONDARY
 variant for the adversarial cross-check; SUE is the primary signal.
@@ -66,12 +66,9 @@ import statistics
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
 
 from atlas.dcp.backtest.portfolio import PanelView
-from atlas.dcp.market_data.adjustment import adjust_for_splits
 from atlas.dcp.market_data.earnings_history import EarningsSurprise
-from atlas.dcp.market_data.models import Bar, Split
 
 STANDARDIZE_WINDOW = 8   # prior quarters over which surprises are standardized
 STANDARDIZE_MIN = 4      # min prior quarters, else the name is ineligible
@@ -84,8 +81,8 @@ SPEC: dict[str, object] = {
     "standardize_window_quarters": STANDARDIZE_WINDOW,
     "standardize_min_quarters": STANDARDIZE_MIN,
     "staleness_sessions": STALENESS_SESSIONS,
-    "eps_basis": "split-adjusted on read (house adjust_for_splits, keyed on "
-                 "report_date)",
+    "eps_basis": "vendor backward-split-adjusted to current basis; used "
+                 "directly (no on-read adjustment)",
     "after_market_boundary": "after-market/unknown prints are tradable the next "
                              "session (effective_index = bisect_right)",
     "weighting": "equal", "rebalance": "monthly",
@@ -101,54 +98,33 @@ class SueReport:
     fiscal_period_end: date
     report_date: date
     before_after_market: str | None
-    adj_surprise: float          # split-adjusted (actual - estimate), common basis
+    surprise: float              # (actual - estimate) on the vendor's common basis
     sue: float | None            # None => fewer than STANDARDIZE_MIN priors / zero stdev
     surprise_pct: float | None   # vendor split-neutral ratio (secondary variant)
 
 
-def _split_reciprocals(symbol: str, dates: list[date],
-                       splits: list[Split]) -> dict[date, Decimal]:
-    """Reciprocal split factor per report_date, computed by running the HOUSE
-    helper (adjust_for_splits) on unit-price probe bars. adjust_for_splits
-    divides a bar dated strictly before a split by the ratio, so a unit probe
-    at date D comes back as 1/factor(D) — exactly the reciprocal we multiply an
-    EPS by to put it on the post-split basis. Reusing the canonical helper (not
-    a re-implementation) means the EPS adjustment shares the bars' convention by
-    construction."""
-    if not splits:
-        return {}
-    probes = [Bar(symbol=symbol, bar_date=d, open=Decimal(1), high=Decimal(1),
-                  low=Decimal(1), close=Decimal(1), volume=0)
-              for d in sorted(set(dates))]
-    return {b.bar_date: b.close for b in adjust_for_splits(probes, splits)}
-
-
-def compute_sue_reports(reports: list[EarningsSurprise],
-                        splits: list[Split]) -> list[SueReport]:
-    """Chronological SUE series for one instrument. Each report's EPS legs are
-    split-adjusted to a common basis (keyed on report_date), differenced, and
-    standardized by the sample stdev of the up-to-8 immediately prior surprises;
-    fewer than STANDARDIZE_MIN priors (or a zero stdev) leaves SUE undefined."""
+def compute_sue_reports(reports: list[EarningsSurprise]) -> list[SueReport]:
+    """Chronological SUE series for one instrument. The vendor stores EPS
+    backward-split-adjusted to a single current basis (see the module SPLIT
+    SAFETY note), so each report's surprise (actual - estimate) is directly
+    comparable — no on-read split adjustment. SUE_i standardizes surprise_i by
+    the sample stdev of the up-to-8 immediately prior surprises; fewer than
+    STANDARDIZE_MIN priors (or a zero stdev) leaves SUE undefined."""
     if not reports:
         return []
     reports = sorted(reports, key=lambda r: (r.fiscal_period_end, r.report_date))
-    recip = _split_reciprocals(reports[0].symbol,
-                               [r.report_date for r in reports], splits)
-    adj: list[float] = []
-    for r in reports:
-        f = recip.get(r.report_date, Decimal(1))
-        adj.append(float(r.eps_actual * f - r.eps_estimate * f))
+    surp = [float(r.eps_actual - r.eps_estimate) for r in reports]
     out: list[SueReport] = []
     for i, r in enumerate(reports):
-        priors = adj[max(0, i - STANDARDIZE_WINDOW):i]
+        priors = surp[max(0, i - STANDARDIZE_WINDOW):i]
         sue: float | None = None
         if len(priors) >= STANDARDIZE_MIN:
             sd = statistics.stdev(priors)
             if sd > 0:
-                sue = adj[i] / sd
+                sue = surp[i] / sd
         out.append(SueReport(
             fiscal_period_end=r.fiscal_period_end, report_date=r.report_date,
-            before_after_market=r.before_after_market, adj_surprise=adj[i],
+            before_after_market=r.before_after_market, surprise=surp[i],
             sue=sue,
             surprise_pct=(float(r.surprise_pct)
                           if r.surprise_pct is not None else None)))
@@ -216,7 +192,6 @@ class EarningsView:
 
 
 def build_earnings_view(reports: dict[str, list[EarningsSurprise]],
-                        splits: dict[str, list[Split]],
                         dates: list[date]) -> EarningsView:
     """Build the point-in-time EarningsView for a panel calendar: per symbol,
     compute the SUE series, map each report to its effective panel index, drop
@@ -225,7 +200,7 @@ def build_earnings_view(reports: dict[str, list[EarningsSurprise]],
     events: dict[str, list[SignalEvent]] = {}
     n = len(dates)
     for symbol, rows in reports.items():
-        series = compute_sue_reports(rows, splits.get(symbol, []))
+        series = compute_sue_reports(rows)
         evs: list[SignalEvent] = []
         for sr in series:
             eff = effective_index(dates, sr.report_date, sr.before_after_market)
