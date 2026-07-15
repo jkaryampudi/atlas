@@ -28,6 +28,12 @@ from atlas.dcp.risk.vol_target import target_gross_exposure
 
 SEED = json.loads((Path(__file__).parents[2] / "seeds" / "limit_set_v1.json").read_text())
 LIMITS = limits_from_json(1, SEED["limits"])
+# ADR-0014 limit_set_v2: v1 with L5 0.20->0.10 and the L2 index-core carve-out
+# (SPY/INDA held to 0.60; every other ETF stays at the 0.15 single cap).
+V2_DOC = {**SEED["limits"], "L5_min_cash_reserve": 0.10,
+          "L2_core_index_etf_weight": 0.60,
+          "core_index_etf_allowlist": ["SPY", "INDA"]}
+LIMITS_V2 = limits_from_json(2, V2_DOC)
 NAV = Decimal("100000")
 
 
@@ -88,6 +94,58 @@ def test_l2_etf_gets_higher_cap():
     assert _rule(check, "L2").passed and _rule(check, "L1").passed
     p2 = _proposal(instrument_type="etf", sector_gics="Broad", qty=45)  # 16875 = 16.9% > 15%
     assert not _rule(validate(p2, _state(), LIMITS), "L2").passed
+
+
+def test_l2_core_index_allowlist_uses_raised_cap():
+    """ADR-0014 L2 per-class carve-out: an ALLOWLISTED index-core ETF (SPY) is
+    held to the 0.60 core cap under v2 — 55% PASSES, 65% FAILS the 0.60 cap.
+    (entry 100, fx 1 -> weight = qty%.)"""
+    p55 = _proposal(symbol="SPY", instrument_type="etf", sector_gics="Broad",
+                    entry_price=Decimal("100"), fx_to_aud=Decimal("1"), qty=550)
+    l2 = _rule(validate(p55, _state(), LIMITS_V2), "L2")
+    assert l2.passed and l2.limit == Decimal("0.60") and l2.value == Decimal("0.55")
+
+    p65 = _proposal(symbol="SPY", instrument_type="etf", sector_gics="Broad",
+                    entry_price=Decimal("100"), fx_to_aud=Decimal("1"), qty=650)
+    l2_65 = _rule(validate(p65, _state(), LIMITS_V2), "L2")
+    assert not l2_65.passed and l2_65.limit == Decimal("0.60")  # 65% > 60% cap
+
+
+def test_l2_non_allowlisted_etf_keeps_single_cap_under_v2():
+    """A NON-allowlisted ETF (QQQ) uses the ordinary 0.15 single cap even under
+    v2 — so 55% FAILS. The carve-out relaxes ONLY allowlisted index-core ETFs."""
+    p = _proposal(symbol="QQQ", instrument_type="etf", sector_gics="Broad",
+                  entry_price=Decimal("100"), fx_to_aud=Decimal("1"), qty=550)
+    l2 = _rule(validate(p, _state(), LIMITS_V2), "L2")
+    assert not l2.passed and l2.limit == Decimal("0.15")
+
+
+def test_l2_v1_has_no_core_carveout_single_cap_for_all_etfs():
+    """Backward compatibility: v1 has no core keys, so EVERY ETF — even SPY — is
+    bound by the single 0.15 cap. 55% SPY FAILS L2 under v1 (the documented
+    current-state blocker that limit_set_v2 lifts)."""
+    assert LIMITS.l2_core_index_etf_weight is None
+    assert LIMITS.core_index_etf_allowlist == frozenset()
+    p = _proposal(symbol="SPY", instrument_type="etf", sector_gics="Broad",
+                  entry_price=Decimal("100"), fx_to_aud=Decimal("1"), qty=550)
+    l2 = _rule(validate(p, _state(), LIMITS), "L2")
+    assert not l2.passed and l2.limit == Decimal("0.15")
+
+
+def test_l2_cap_for_helper_covers_all_branches():
+    """limits.l2_cap_for: allowlisted+core-cap-present -> 0.60; not-allowlisted ->
+    0.15; core-cap-absent (v1) -> 0.15 (short-circuit, never consults allowlist)."""
+    assert LIMITS_V2.l2_cap_for("SPY") == Decimal("0.60")
+    assert LIMITS_V2.l2_cap_for("INDA") == Decimal("0.60")
+    assert LIMITS_V2.l2_cap_for("QQQ") == Decimal("0.15")   # present, not allowlisted
+    assert LIMITS.l2_cap_for("SPY") == Decimal("0.15")      # v1: no core cap at all
+
+
+def test_limits_from_json_parses_v2_core_keys():
+    assert LIMITS_V2.l2_core_index_etf_weight == Decimal("0.60")
+    assert LIMITS_V2.core_index_etf_allowlist == frozenset({"SPY", "INDA"})
+    assert LIMITS_V2.l2_max_etf_weight == Decimal("0.15")   # other ETFs unchanged
+    assert LIMITS_V2.l5_min_cash_reserve == Decimal("0.10")
 
 
 def test_l3_sector_exposure_pro_forma():

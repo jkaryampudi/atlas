@@ -712,7 +712,7 @@ def approve(session: Session, clock: Clock, *, proposal_id: str,
     pid = UUID(proposal_id)
     row = session.execute(text(
         "SELECT id, instrument_id, position_size, entry_price, stop_loss, state, "
-        "       expires_at, risk_check_id, action FROM trading.trade_proposals "
+        "       expires_at, risk_check_id, action, origin FROM trading.trade_proposals "
         "WHERE id = :p FOR UPDATE"), {"p": pid}).first()
     if row is None:
         raise ValueError(f"unknown proposal {proposal_id}")
@@ -740,10 +740,29 @@ def approve(session: Session, clock: Clock, *, proposal_id: str,
     limits = load_active_limit_set(session, now.date())
     inst = _load_instrument_by_id(session, row.instrument_id)
     book = _build_book(session, clock)
+    # ADR-0014: a core BUY (origin='core_allocation') is rebalanced, not stopped —
+    # it carries NULL stop_loss and ZERO stop-out risk. Represent it to the re-check
+    # exactly as build_core_proposals does: stop == entry => risk_aud = 0, so it
+    # contributes nothing to L6/L7 while L1-L5/L11 weight rules still bind (SPY 55%
+    # must still clear L2's core cap). The stopless treatment is gated on the
+    # POSITIVE origin marker ALONE, never inferred from a missing stop: an agent
+    # proposal (which the DB forbids from carrying a NULL stop, migration 0022)
+    # that somehow reached here FAILS CLOSED loudly — a dropped stop is a bug or
+    # a tamper, never read as zero risk.
+    entry = Decimal(row.entry_price)
+    if row.origin == "core_allocation":
+        stop = entry
+    elif row.stop_loss is None:
+        raise RuntimeError(
+            f"proposal {proposal_id} has origin {row.origin!r} and a NULL "
+            "stop_loss — only a core_allocation proposal may be stopless; a "
+            "missing stop on any other origin is never inferred to be zero risk "
+            "(ADR-0014, invariant 2)")
+    else:
+        stop = Decimal(row.stop_loss)
     proposal = _fresh_proposal_inputs(
         session, clock, inst, qty=int(row.position_size),
-        entry_price=Decimal(row.entry_price), stop_price=Decimal(row.stop_loss),
-        book=book)
+        entry_price=entry, stop_price=stop, book=book)
     recheck = recheck_at_approval(
         proposal=proposal, state_now=book.state, limits=limits,
         breaker=book.breaker, original_check=_original_check(session, row.risk_check_id))
@@ -1011,7 +1030,7 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
 
     audit = _audit(session, clock)
     pos = session.execute(text(
-        "SELECT id, qty, avg_cost, current_stop FROM trading.positions "
+        "SELECT id, qty, avg_cost, current_stop, is_core FROM trading.positions "
         "WHERE instrument_id = :iid AND closed_at IS NULL FOR UPDATE"),
         {"iid": order.iid}).first()
     if order.side == "sell":
@@ -1071,16 +1090,33 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
                               "symbol": order.symbol, "qty": fill.fill_qty,
                               "stop": str(order.stop_loss)})
     else:
+        # ADR-0014 safety (adversarial-review finding 2026-07-16): a position row
+        # is EITHER core or satellite, never mixed. The partial unique index
+        # (one open row per instrument) forces a same-instrument add through this
+        # merge branch, so a cross-origin fold — an agent add into a core row, or
+        # a core rebalance into a satellite row — would inherit the row's is_core
+        # and silently zero (or wrongly count) the added shares' L7 stop risk.
+        # Refuse it fail-closed; is_core is decided at open and never mutates here.
+        order_is_core = order.origin == "core_allocation"
+        if bool(pos.is_core) != order_is_core:
+            raise RuntimeError(
+                f"cross-origin merge refused for {order.symbol}: an order with "
+                f"origin '{order.origin}' cannot fold into an is_core="
+                f"{pos.is_core} position — a core holding and a satellite "
+                "holding may not share one position row")
         new_qty = int(pos.qty) + fill.fill_qty
         new_avg = ((Decimal(pos.qty) * Decimal(pos.avg_cost)
                     + Decimal(fill.fill_qty) * fill.fill_price)
                    / Decimal(new_qty)).quantize(_QTY6)
-        # tighten-only stop merge: a looser add-on stop must not expand the
-        # open risk L7 approved for the existing quantity (long-only: higher
-        # stop = less risk)
-        old_stop = Decimal(pos.current_stop) if pos.current_stop is not None else None
-        new_stop = (Decimal(order.stop_loss) if old_stop is None
-                    else max(old_stop, Decimal(order.stop_loss)))
+        if order_is_core:
+            new_stop = None            # core is rebalanced, not stopped (stays stopless)
+        else:
+            # tighten-only stop merge: a looser add-on stop must not expand the
+            # open risk L7 approved for the existing quantity (long-only: higher
+            # stop = less risk)
+            old_stop = Decimal(pos.current_stop) if pos.current_stop is not None else None
+            new_stop = (Decimal(order.stop_loss) if old_stop is None
+                        else max(old_stop, Decimal(order.stop_loss)))
         session.execute(text(
             "UPDATE trading.positions SET qty = :q, avg_cost = :avg, "
             "current_stop = :stop WHERE id = :i"),

@@ -21,6 +21,8 @@ Nothing commits: pg_session/clean_audit roll back. The migration test restores h
 import os
 import subprocess
 from datetime import UTC, date, datetime, timedelta
+
+import pytest
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -244,6 +246,50 @@ def test_settlement_marks_agent_position_not_core(clean_audit):
                       stop=Decimal("95"), qty=40, entry=Decimal("100"), memo_id=memo)
     assert pos["is_core"] is False           # the invariant-preserving default
     assert pos["current_stop"] == Decimal("95.000000")
+
+
+def test_cross_origin_merge_is_refused(clean_audit):
+    """Adversarial-review finding (2026-07-16): the one-open-row-per-instrument
+    index forces a same-instrument add through the merge branch. An AGENT buy
+    folding into an open CORE row must FAIL CLOSED — otherwise the agent's
+    stopped shares inherit is_core=true and their L7 stop-out risk is zeroed."""
+    s = clean_audit
+    _clean(s)
+    seed_limit_set(s, ROOT / "seeds" / "limit_set_v1.json")
+    iid = _etf(s, "ZL7XMRG")
+    memo = _memo(s)
+    _deploy(s, iid, 50, Decimal("100"), is_core=True, stop=None)  # open CORE row
+    # an approved AGENT buy for the SAME instrument, headed for settlement
+    clock = FrozenClock(T0)
+    pid = s.execute(text(
+        "INSERT INTO trading.trade_proposals (instrument_id, market, action, "
+        " committee_memo_id, signal_ids, entry_price, stop_loss, target_price, "
+        " position_size, state, expires_at, created_at) "
+        "VALUES (:i,'US','buy',:m,:sig,:e,:s,:e,:q,'approved',:x,:c) RETURNING id"),
+        {"i": iid, "m": memo, "sig": [uuid4()], "e": Decimal("100"),
+         "s": Decimal("95"), "q": 10, "x": T0 + timedelta(hours=24), "c": T0}).scalar()
+    rc = s.execute(text(
+        "INSERT INTO risk.risk_checks (proposal_id, price_snapshot, results, verdict, "
+        " check_kind) VALUES (:p,'{}','[]','PASS','approval_time') RETURNING id"),
+        {"p": pid}).scalar()
+    ap = s.execute(text(
+        "INSERT INTO trading.approvals (proposal_id, decision, approver, "
+        " approval_time_risk_check_id, decided_at) "
+        "VALUES (:p,'approve','principal',:c,:t) RETURNING id"),
+        {"p": pid, "c": rc, "t": T0}).scalar()
+    s.execute(text(
+        "INSERT INTO trading.orders (proposal_id, approval_id, risk_check_id, broker, "
+        " side, qty, order_type, state, created_at) "
+        "VALUES (:p,:a,:c,'paper','buy',10,'market','pending_submit',:t)"),
+        {"p": pid, "a": ap, "c": rc, "t": T0})
+    s.execute(text(
+        "INSERT INTO market.price_bars_daily (instrument_id, bar_date, open, close, "
+        " volume, source) VALUES (:i,:d,100,100,1000000,'EodhdAdapter')"),
+        {"i": iid, "d": NEXT_SESSION})
+    _fx(s, [NEXT_SESSION])
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    with pytest.raises(RuntimeError, match="cross-origin merge refused"):
+        settle_orders(s, clock)
 
 
 # ------------------------------------------------- snapshot open_risk_pct

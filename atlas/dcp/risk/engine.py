@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_FLOOR, Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, cast
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -83,6 +83,25 @@ class Limits:
     l9_max_new_positions_per_day: int
     l10_max_pct_adv: Decimal
     l11_max_non_aud_exposure: Decimal
+    # ADR-0014 L2 per-class carve-out (added in limit_set_v2). A SINGLE allowlisted
+    # index-core ETF (SPY/INDA) may be held to `l2_core_index_etf_weight` (0.60)
+    # instead of the ordinary `l2_max_etf_weight` (0.15) — the passive core IS the
+    # deliberate market exposure, sized by target weight, not a satellite ETF
+    # concentration bet. Absent in v1 (l2_core_index_etf_weight None, empty
+    # allowlist), the single ETF cap applies to every ETF (backward compatible).
+    l2_core_index_etf_weight: Decimal | None = None
+    core_index_etf_allowlist: frozenset[str] = frozenset()
+
+    def l2_cap_for(self, symbol: str) -> Decimal:
+        """The L2 weight cap for one ETF proposal: the raised core-index cap when
+        the limit set defines one AND this symbol is on the allowlist, else the
+        ordinary single-ETF cap. A missing core cap (v1) always falls back to the
+        single cap — the carve-out only ever relaxes an explicitly allowlisted,
+        explicitly-priced index-core ETF, never any other ETF."""
+        if (self.l2_core_index_etf_weight is not None
+                and symbol in self.core_index_etf_allowlist):
+            return self.l2_core_index_etf_weight
+        return self.l2_max_etf_weight
 
     def risk_per_trade(self, breaker: BreakerLevel) -> Decimal:
         """DD1 halves new-position risk (L6 -> 0.5%); §5."""
@@ -92,7 +111,13 @@ class Limits:
 
 
 def limits_from_json(version: int, doc: dict[str, object]) -> Limits:
-    d = {k: Decimal(str(v)) for k, v in doc.items()}
+    # The allowlist is a JSON array of symbols, not a numeric limit — parse it
+    # separately so the numeric coercion below never sees a list. Both keys are
+    # OPTIONAL: v1 lacks them and gets the single-cap behavior (core cap None,
+    # empty allowlist); v2 supplies them (ADR-0014).
+    allowlist = cast("list[str]", doc.get("core_index_etf_allowlist", []))
+    d = {k: Decimal(str(v)) for k, v in doc.items()
+         if k != "core_index_etf_allowlist"}
     return Limits(
         version=version,
         l1_max_stock_weight=d["L1_max_stock_weight"],
@@ -107,6 +132,8 @@ def limits_from_json(version: int, doc: dict[str, object]) -> Limits:
         l9_max_new_positions_per_day=int(d["L9_max_new_positions_per_day"]),
         l10_max_pct_adv=d["L10_max_pct_adv"],
         l11_max_non_aud_exposure=d["L11_max_non_aud_exposure"],
+        l2_core_index_etf_weight=d.get("L2_core_index_etf_weight"),
+        core_index_etf_allowlist=frozenset(allowlist),
     )
 
 
@@ -250,7 +277,11 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
     cand_weight = _weight(existing_symbol_value + proposal.cost_aud, nav)
 
     if proposal.instrument_type == "etf":
-        cap = limits.l2_max_etf_weight
+        # ADR-0014: an allowlisted index-core ETF (SPY/INDA) is held to the raised
+        # core cap; every other ETF stays under the ordinary single-ETF cap. In v1
+        # (no core cap) this is exactly the old single cap for all ETFs. The `limit`
+        # field carries whichever cap applied, so the itemised result is explicit.
+        cap = limits.l2_cap_for(proposal.symbol)
         results.append(RuleResult("L1", True, "n/a (ETF -> L2)"))
         results.append(RuleResult("L2", cand_weight <= cap,
                                   f"etf weight {cand_weight:.4f} vs cap {cap}",
