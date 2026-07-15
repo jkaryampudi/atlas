@@ -1,6 +1,6 @@
 # ADR-0014 — Limit-set v2: risk limits for the core-satellite model
 
-Date: 2026-07-15 · Status: Proposed (pending Principal signature + dual-confirm) · Decider: Principal (Jay)
+Date: 2026-07-15 · Status: **Accepted** (signed by the Principal 2026-07-16; option **B** chosen) · Decider: Principal (Jay)
 
 ## Context
 `limit_set_v1` (`small_aum`, ADR-0001) was designed for a pure single-name
@@ -20,7 +20,7 @@ mandate is served, not harmed, by owning it.
 | Limit | v1 value | Problem | v2 |
 |---|---|---|---|
 | `L2_max_etf_weight` | 0.15 | Blocks the 55% SPY / 15% INDA core; treats a broad index ETF as single-name concentration | Split the ETF class: **core-index ETFs** (an explicit allowlist: SPY, INDA) capped at **0.60** each; **all other ETFs** stay at **0.15** |
-| `L5_min_cash_reserve` | 0.20 | A fully-invested 70/30 book holds ~0% cash; the 20% floor was for a cash-heavy single-name book | **0.02** settlement buffer (the core-satellite model is designed to be ~fully invested; see the Principal choice below) |
+| `L5_min_cash_reserve` | 0.20 | The 20% floor was for a cash-heavy single-name book | **0.10** (option B, signed): a deliberate 10% cash reserve under the 70/20/10 allocation |
 | `L9_max_new_positions_per_day` | 2 | A core rebalance (2 legs) + a satellite build (up to ~10) exceeds it; the cap was meant to throttle *discretionary* single-name entries | A **batched core/satellite rebalance counts as ONE authorized action** (origin `core_allocation` or a signed strategy rebalance); discretionary agent entries stay capped at **2/day** |
 | `L7_max_aggregate_open_risk` | 0.06 | Core positions have `stop = entry` (rebalanced, not stopped); v1 fail-closes and counts their FULL value as open risk, which would blow L7 for satellite proposals | Open risk is **stop-based**: a position with no stop-out distance (core) contributes **zero** to L7; the 0.06 cap applies to the **stopped satellite** book only |
 
@@ -37,19 +37,15 @@ v2 `supersedes` v1. The core-index ETF allowlist (SPY, INDA) is part of the
 signed set — adding an instrument to it is itself a signed limit-set change, so
 the 0.60 cap can never silently extend to an arbitrary ETF.
 
-## Principal choice to confirm (the L5 / allocation tension)
-ADR-0012's 70/30 split leaves ~0% cash, which is why L5 must drop. Two ways to
-resolve it — please pick:
-- **(A) Fully invested**: keep 70/30, set L5 = 0.02 (settlement buffer only).
-  Maximum market exposure; no dry powder for opportunistic satellite adds.
-- **(B) Keep a cash sleeve**: amend ADR-0012 to 70% core / 20% satellite / 10%
-  cash, set L5 = 0.10. Preserves a genuine reserve consistent with the
-  capital-preservation mandate.
-My recommendation is **(B)** — a capital-preservation fund holding a deliberate
-cash reserve is more defensible than one at 100% invested, and the satellite's
-edge is unproven enough that a smaller active envelope is prudent. This ADR is
-written for (A)'s numbers; tell me to switch to (B) and I will before it's
-signed.
+## Principal choice — RESOLVED: option B (signed 2026-07-16)
+The Principal chose **(B)**: the allocation is amended to **70% core / 20%
+active satellite / 10% cash**, and **L5 = 0.10**. ADR-0012 is amended
+accordingly (core targets unchanged at SPY 55% / INDA 15%; the satellite
+envelope drops from 30% to 20%, split momentum 10% / PEAD 10%). A deliberate
+cash reserve consistent with the capital-preservation mandate; a smaller active
+envelope while PEAD's edge is unproven.
+
+(Option A — fully invested 70/30, L5 = 0.02 — was declined.)
 
 ## Consequences
 1. The passive core can generate `core_allocation` proposals that PASS the risk

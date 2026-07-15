@@ -68,10 +68,11 @@ Split the book into a **passive core** and an **active satellite**.
    the scorecard measures what the active strategies actually add over simply
    holding the index.
 
-## Signed allocation (2026-07-15)
-The Principal accepted the recommended default as the operating allocation:
-**core 70% (SPY 55% / INDA 15%), active satellite 30%.** Adjustable by a future
-signed amendment; the mechanics are weight-agnostic.
+## Signed allocation (2026-07-15; amended 2026-07-16 by ADR-0014 option B)
+The operating allocation is **core 70% (SPY 55% / INDA 15%), active satellite
+20% (momentum 10% / PEAD 10%), cash 10%.** (The original 30% satellite / 0%
+cash was amended to 20% / 10% when ADR-0014 option B was signed — a deliberate
+cash reserve; core targets unchanged.) The mechanics are weight-agnostic.
 
 Consequence for the in-flight book: the nine momentum proposals generated
 2026-07-14 were sized to the FULL A$100k envelope (~A$69k total), which now
