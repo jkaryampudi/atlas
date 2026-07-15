@@ -1,6 +1,6 @@
 # ADR-0012 — Index-core allocation: be invested while factors prove out
 
-Date: 2026-07-15 · Status: Proposed (pending Principal signature) · Decider: Principal (Jay)
+Date: 2026-07-15 · Status: **Accepted** (signed by the Principal 2026-07-15) · Decider: Principal (Jay)
 
 ## Context
 Atlas holds a hypothetical A$100k under a **capital-preservation-first**,
@@ -68,7 +68,15 @@ Split the book into a **passive core** and an **active satellite**.
    the scorecard measures what the active strategies actually add over simply
    holding the index.
 
-## Open question for the Principal
-The 70/30 split and the 55/15 US/India core weights are a capital-preservation-
-consistent default, not a derived optimum. Set them to your risk appetite; the
-mechanics above are weight-agnostic.
+## Signed allocation (2026-07-15)
+The Principal accepted the recommended default as the operating allocation:
+**core 70% (SPY 55% / INDA 15%), active satellite 30%.** Adjustable by a future
+signed amendment; the mechanics are weight-agnostic.
+
+Consequence for the in-flight book: the nine momentum proposals generated
+2026-07-14 were sized to the FULL A$100k envelope (~A$69k total), which now
+exceeds the 30% satellite cap. They are superseded by this ADR and must be
+regenerated inside the satellite envelope; the active-sleeve sizing is held
+until the PEAD verdict resolves how many validated factors share the 30%
+(one factor → 30% momentum; two → 15%/15%). The passive core (70%) deploys
+first and independently.

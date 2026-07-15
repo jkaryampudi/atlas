@@ -1,6 +1,6 @@
 # ADR-0011 — Research sequencing: narrow and deep, one factor at a time
 
-Date: 2026-07-15 · Status: Proposed (pending Principal signature) · Decider: Principal (Jay)
+Date: 2026-07-15 · Status: **Accepted** (signed by the Principal 2026-07-15) · Decider: Principal (Jay)
 
 ## Context
 An external quant review and a "v2 roadmap" proposed evolving Atlas from
