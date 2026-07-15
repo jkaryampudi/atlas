@@ -37,9 +37,13 @@ def _state(holdings=(), cash=None, new_today=0) -> PortfolioState:
 
 
 def _hold(symbol="MSFT", value="5000", sector="Information Technology",
-          india=False, ccy="USD", risk="500") -> HoldingRisk:
+          india=False, ccy="USD", risk="500", is_core=False) -> HoldingRisk:
+    """risk=None models a holding with NO stop-out distance (no stop); is_core
+    marks the ADR-0014 passive-index core (legitimately stopless)."""
     return HoldingRisk(symbol=symbol, value_aud=Decimal(value), sector_gics=sector,
-                       india_exposed=india, currency=ccy, risk_to_stop_aud=Decimal(risk))
+                       india_exposed=india, currency=ccy,
+                       risk_to_stop_aud=None if risk is None else Decimal(risk),
+                       is_core=is_core)
 
 
 def _proposal(**kw) -> TradeProposal:
@@ -127,6 +131,45 @@ def test_l7_aggregate_open_risk():
     state = _state(holdings=[_hold(risk="5600")])  # 5.6% open risk
     p = _proposal(qty=100, stop_price=Decimal("246"))  # +0.6% -> 6.2% > 6%
     assert not _rule(validate(p, state, LIMITS), "L7").passed
+
+
+def test_l7_core_position_contributes_zero_open_risk():
+    """ADR-0014: a CORE holding (is_core=True, no stop) is rebalanced, not
+    stopped — it contributes ZERO to aggregate open risk. A huge core book must
+    NOT block a satellite proposal on L7 (the whole reason for the redefinition):
+    only the satellite's own 0.6% stop-out risk counts."""
+    state = _state(holdings=[_hold(symbol="SPY", value="70000", risk=None,
+                                   is_core=True)])  # 70% core, no stop
+    p = _proposal(qty=100, stop_price=Decimal("246"))  # satellite: +0.6%
+    l7 = _rule(validate(p, state, LIMITS), "L7")
+    assert l7.passed
+    assert l7.value == Decimal("600") / NAV  # 0.006 — the core added nothing
+
+
+def test_l7_satellite_missing_stop_still_fails_closed():
+    """THE SAFETY PIN (ADR-0014, must never regress): a NON-core holding with no
+    stop-out distance (risk_to_stop_aud=None, is_core=False) STILL counts its
+    FULL value as open risk — exactly as before ADR-0014. A satellite whose stop
+    was dropped by a bug or a data error must fail closed, never read as zero."""
+    state = _state(holdings=[_hold(symbol="AVGO", value="7000", risk=None,
+                                   is_core=False)])  # satellite, stop dropped
+    p = _proposal(qty=100, stop_price=Decimal("246"))  # +600
+    l7 = _rule(validate(p, state, LIMITS), "L7")
+    assert not l7.passed                              # fail closed
+    assert l7.value == Decimal("7600") / NAV          # 7000 full value + 600
+
+
+def test_l7_core_marker_is_the_only_thing_that_relaxes_the_rule():
+    """The relaxation is scoped to the POSITIVE core marker and nothing else:
+    an identical holding (same value, same MISSING stop) blows L7 as a satellite
+    but is zeroed as a core position. The distinction is is_core alone — it is
+    never inferred from the mere absence of a stop."""
+    sat_kw = dict(value="70000", risk=None)           # same value + missing stop
+    p = _proposal(qty=1, stop_price=Decimal("249"))   # negligible satellite risk
+    assert not _rule(validate(p, _state(holdings=[_hold(**sat_kw, is_core=False)]),
+                              LIMITS), "L7").passed    # satellite: 70% > 6%
+    assert _rule(validate(p, _state(holdings=[_hold(**sat_kw, is_core=True)]),
+                          LIMITS), "L7").passed        # core: 0 open risk
 
 
 def test_l8_correlation_concentration():

@@ -187,18 +187,20 @@ def _thread(state: PortfolioState, leg: CoreLeg, inst: _Instrument) -> Portfolio
     trade_value = Decimal(leg.qty) * leg.ref_price * leg.fx_to_aud
     holdings = list(state.holdings)
     if leg.action == "buy":
+        # ADR-0014: a core holding is marked is_core (the POSITIVE marker) and
+        # carries no stop (risk_to_stop_aud None) -> the engine's L7 zeroes it.
         holdings.append(HoldingRisk(
             symbol=leg.symbol, value_aud=trade_value,
             sector_gics=inst.sector_gics, india_exposed=inst.india_exposed,
-            currency=inst.currency, risk_to_stop_aud=Decimal(0)))  # no stop -> no risk
+            currency=inst.currency, risk_to_stop_aud=None, is_core=True))
         return replace(state, cash_aud=state.cash_aud - trade_value,
                        holdings=tuple(holdings),
                        new_positions_today=state.new_positions_today + 1)
     for idx, h in enumerate(holdings):
-        if h.symbol == leg.symbol:
+        if h.symbol == leg.symbol:  # trim the sibling; is_core is preserved
             holdings[idx] = replace(
                 h, value_aud=max(Decimal(0), h.value_aud - trade_value),
-                risk_to_stop_aud=Decimal(0))
+                risk_to_stop_aud=None)
             break
     return replace(state, cash_aud=state.cash_aud + trade_value,
                    holdings=tuple(holdings))

@@ -131,7 +131,38 @@ class HoldingRisk:
     sector_gics: str
     india_exposed: bool          # ADR/ETF look-through included (L4)
     currency: str
-    risk_to_stop_aud: Decimal    # open risk if stopped out (L7)
+    risk_to_stop_aud: Decimal | None  # stop-out loss (L7); None => NO stop-out
+    #   distance (no stop). The engine, not the book-builder, then decides the
+    #   L7 contribution: a satellite fails closed to its full value, a core
+    #   holding contributes zero — see _holding_open_risk. Never conflate the
+    #   two: a satellite whose stop was dropped by a bug MUST NOT read as zero.
+    is_core: bool = False        # ADR-0014 positive core marker: a legitimately
+    #   stopless passive-index holding (rebalanced, not stopped). Its market
+    #   exposure is captured by the weight rules (L1-L5/L11), so it contributes
+    #   ZERO stop-out open risk to L7. Defaults false, so any holding NOT
+    #   explicitly marked core is treated as a satellite that must be stopped.
+
+
+def _holding_open_risk(h: HoldingRisk) -> Decimal:
+    """ADR-0014 L7 open-risk contribution of ONE existing holding, stop-based
+    and core-aware. Three mutually exclusive cases, in safety order:
+
+    1. is_core: a passive-index core holding is rebalanced, not stopped — its
+       exposure is a weight-rule matter (L1-L5/L11), never a stop-out risk. It
+       contributes ZERO. This branch is reached ONLY through the explicit,
+       positive core marker (migration 0023's trading.positions.is_core).
+    2. NOT core AND no stop-out distance (risk_to_stop_aud is None): a satellite
+       must be stop-protected; a missing stop is a bug or a data error, so it
+       FAILS CLOSED and counts its FULL value as open risk — exactly the
+       pre-ADR-0014 behavior. Never inferred to be zero.
+    3. NOT core AND a stop: the stop-out loss the book-builder computed
+       (max(0, ref - stop) * qty * fx).
+    """
+    if h.is_core:
+        return Decimal(0)
+    if h.risk_to_stop_aud is None:        # satellite missing a stop: fail closed
+        return h.value_aud
+    return h.risk_to_stop_aud
 
 
 @dataclass(frozen=True)
@@ -268,8 +299,8 @@ def validate(proposal: TradeProposal, state: PortfolioState, limits: Limits,
                               f"trade risk {trade_risk_pct:.4f} vs cap {l6_cap}",
                               value=trade_risk_pct, limit=l6_cap))
 
-    # L7 aggregate open risk
-    open_risk = sum((h.risk_to_stop_aud for h in state.holdings), Decimal(0))
+    # L7 aggregate open risk (ADR-0014: stop-based + core-aware per holding)
+    open_risk = sum((_holding_open_risk(h) for h in state.holdings), Decimal(0))
     agg_after = _weight(open_risk + proposal.risk_aud, nav)
     results.append(RuleResult("L7", agg_after <= limits.l7_max_aggregate_open_risk,
                               f"aggregate open risk {agg_after:.4f} vs cap "

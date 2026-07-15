@@ -353,8 +353,8 @@ def _build_book(session: Session, clock: Clock) -> _Book:
     approved-but-unfilled orders, marked at latest vendor closes and FX."""
     on = clock.now().date()
     positions = session.execute(text(
-        "SELECT p.qty, p.current_stop, i.id AS iid, i.symbol, i.sector_gics, "
-        "       i.market, i.economic_exposure, i.currency "
+        "SELECT p.qty, p.current_stop, p.is_core, i.id AS iid, i.symbol, "
+        "       i.sector_gics, i.market, i.economic_exposure, i.currency "
         "FROM trading.positions p JOIN market.instruments i ON i.id = p.instrument_id "
         "WHERE p.closed_at IS NULL AND p.qty > 0")).all()
 
@@ -366,15 +366,20 @@ def _build_book(session: Session, clock: Clock) -> _Book:
         close = _latest_close(session, p.iid, on)
         fx = rates[p.currency]
         value = Decimal(p.qty) * close * fx
-        if p.current_stop is None:  # fail closed: whole position is open risk
-            risk = value
+        # ADR-0014: a no-stop position carries NO stop-out distance -> risk None;
+        # the engine (not the book-builder) then zeroes a core holding and
+        # FAILS CLOSED a satellite (no stop = full value at risk). is_core is
+        # the positive marker (migration 0023) that keeps those two apart.
+        risk: Decimal | None
+        if p.current_stop is None:
+            risk = None
         else:
             risk = max(Decimal(0), (close - Decimal(p.current_stop))) * Decimal(p.qty) * fx
         holdings.append(HoldingRisk(
             symbol=p.symbol, value_aud=value,
             sector_gics=p.sector_gics or "Unknown",
             india_exposed=_india_exposed(p.market, p.economic_exposure),
-            currency=p.currency, risk_to_stop_aud=risk))
+            currency=p.currency, risk_to_stop_aud=risk, is_core=p.is_core))
         marks.append(Holding(symbol=p.symbol, qty=p.qty, currency=p.currency,
                              last_price=close))
 
@@ -398,13 +403,16 @@ def _build_book(session: Session, clock: Clock) -> _Book:
         fx = rates[o.currency]
         cost = Decimal(o.qty) * Decimal(o.entry_price) * fx
         pending_cost += cost
+        # A pending BUY reaching this block is an agent order: it carries a stop
+        # (the origin='agent' NOT-NULL invariant, migration 0022) and is not a
+        # core holding. is_core=False keeps it bound by L7's stop-based rule.
         holdings.append(HoldingRisk(
             symbol=o.symbol, value_aud=cost,
             sector_gics=o.sector_gics or "Unknown",
             india_exposed=_india_exposed(o.market, o.economic_exposure),
             currency=o.currency,
             risk_to_stop_aud=(Decimal(o.entry_price) - Decimal(o.stop_loss))
-            * Decimal(o.qty) * fx))
+            * Decimal(o.qty) * fx, is_core=False))
 
     opened_today = session.execute(text(
         "SELECT count(*) FROM trading.positions "
@@ -894,8 +902,8 @@ def settle_orders(session: Session, clock: Clock,
     rows = session.execute(text(
         "SELECT o.id, o.qty, o.side, o.created_at, tp.id AS proposal_id, "
         "       tp.state AS proposal_state, tp.entry_price, tp.stop_loss, "
-        "       tp.committee_memo_id, i.id AS iid, i.symbol, i.market, i.currency, "
-        "       rc.verdict AS check_verdict, rc.check_kind AS check_kind "
+        "       tp.origin, tp.committee_memo_id, i.id AS iid, i.symbol, i.market, "
+        "       i.currency, rc.verdict AS check_verdict, rc.check_kind AS check_kind "
         "FROM trading.orders o "
         "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
         "JOIN market.instruments i ON i.id = tp.instrument_id "
@@ -1042,13 +1050,20 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
                                   "remaining_qty": new_qty,
                                   "proceeds_aud": str(proceeds)})
     elif pos is None:
+        # ADR-0014: a settled origin='core_allocation' proposal opens a CORE
+        # position (rebalanced, not stopped -> zero L7 open risk). Every other
+        # origin ('agent') opens a satellite bound by the stop-based rule; a
+        # dropped stop on a satellite must still fail closed. The marker is
+        # POSITIVE and taken straight from the proposal origin, never inferred.
+        is_core = order.origin == "core_allocation"
         position_id = session.execute(text(
             "INSERT INTO trading.positions (instrument_id, qty, avg_cost, currency, "
-            " opened_at, current_stop, thesis_memo_id, created_at) "
-            "VALUES (:iid, :q, :px, :ccy, :at, :stop, :memo, :ca) RETURNING id"),
+            " opened_at, current_stop, thesis_memo_id, is_core, created_at) "
+            "VALUES (:iid, :q, :px, :ccy, :at, :stop, :memo, :core, :ca) RETURNING id"),
             {"iid": order.iid, "q": fill.fill_qty, "px": fill.fill_price,
              "ccy": order.currency, "at": fill.executed_at, "stop": order.stop_loss,
-             "memo": order.committee_memo_id, "ca": now}).scalar_one()
+             "memo": order.committee_memo_id, "core": is_core,
+             "ca": now}).scalar_one()
         audit.append(event_type="position.opened", entity_type="position",
                      entity_id=str(position_id), actor_type="dcp",
                      actor_id="trading_lifecycle",
@@ -1122,7 +1137,7 @@ def snapshot(session: Session, clock: Clock) -> SnapshotResult:
     now = clock.now()
     on = now.date()
     positions = session.execute(text(
-        "SELECT p.qty, p.current_stop, i.id AS iid, i.symbol, i.currency "
+        "SELECT p.qty, p.current_stop, p.is_core, i.id AS iid, i.symbol, i.currency "
         "FROM trading.positions p JOIN market.instruments i ON i.id = p.instrument_id "
         "WHERE p.closed_at IS NULL AND p.qty > 0")).all()
 
@@ -1135,7 +1150,13 @@ def snapshot(session: Session, clock: Clock) -> SnapshotResult:
         close = _latest_close(session, p.iid, on)
         fx = rates[p.currency]
         value = (Decimal(p.qty) * close * fx).quantize(_CENT)
-        if p.current_stop is None:  # fail closed (no stop = fully at risk)
+        # open_risk_pct mirrors the L7 gate (ADR-0014): a core position is
+        # rebalanced, not stopped, so it contributes ZERO; a satellite with no
+        # stop fails closed to its full value; a stopped satellite contributes
+        # its stop-out loss. Reporting must not disagree with the gate.
+        if p.is_core:
+            open_risk += Decimal(0)
+        elif p.current_stop is None:  # fail closed (no stop = fully at risk)
             open_risk += value
         else:
             open_risk += max(Decimal(0),
