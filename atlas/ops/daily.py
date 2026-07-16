@@ -19,6 +19,10 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   initiation after approval, quant.signals upsert
                   (atlas/dcp/signals/xsmom/generate.py). Fail-soft like the
                   desk — a signal failure must never kill settlement
+  T6c pead signals PEAD/SUE paper-strategy signal generation (ADR-0013/0014):
+                  the second satellite sleeve, monthly rebalance / one-time
+                  initiation / catch_up exactly like t6b, quant.signals upsert
+                  (atlas/dcp/signals/pead/generate.py). Fail-soft like t6b
   T7 desk         SCAN then DESK — one attention+analysis stage. The
                   deterministic scanner (ADR-0007, atlas/dcp/scanner/v1.py —
                   attention, not alpha) sweeps the FULL active universe for
@@ -88,6 +92,10 @@ from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
+from atlas.dcp.signals.pead.generate import (
+    active_pead_signal_symbols,
+    generate_pead_signals,
+)
 from atlas.dcp.signals.xsmom.generate import active_signal_symbols, generate_signals
 from atlas.dcp.trading.bands import check_bands
 from atlas.dcp.trading.bridge import bridge_memos
@@ -235,7 +243,12 @@ def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
     scan failure that aborts the transaction kills the run like any other
     node-level SQL failure."""
     def scanned_desk(session: Session, clock: Clock) -> ScannedDeskReport:
-        signal_names = active_signal_symbols(session, clock)
+        # BOTH satellite sleeves lead the shortlist (ADR-0010/0013/0014):
+        # momentum's active names, then PEAD's, deduped preserving order — so
+        # neither signed sleeve is starved when the nightly budget breaker
+        # halts the tail (order is policy, module docstring).
+        signal_names = merge_shortlist(active_signal_symbols(session, clock),
+                                       active_pead_signal_symbols(session, clock))
         try:
             report = scan(session, clock, top_n=top_n)
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
@@ -333,6 +346,20 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["signals"] = report
         return report.summary()
 
+    def t6c_pead_signals() -> str:
+        # PEAD paper signals (ADR-0013/0014): the second satellite sleeve,
+        # generated in parallel to xsmom (t6b) and BEFORE the desk so tonight's
+        # PEAD rebalance names reach tonight's shortlist with citable evidence.
+        # Fail-soft exactly like t6b: a generation failure pages, the settled
+        # and protected book stands.
+        try:
+            report = generate_pead_signals(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["pead_signals_failed"] = True
+            return f"pead signals FAILED: {e}"[:300]
+        state["pead_signals"] = report
+        return report.summary()
+
     def t7_desk() -> str:
         if desk is None:
             return "desk off (no model key configured)"
@@ -390,18 +417,22 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         desk_report = state.get("desk")
         bridge_report = state.get("bridge")
         signals_report = state.get("signals")
+        pead_signals_report = state.get("pead_signals")
         bands_report = state.get("bands")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
                   or bool(state.get("scorecard_failed", False))
                   or bool(state.get("signals_failed", False))
+                  or bool(state.get("pead_signals_failed", False))
                   or bool(state.get("bands_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
                  bridge_report.summary() if bridge_report is not None else "bridge idle",
                  signals_report.summary() if signals_report is not None else "signals idle",
+                 pead_signals_report.summary() if pead_signals_report is not None
+                 else "pead signals idle",
                  bands_report.summary() if bands_report is not None else "bands idle",
                  scorecard_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
@@ -412,6 +443,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("bridge FAILED — see log")
         if state.get("signals_failed"):
             lines.append("signals FAILED — see log")
+        if state.get("pead_signals_failed"):
+            lines.append("pead signals FAILED — see log")
         if state.get("bands_failed"):
             lines.append("bands FAILED — see log")
         summary = " · ".join(lines)
@@ -451,6 +484,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t5b_bands", t5b_bands),
         Node("t6_reconcile", t6_reconcile),
         Node("t6b_signals", t6b_signals),
+        Node("t6c_pead_signals", t6c_pead_signals),
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
         Node("t9_report", t9_report),
@@ -496,6 +530,7 @@ def main() -> None:
               or "scan FAILED" in (results.get("t7_desk") or "")
               or "bridge FAILED" in (results.get("t8_bridge") or "")
               or "signals FAILED" in (results.get("t6b_signals") or "")
+              or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
               or "bands FAILED" in (results.get("t5b_bands") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)

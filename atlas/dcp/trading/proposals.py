@@ -515,10 +515,20 @@ def _fresh_proposal_inputs(session: Session, clock: Clock, inst: _Instrument, *,
 
 def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
                    signal_refs: Sequence[str], entry_price: Decimal,
-                   stop_price: Decimal, target_price: Decimal) -> ProposalResult:
+                   stop_price: Decimal, target_price: Decimal,
+                   sleeve_max_qty: int | None = None) -> ProposalResult:
     """Size (Doc 04 §4), validate (L1-L11 §3), persist. PASS lands the proposal
     in 'pending_approval' with the check referenced (§2.1); FAIL is terminal:
-    'rejected', check recorded, no override path."""
+    'rejected', check recorded, no override path.
+
+    sleeve_max_qty (ADR-0014, set only by the bridge's sleeve budget): an OUTER
+    whole-share cap the DCP applies to the §4 risk size so a strategy sleeve's
+    aggregate exposure stays inside its signed envelope. It can only ever SHRINK
+    the size — the risk engine still validates the capped quantity, and a
+    smaller position is strictly less risk than the one §4 sized — never grow it
+    past what risk allows. None leaves §4 sizing untouched (every non-sleeve
+    proposal, unchanged). Callers pass a cap >= 1; the sleeve budget's
+    'no whole share fits' case is a skip in the bridge, never a 0-qty proposal."""
     _lifecycle_lock(session)
     on = clock.now().date()
     limits = load_active_limit_set(session, on)   # raises before effective_from
@@ -532,12 +542,15 @@ def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
         adv_20d=_adv_20d(session, inst.id, on), limits=limits, breaker=book.breaker)
 
     if size.accepted:
-        proposal = _fresh_proposal_inputs(session, clock, inst, qty=size.qty,
+        qty = (size.qty if sleeve_max_qty is None
+               else min(size.qty, sleeve_max_qty))   # the cap only shrinks
+        proposal = _fresh_proposal_inputs(session, clock, inst, qty=qty,
                                           entry_price=entry_price,
                                           stop_price=stop_price, book=book)
         check = validate(proposal, book.state, limits, book.breaker)
         value_aud = proposal.cost_aud.quantize(_CENT)
     else:  # §4 'reject if …' — sizing is risk policy, recorded as a FAIL check
+        qty = size.qty
         check = RiskCheck(passed=False, breaker=book.breaker, results=(
             RuleResult("SIZING", False,
                        f"{size.detail} (binding: {size.binding_constraint})"),))
@@ -557,7 +570,7 @@ def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
         "        :value, 'risk_review', :exp, :ca) RETURNING id"),
         {"iid": inst.id, "mkt": inst.market, "memo": UUID(memo_id),
          "sids": [UUID(s) for s in signal_refs], "entry": entry_price,
-         "stop": stop_price, "target": target_price, "qty": size.qty,
+         "stop": stop_price, "target": target_price, "qty": qty,
          "value": value_aud, "exp": now + PROPOSAL_TTL, "ca": now}).scalar_one()
 
     check_id = _persist_check(
@@ -575,13 +588,13 @@ def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
         event_type="proposal.created", entity_type="proposal",
         entity_id=str(proposal_id), actor_type="dcp", actor_id="trading_lifecycle",
         payload={"proposal_id": str(proposal_id), "symbol": symbol, "action": "buy",
-                 "memo_id": memo_id, "qty": size.qty, "state": state,
+                 "memo_id": memo_id, "qty": qty, "state": state,
                  "expires_at": (now + PROPOSAL_TTL).isoformat()})
 
     return ProposalResult(
         proposal_id=str(proposal_id), state=state,
         verdict="PASS" if check.passed else "FAIL", risk_check_id=check_id,
-        qty=size.qty, failures=tuple(r.rule for r in check.failures()))
+        qty=qty, failures=tuple(r.rule for r in check.failures()))
 
 
 # --------------------------------------------------------------- expiry (§5)

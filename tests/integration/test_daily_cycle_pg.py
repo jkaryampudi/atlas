@@ -52,7 +52,8 @@ def _clean(s) -> None:
     # strings below drift
     s.execute(text("DELETE FROM quant.sleeve_daily"))
     s.execute(text("DELETE FROM quant.signals"))
-    s.execute(text("DELETE FROM quant.strategies WHERE family = 'xsmom-pit-tr'"))
+    s.execute(text("DELETE FROM quant.strategies "
+                   "WHERE family IN ('xsmom-pit-tr', 'pead-sue-tr')"))
     s.execute(text("DELETE FROM risk.limit_sets WHERE version > 1"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol LIKE 'ZCY%')"))
@@ -113,12 +114,14 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-        "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals", "t7_desk",
-        "t8_bridge", "t9_report"]
+        "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals",
+        "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
     # no approved strategy in this fixture: both ADR-0010 nodes idle honestly
     assert results["t5b_bands"] == "bands idle (no banded strategy)"
     assert results["t6b_signals"] == ("signals idle (no paper/live "
                                       "xsmom-pit-tr strategy)")
+    assert results["t6c_pead_signals"] == ("pead signals idle (no paper/live "
+                                           "pead-sue-tr strategy)")
     # the entry order fills at the 7/14 open AND the 7/15 bar fires the stop
     # in ONE cycle: settle runs before the scan precisely so a just-entered
     # position is never naked while its breaching bar is already ingested
@@ -201,6 +204,33 @@ def test_desk_failure_pages_but_never_undoes_trading(clean_audit):
     assert n_ex == 1
 
 
+def test_pead_signal_failure_is_fail_soft(clean_audit, monkeypatch):
+    """t6c PEAD signal generation is fail-soft exactly like t6b: a generation
+    blow-up pages (the node line records FAILED, t9 flags it) but the settled,
+    protected book stands and the run still completes every later node."""
+    import atlas.ops.daily as daily
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))  # entry fill only
+
+    def exploding_pead(session, clk):
+        raise RuntimeError("pead panel exploded")
+
+    monkeypatch.setattr(daily, "generate_pead_signals", exploding_pead)
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert results["t3_settle"] == "fills=1"                 # trading unaffected
+    assert results["t6_reconcile"] == "clean"
+    assert results["t6c_pead_signals"].startswith(
+        "pead signals FAILED: pead panel exploded")
+    assert "pead signals FAILED" in results["t9_report"]
+    assert list(results.keys()) == NODES                     # every node ran
+    n_ex = s.execute(text("SELECT count(*) FROM trading.executions")).scalar()
+    assert n_ex == 1                                          # only the entry fill
+
+
 def test_desk_skipped_on_non_us_session_day(clean_audit):
     """2026-07-12 is a Sunday in UTC: the desk has nothing new to read, so it
     must not spend a cent — and must say so."""
@@ -227,8 +257,8 @@ def test_desk_skipped_on_non_us_session_day(clean_audit):
 REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
                "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-         "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals", "t7_desk",
-         "t8_bridge", "t9_report"]
+         "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals",
+         "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
 
 
 def test_mid_session_start_is_refused_before_the_checkpoint_exists(

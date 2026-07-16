@@ -52,15 +52,29 @@ Documented resolutions (ADR-0006 ambiguities, resolved conservatively):
   an older complete one (that would derive volatility from a hand-picked
   history).
 - signal_ids: an evidence ref that IS a quant signal ref
-  ('dcp:signal:xsmom:<uuid>:<date>', emitted only by
-  signals/xsmom/generate.extract_signal_evidence) resolves to the REAL
-  quant.signals UUID — verified to exist; a signal-shaped ref whose row is
+  ('dcp:signal:<family>:<uuid>:<date>' for family xsmom OR pead, emitted only
+  by signals/{xsmom,pead}/generate.extract_*signal_evidence) resolves to the
+  REAL quant.signals UUID — verified to exist; a signal-shaped ref whose row is
   missing fails the memo closed (a forged lineage must never silently become
   a synthetic one). Every other ref keeps ADR-0006's interim
   uuid5(NAMESPACE_URL, 'atlas:evidence:<ref>') convention — memos without
   signals bridge exactly as before. Deduplicated preserving order; the full
   ref->uuid mapping lands in the trading.bridge.completed audit payload so
   lineage stays reconstructible.
+
+- sleeve budget (ADR-0014, option B — the active satellite is momentum 10% +
+  PEAD 10% of NAV): a memo attributed to a signed strategy FAMILY (via its
+  resolved signal_ids -> quant.signals -> strategy_id, the same lineage join
+  bands.py uses) is sized so the family's AGGREGATE new exposure stays inside
+  its envelope. Per name: floor((NAV*fraction - already_committed) / n_names /
+  (entry x FX)) whole shares, equal-weight across the sleeve's BUY names — a
+  hard cap PASSED INTO build_proposal that can only SHRINK the risk engine's §4
+  size, never grow it (the engine still validates the capped quantity; risk may
+  shrink it further). already_committed sums the family's open positions and its
+  live unfilled proposals. Without this cap ~10 momentum names would each size
+  to the L1 8% single-name limit and aggregate to ~77% of NAV — far past the
+  signed 10% sleeve. Memos with no signed-sleeve signal are sized by risk alone,
+  exactly as before.
 - A build_proposal risk FAIL (state 'rejected') is an HONEST outcome reported
   in BridgeReport.built with its verdict — the gate working is a deliverable,
   never an error (CLAUDE.md working style).
@@ -79,18 +93,20 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
-from decimal import Decimal
+from datetime import date, timedelta
+from decimal import ROUND_FLOOR, Decimal
+from typing import Any, Sequence
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.core.clock import Clock
-from atlas.dcp.execution.paper import PRICE_SOURCE
+from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
 from atlas.dcp.indicators.core import wilder_atr
 from atlas.dcp.trading.proposals import (
     ProposalResult,
     _audit,
+    _build_book,
     _latest_close,
     _lifecycle_lock,
     _load_instrument,
@@ -141,12 +157,26 @@ def evidence_signal_id(ref: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"atlas:evidence:{ref}")
 
 
-# 'dcp:signal:xsmom:<quant.signals uuid>:<signal_date>' — emitted only by
-# signals/xsmom/generate.extract_signal_evidence, so the embedded uuid IS the
-# real signal identity the sleeve attribution joins on
+# 'dcp:signal:<family>:<quant.signals uuid>:<signal_date>' — emitted only by
+# signals/{xsmom,pead}/generate.extract_*signal_evidence, so the embedded uuid
+# IS the real signal identity the sleeve attribution joins on. The family group
+# is NON-capturing so the uuid stays group(1) for _resolve_signal_ids.
 _SIGNAL_REF = re.compile(
-    r"^dcp:signal:xsmom:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
-    r"[0-9a-f]{12}):\d{4}-\d{2}-\d{2}$")
+    r"^dcp:signal:(?:xsmom|pead):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{4}-[0-9a-f]{12}):\d{4}-\d{2}-\d{2}$")
+
+# ADR-0014 (option B, signed 2026-07-16): the active satellite is momentum 10% +
+# PEAD 10% of NAV (core 70%, cash 10%). SLEEVE_BUDGET_FRACTION keys each signed
+# strategy FAMILY (quant.strategies.family) to its fraction of NAV — the same
+# documented-constant pattern core_allocation.CORE_TARGETS uses for the passive
+# core. When the bridge sizes a family's BUY memos it caps their aggregate NEW
+# exposure so the sleeve never sums past this envelope; a family absent here has
+# no sleeve cap (sized by risk alone, unchanged). Editing these numbers is an
+# ADR change, exactly like editing CORE_TARGETS.
+SLEEVE_BUDGET_FRACTION: dict[str, Decimal] = {
+    "xsmom-pit-tr": Decimal("0.10"),   # momentum sleeve (ADR-0014)
+    "pead-sue-tr": Decimal("0.10"),    # PEAD sleeve (ADR-0014)
+}
 
 
 def _resolve_signal_ids(session: Session, refs: list[str]) -> dict[str, str]:
@@ -168,6 +198,100 @@ def _resolve_signal_ids(session: Session, refs: list[str]) -> dict[str, str]:
                             "exists — refusing to fabricate signal lineage")
         out[ref] = str(sid)
     return out
+
+
+# ------------------------------------------------------ sleeve budget (ADR-0014)
+
+def _signal_ref_uuids(refs: list[str]) -> list[uuid.UUID]:
+    """The quant.signals UUIDs embedded in a memo's signal-shaped evidence refs
+    — the candidates for sleeve attribution (non-signal refs are ignored)."""
+    out: list[uuid.UUID] = []
+    for ref in refs:
+        m = _SIGNAL_REF.match(ref)
+        if m is not None:
+            out.append(uuid.UUID(m.group(1)))
+    return out
+
+
+def _sleeve_family(session: Session, signal_uuids: list[uuid.UUID]) -> str | None:
+    """The signed-sleeve FAMILY a memo's signal UUIDs belong to, or None. The
+    attribution join is the one bands.py uses — a signal id maps to its
+    strategy's family — restricted to the paper/live sleeves that carry a
+    budget. Deterministic on the rare overlap (a name that is BOTH a momentum
+    and a PEAD winner): the alphabetically-first family wins."""
+    if not signal_uuids:
+        return None
+    row = session.execute(text(
+        "SELECT st.family FROM quant.signals s "
+        "JOIN quant.strategies st ON st.id = s.strategy_id "
+        "WHERE s.id = ANY(:ids) AND st.state IN ('paper','live') "
+        "  AND st.family = ANY(:fams) ORDER BY st.family LIMIT 1"),
+        {"ids": signal_uuids, "fams": list(SLEEVE_BUDGET_FRACTION)}).first()
+    return str(row.family) if row is not None else None
+
+
+def _sleeve_committed_aud(session: Session, family: str, on: date) -> Decimal:
+    """Capital already committed to `family`'s sleeve at run start: the market
+    value of its OPEN positions PLUS the reserved value of its LIVE (unfilled)
+    proposals. Same signal-lineage attribution the band check uses (bands.py):
+    a lot / proposal is in the sleeve iff its proposal's signal_ids intersect
+    the family's paper/live quant.signals ids. Both terms only ENLARGE the
+    committed base, so the remaining envelope can only shrink sizing — a
+    conservative superset of the ADR-0014 'existing sleeve positions' that also
+    closes the cross-cycle over-commit hole (yesterday's still-pending sleeve
+    proposals count against today's budget)."""
+    sleeve_ids = ("ARRAY(SELECT s.id FROM quant.signals s "
+                  "JOIN quant.strategies st ON st.id = s.strategy_id "
+                  "WHERE st.family = :fam AND st.state IN ('paper','live'))")
+    total = Decimal("0")
+    fx_cache: dict[str, Decimal] = {}
+    for r in session.execute(text(
+            "SELECT tp.instrument_id AS iid, i.currency, tl.qty "
+            "FROM trading.tax_lots tl "
+            "JOIN trading.executions e ON e.id = tl.execution_id "
+            "JOIN trading.orders o ON o.id = e.order_id "
+            "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+            "JOIN market.instruments i ON i.id = tp.instrument_id "
+            "WHERE tl.disposed_at IS NULL AND tp.signal_ids && " + sleeve_ids),
+            {"fam": family}).all():
+        if r.currency not in fx_cache:
+            fx_cache[r.currency] = fx_to_aud(session, r.currency, on)
+        total += Decimal(int(r.qty)) * _latest_close(session, r.iid, on) \
+            * fx_cache[r.currency]
+    reserved = session.execute(text(
+        "SELECT COALESCE(sum(position_value_aud), 0) FROM trading.trade_proposals "
+        "WHERE state IN ('risk_review','pending_approval','approved') "
+        "  AND signal_ids && " + sleeve_ids), {"fam": family}).scalar_one()
+    return total + Decimal(reserved)
+
+
+def _sleeve_name_budgets(session: Session, clock: Clock,
+                         candidates: Sequence[Any]) -> dict[str, Decimal]:
+    """Per-name AUD slice for each sleeve family with BUY candidates this run,
+    computed ONCE at run start (a snapshot — a proposal created later in the run
+    does not shrink a sibling's slice; the sleeve's names split one fixed
+    envelope equally). For family F with n candidate BUY names:
+
+        per_name_aud = (NAV * SLEEVE_BUDGET_FRACTION[F] - committed_F) / n
+
+    NAV is the book NAV the risk engine sizes against (worst-case pro-forma,
+    _build_book). n counts every candidate attributed to F; a name later skipped
+    by a scope guard simply leaves its slice undeployed (aggregate stays UNDER
+    budget — conservative). A non-positive slice (envelope already full) yields a
+    sub-1-share cap downstream and the name is skipped."""
+    counts: dict[str, int] = {}
+    for memo in candidates:
+        refs = [r for r in memo.evidence_refs if isinstance(r, str) and r]
+        fam = _sleeve_family(session, _signal_ref_uuids(refs))
+        if fam is not None:
+            counts[fam] = counts.get(fam, 0) + 1
+    if not counts:
+        return {}
+    nav = _build_book(session, clock).state.nav_aud
+    on = clock.now().date()
+    return {fam: (nav * SLEEVE_BUDGET_FRACTION[fam]
+                  - _sleeve_committed_aud(session, fam, on)) / n
+            for fam, n in counts.items()}
 
 
 def derive_prices(entry: Decimal, atr14: float) -> tuple[Decimal, Decimal]:
@@ -252,6 +376,11 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
         "ORDER BY m.created_at, m.id"),
         {"cutoff": now - MEMO_MAX_AGE, "now": now}).all()
 
+    # ADR-0014 sleeve budgets: the per-name AUD slice for each satellite family
+    # with BUY candidates tonight, snapshotted BEFORE any proposal is built so
+    # the sleeve's names split one fixed envelope equally (module: sleeve budget).
+    sleeve_budgets = _sleeve_name_budgets(session, clock, candidates)
+
     built: list[BridgedProposal] = []
     skipped: list[BridgeSkip] = []
     ref_map: dict[str, dict[str, str]] = {}   # memo_id -> {ref: uuid}
@@ -279,11 +408,30 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
                 raise _SkipMemo(str(e)) from e
             stop, target = derive_prices(entry, _atr14(session, inst.id, clock))
             signal_ids = _resolve_signal_ids(session, refs)
+            # ADR-0014 sleeve cap: a memo attributed to a signed satellite
+            # family gets a whole-share cap = floor(per-name AUD slice /
+            # entry x FX), equal-weight across the sleeve's BUY names. It only
+            # ever SHRINKS the §4 risk size (build_proposal.sleeve_max_qty);
+            # non-sleeve memos are sized by risk alone (cap None). A full
+            # envelope (< 1 share fits) is an honest recorded skip.
+            sleeve_cap: int | None = None
+            fam = _sleeve_family(session, _signal_ref_uuids(refs))
+            if fam is not None:
+                price_aud = entry * fx_to_aud(session, inst.currency, now.date())
+                per_name = sleeve_budgets[fam]
+                sleeve_cap = int(
+                    (per_name / price_aud).to_integral_value(ROUND_FLOOR))
+                if sleeve_cap < 1:
+                    raise _SkipMemo(
+                        f"{symbol}: {fam} sleeve envelope full — per-name budget "
+                        f"A${per_name:.2f} buys no whole share at A${price_aud:.2f} "
+                        "(ADR-0014)")
             res: ProposalResult = build_proposal(
                 session, clock, memo_id=memo_id, symbol=symbol,
                 signal_refs=list(dict.fromkeys(signal_ids.values())),
                 entry_price=entry,
-                stop_price=stop, target_price=target)
+                stop_price=stop, target_price=target,
+                sleeve_max_qty=sleeve_cap)
         except _SkipMemo as e:
             skipped.append(BridgeSkip(symbol=symbol, memo_id=memo_id,
                                       reason=str(e)))
