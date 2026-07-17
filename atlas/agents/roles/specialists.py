@@ -107,13 +107,18 @@ def _lane_evidence(role: str, evidence: list[tuple[str, str]]) -> list[tuple[str
 
 def run_specialists(*, session: Session, audit: PostgresAuditLog, symbol: str,
                     evidence: list[tuple[str, str]],
-                    clients: dict[str, LlmClient] | None = None) -> SpecialistPanel:
+                    clients: dict[str, LlmClient] | None = None,
+                    shadow_mode: bool = False) -> SpecialistPanel:
     """Run the three-lane specialist panel through the full cage.
 
     Each seat gets its OWN registry client — build_client('quality_analyst')
     etc. — so ATLAS_MODEL_QUALITY_ANALYST / _GROWTH_ANALYST / _MACRO_ANALYST
     route per role exactly like the debate seats. `clients` injects explicit
     per-role clients (tests), keyed by SPECIALIST_ROLES name.
+
+    `shadow_mode` (Constitution 7.2) is threaded verbatim to every run_agent
+    call so a shadow model-upgrade comparison (shadow_compare.py) marks all
+    three seats non-actionable; production callers never set it.
 
     BudgetExhausted propagates (see module docstring); everything else the
     cage or transport raises becomes an honest per-specialist absence.
@@ -142,6 +147,7 @@ def run_specialists(*, session: Session, audit: PostgresAuditLog, symbol: str,
                 output_model=SpecialistAssessment,
                 input_refs=[{"type": "evidence", "id": r} for r, _ in lane],
                 evidence_bodies=dict(lane),  # grounding corpus == the lane, exactly
+                shadow_mode=shadow_mode,
                 max_tokens=1200)  # structured single assessment; no debate headroom
             assessments[role] = out  # type: ignore[assignment]
         except AgentRunFailed as e:

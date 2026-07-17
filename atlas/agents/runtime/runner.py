@@ -153,9 +153,14 @@ def _complete_with_backoff(client: LlmClient, prompt: str, *,
 #
 # Surfaces are bound where each one enters the runner: run_desk defaults to
 # 'nightly' (the T7 cycle and manual desk runs), atlas/ops/analyze.py wraps
-# its desk call in budget_surface('analyze'). Entry points that bind no
-# surface (e.g. the manual live_run tool) answer to the global breaker alone.
-SURFACE_BUDGET_DEFAULTS_USD: dict[str, float] = {"nightly": 6.00, "analyze": 3.00}
+# its desk call in budget_surface('analyze'), and the shadow model-upgrade
+# comparison (atlas/agents/shadow_compare.py, Constitution 7.2) binds
+# 'shadow' (ATLAS_BUDGET_SHADOW, default $3.00) — a comparison spree must
+# never starve the nightly desk, exactly the analyze rationale. Entry points
+# that bind no surface (e.g. the manual live_run tool) answer to the global
+# breaker alone.
+SURFACE_BUDGET_DEFAULTS_USD: dict[str, float] = {"nightly": 6.00, "analyze": 3.00,
+                                                 "shadow": 3.00}
 _budget_surface: ContextVar[str | None] = ContextVar("atlas_budget_surface",
                                                      default=None)
 
@@ -267,10 +272,15 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
                         f"{total:.2f} > {cap:.2f} USD sub-cap "
                         f"(ATLAS_BUDGET_{surface.upper()}; global cap intact)")
         except BudgetExhausted:
+            # the kill row carries the shadow flag too (Constitution 7.2): a
+            # shadow comparison must never write an unmarked run row, and the
+            # comparison's cost attribution sums shadow-marked rows only
             session.execute(text(
                 "INSERT INTO research.agent_runs (agent_role, prompt_template_hash, "
-                " model, status, cost_usd) VALUES (:r, :h, :m, 'budget_kill', :c)"),
-                {"r": agent_role, "h": t_hash, "m": model_str, "c": cost})
+                " model, status, cost_usd, shadow) "
+                "VALUES (:r, :h, :m, 'budget_kill', :c, :sh)"),
+                {"r": agent_role, "h": t_hash, "m": model_str, "c": cost,
+                 "sh": shadow_mode})
             audit.append(event_type="cost.budget.breached", entity_type="agent_run",
                          entity_id=agent_role, actor_type="scheduler",
                          actor_id="budget_guard", payload={"cost": cost,
