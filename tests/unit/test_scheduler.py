@@ -149,3 +149,54 @@ def test_failed_exit_code_still_pages(monkeypatch):
     assert pages[0][1].get("priority") == "high"
     last = scheduler.status()["last"]
     assert last["ok"] is False and last["refused"] is False
+
+
+# ---------------------------------------------------------------------------
+# Wall-clock tick loop (the lid-close fix, 2026-07-18): a fire time observed
+# in the PAST on any tick must fire immediately (catch-up after system sleep),
+# and each fire re-arms for the next day.
+# ---------------------------------------------------------------------------
+
+def test_tick_loop_catches_up_after_system_sleep(monkeypatch):
+    """Simulate a laptop that slept through the 23:30 fire: ticks observe a
+    wall clock that JUMPS past the fire time; the loop must fire exactly once
+    on the first post-wake tick and re-arm for tomorrow."""
+    import asyncio
+
+    from atlas.ops import scheduler as sched
+
+    fired: list[str] = []
+    times = iter([
+        datetime(2026, 7, 17, 20, 0, tzinfo=UTC),    # loop start
+        datetime(2026, 7, 17, 20, 0, 30, tzinfo=UTC),  # tick 1: nothing due
+        datetime(2026, 7, 18, 9, 0, tzinfo=UTC),     # tick 2: WOKE PAST both
+        datetime(2026, 7, 18, 9, 0, 30, tzinfo=UTC),  # tick 3: nothing (re-armed)
+    ])
+
+    from datetime import datetime as _real_dt
+
+    class _Now:
+        combine = _real_dt.combine          # next_fire uses datetime.combine
+
+        @staticmethod
+        def now(tz=None):
+            return next(times)
+
+    monkeypatch.setattr(sched, "datetime", _Now)
+    monkeypatch.setattr(sched, "start_cycle", lambda: fired.append("cycle") or True)
+    monkeypatch.setattr(sched, "_run_backup", lambda: fired.append("backup"))
+
+    sleeps = {"n": 0}
+
+    async def fast_sleep(_secs):
+        sleeps["n"] += 1
+        if sleeps["n"] >= 3:          # after tick 3, stop the loop
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(sched.asyncio, "sleep", fast_sleep)
+    try:
+        asyncio.run(sched.scheduler_loop())
+    except asyncio.CancelledError:
+        pass
+    # the missed 23:30 cycle AND the missed 00:30 backup both fired on wake
+    assert fired == ["cycle", "backup"]

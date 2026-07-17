@@ -143,18 +143,34 @@ def _run_backup() -> None:
         notify("Atlas backup CRASHED", str(e), priority="high")
 
 
+# Short wall-clock tick. asyncio.sleep counts MONOTONIC time, which pauses
+# while a laptop lid is closed — a single long sleep to a fire time silently
+# owes every slept hour on wake (observed live: the 2026-07-15 cycle fired 16
+# minutes late, 2026-07-16's never fired before a restart re-armed it for the
+# next day, and 2026-07-17's was skipped outright). Ticking every TICK_SECONDS
+# against the WALL clock survives system sleep: on wake the very next tick
+# notices the fire time has passed and catches up. Re-fires are safe by
+# construction — the daily checkpoint replays an already-completed date and
+# the pre-session guard refuses a too-early one.
+TICK_SECONDS = 30.0
+
+
 async def scheduler_loop() -> None:
-    """Sleep until the nearest of the two daily fire times, run it, repeat.
-    Started from the API's lifespan when ATLAS_INPROC_SCHEDULER=1."""
+    """Wall-clock tick loop for the two daily fire times. Started from the
+    API's lifespan when ATLAS_INPROC_SCHEDULER=1. Each pending fire time is
+    executed as soon as a tick observes it in the past (catch-up after system
+    sleep), then re-armed for the next day."""
+    now = datetime.now(UTC)
+    pending = {"cycle": next_fire(now, CYCLE_UTC),
+               "backup": next_fire(now, BACKUP_UTC)}
     while True:
+        await asyncio.sleep(TICK_SECONDS)
         now = datetime.now(UTC)
-        fires = [(next_fire(now, CYCLE_UTC), "cycle"),
-                 (next_fire(now, BACKUP_UTC), "backup")]
-        when, what = min(fires)
-        await asyncio.sleep(max(1.0, (when - datetime.now(UTC)).total_seconds()))
-        if what == "cycle":
+        if now >= pending["cycle"]:
+            pending["cycle"] = next_fire(now, CYCLE_UTC)
             if not start_cycle():
                 notify("Atlas scheduler", "09:30 cycle skipped — a cycle was "
                        "already running", priority="high")
-        else:
+        if now >= pending["backup"]:
+            pending["backup"] = next_fire(now, BACKUP_UTC)
             await asyncio.to_thread(_run_backup)
