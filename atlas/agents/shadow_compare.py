@@ -103,6 +103,14 @@ SHADOW_ROLES: tuple[str, ...] = ("debate_bull", "debate_bear",
                                  "macro_analyst", "cio")
 REPORTS_DIR = Path(__file__).resolve().parents[2] / "docs" / "reports"
 
+# Challenger output ceilings: 2x production. Empirical (2026-07-18): sonnet-5's
+# verbose JSON truncated at the production 2500 on real evidence — 8/8 cage
+# holds. Doubling isolates memo QUALITY from ceiling fit; production defaults
+# are untouched, and a real switch would raise them in the same reviewed change.
+CHALLENGER_MAX_TOKENS_DEBATE = 5000
+CHALLENGER_MAX_TOKENS_SPECIALIST = 2400
+CHALLENGER_MAX_TOKENS_CIO = CIO_MAX_TOKENS * 2
+
 
 def incumbent_default() -> str:
     """The desk's default model (registry resolution without a role override)."""
@@ -183,14 +191,23 @@ def _shadow_committee_run(session: Session, audit: PostgresAuditLog, *,
                           client: LlmClient) -> dict[str, object]:
     """Full committee path, shadow end to end, on ONE client (every seat is
     the challenger — per-role routing is deliberately bypassed: the model IS
-    the variable under test). Returns the payload persisted to shadow_memos."""
+    the variable under test). Returns the payload persisted to shadow_memos.
+
+    CHALLENGER TOKEN HEADROOM: every seat runs at 2x the production output
+    ceiling. Empirically required (2026-07-18): sonnet-5's more verbose JSON
+    truncated at the production 2500 on real evidence bundles — 8/8 cage
+    holds, zero scoreable memos. The comparison isolates memo QUALITY, not
+    ceiling fit; a switch decision would raise the production ceilings as
+    part of the same reviewed registry change. Production defaults untouched."""
     debate = run_debate(session=session, audit=audit, symbol=symbol,
                         evidence=evidence, bull_client=client,
-                        bear_client=client, shadow_mode=True)
+                        bear_client=client, shadow_mode=True,
+                        max_tokens=CHALLENGER_MAX_TOKENS_DEBATE)
     panel = (run_specialists(session=session, audit=audit, symbol=symbol,
                              evidence=evidence,
                              clients={r: client for r in SPECIALIST_ROLES},
-                             shadow_mode=True)
+                             shadow_mode=True,
+                             max_tokens=CHALLENGER_MAX_TOKENS_SPECIALIST)
              if has_signal_block(evidence) else None)
     context = committee_context(symbol=symbol, question=question,
                                 evidence=evidence, news=[], debate=debate,
@@ -203,7 +220,7 @@ def _shadow_committee_run(session: Session, audit: PostgresAuditLog, *,
         extra_fields={"evidence_available": bool(evidence),
                       "debate_present": True},
         evidence_bodies=dict(evidence),
-        shadow_mode=True, max_tokens=CIO_MAX_TOKENS)
+        shadow_mode=True, max_tokens=CHALLENGER_MAX_TOKENS_CIO)
     assert isinstance(memo, CommitteeMemo)
     return {
         "memo": memo.model_dump(),

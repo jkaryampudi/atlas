@@ -108,7 +108,8 @@ def _lane_evidence(role: str, evidence: list[tuple[str, str]]) -> list[tuple[str
 def run_specialists(*, session: Session, audit: PostgresAuditLog, symbol: str,
                     evidence: list[tuple[str, str]],
                     clients: dict[str, LlmClient] | None = None,
-                    shadow_mode: bool = False) -> SpecialistPanel:
+                    shadow_mode: bool = False,
+                    max_tokens: int = 1200) -> SpecialistPanel:
     """Run the three-lane specialist panel through the full cage.
 
     Each seat gets its OWN registry client — build_client('quality_analyst')
@@ -148,7 +149,9 @@ def run_specialists(*, session: Session, audit: PostgresAuditLog, symbol: str,
                 input_refs=[{"type": "evidence", "id": r} for r, _ in lane],
                 evidence_bodies=dict(lane),  # grounding corpus == the lane, exactly
                 shadow_mode=shadow_mode,
-                max_tokens=1200)  # structured single assessment; no debate headroom
+                max_tokens=max_tokens)  # default 1200: structured single
+                                        # assessment; shadow comparisons may
+                                        # raise it for more verbose challengers
             assessments[role] = out  # type: ignore[assignment]
         except AgentRunFailed as e:
             absences[role] = f"cage held: {str(e)[:160]}"
