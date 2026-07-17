@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from atlas.core.clock import FrozenClock
 from atlas.dcp.risk.seed_limits import seed_limit_set
+from atlas.dcp.trading import bridge
 from atlas.dcp.trading.bridge import SLEEVE_BUDGET_FRACTION, bridge_memos
 from tests.conftest import requires_pg
 
@@ -259,7 +260,13 @@ def test_whole_share_flooring(clean_audit):
 # E — per-strategy attribution: each family capped by ITS OWN budget.
 # --------------------------------------------------------------------------
 
-def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit):
+def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit, monkeypatch):
+    # ADR-0015 suspended PEAD's budget in production; this test pins the
+    # TWO-FUNDED-SLEEVE envelope math itself, so it injects a two-sleeve
+    # configuration explicitly (the production constant is pinned separately).
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.10")})
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
@@ -282,18 +289,22 @@ def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit):
     pead_names = [props[f"ZSLVP{i}"] for i in range(2)]
     assert all(int(p.position_size) == 25 for p in pead_names)
     assert sum(Decimal(p.position_value_aud) for p in pead_names) == SLEEVE_AUD
-    # the two sleeves are separate envelopes: 10% + 10% = the signed 20% satellite
+    # production constants pinned per ADR-0014 as amended by ADR-0015:
     assert SLEEVE_BUDGET_FRACTION["xsmom-pit-tr"] == Decimal("0.10")
-    assert SLEEVE_BUDGET_FRACTION["pead-sue-tr"] == Decimal("0.10")
+    assert SLEEVE_BUDGET_FRACTION["pead-sue-tr"] == Decimal("0.00")  # suspended
 
 
-def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audit):
+def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audit, monkeypatch):
     """Audit fix (2026-07-17): a name that is BOTH a momentum and a PEAD winner
     carries both signal refs on ONE memo. It must occupy a budget slot in EACH
     sleeve and be sized under the TIGHTER slice — under the intersect
     attribution rule (signal_ids && sleeve ids, the rule committed/bands use)
     NEITHER family's attributed exposure may exceed its 10% envelope. The old
-    LIMIT-1 attribution let the tie-break-losing family reach ~12%."""
+    LIMIT-1 attribution let the tie-break-losing family reach ~12%. (Two-funded
+    configuration injected; ADR-0015 zeroed PEAD's production budget.)"""
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.10")})
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
@@ -327,3 +338,35 @@ def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audi
                    + Decimal(props["ZSLVX"].position_value_aud))
     assert mom_attrib == SLEEVE_AUD
     assert pead_attrib == SLEEVE_AUD
+
+
+def test_suspended_pead_sleeve_sizes_to_zero_and_dual_deploys_under_momentum(
+        clean_audit):
+    """ADR-0015 (production constants): PEAD's budget is 0.00 — a pure PEAD BUY
+    memo is an honest recorded skip ("suspended at zero budget"), and a dual
+    momentum+PEAD winner deploys under the MOMENTUM slice alone (a zero-budget
+    sleeve must not veto a funded one)."""
+    s = clean_audit
+    _seed(s)
+    mom = _strategy(s, "xsmom-pit-tr")
+    pead = _strategy(s, "pead-sue-tr")
+    _sleeve_name(s, FrozenClock(T0), mom, "xsmom-pit-tr", "ZSLVM0", 100)
+    _sleeve_name(s, FrozenClock(T0), pead, "pead-sue-tr", "ZSLVP0", 100)  # skips
+    iid = _instrument(s, "ZSLVX")
+    _ohlc(s, iid, 100)
+    sig_m = _signal(s, mom, iid)
+    sig_p = _signal(s, pead, iid)
+    _memo(s, FrozenClock(T0), "ZSLVX",
+          [f"dcp:signal:xsmom:{sig_m}:{SIG_DATE}",
+           f"dcp:signal:pead:{sig_p}:{SIG_DATE}", BARS_REF])
+
+    report = bridge_memos(s, FrozenClock(T0))
+    built = {b.symbol for b in report.built}
+    assert built == {"ZSLVM0", "ZSLVX"}
+    skip = {sk.symbol: sk.reason for sk in report.skipped}
+    assert "ZSLVP0" in skip and "suspended at zero budget" in skip["ZSLVP0"]
+    props = _proposals(s)
+    # momentum counts TWO slots (pure + dual): 10000/2 = A$5,000 -> 50 sh @100
+    assert int(props["ZSLVM0"].position_size) == 50
+    assert int(props["ZSLVX"].position_size) == 50
+    assert "ZSLVP0" not in props

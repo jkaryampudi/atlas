@@ -165,17 +165,21 @@ _SIGNAL_REF = re.compile(
     r"^dcp:signal:(?:xsmom|pead):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{4}-[0-9a-f]{12}):\d{4}-\d{2}-\d{2}$")
 
-# ADR-0014 (option B, signed 2026-07-16): the active satellite is momentum 10% +
-# PEAD 10% of NAV (core 70%, cash 10%). SLEEVE_BUDGET_FRACTION keys each signed
-# strategy FAMILY (quant.strategies.family) to its fraction of NAV — the same
+# ADR-0014 (option B, signed 2026-07-16) as amended by ADR-0015 (2026-07-18):
+# the active satellite is momentum 10% of NAV; the PEAD sleeve is SUSPENDED at
+# 0.00 (its implementable form failed the null model — random top-5 draws did
+# as well, p=0.132 — so its BUY memos size to an honest zero/skip while its
+# signals, memos and scorecard record keep accruing as a forward experiment).
+# Core 70%, cash 20%. SLEEVE_BUDGET_FRACTION keys each signed strategy FAMILY
+# (quant.strategies.family) to its fraction of NAV — the same
 # documented-constant pattern core_allocation.CORE_TARGETS uses for the passive
-# core. When the bridge sizes a family's BUY memos it caps their aggregate NEW
-# exposure so the sleeve never sums past this envelope; a family absent here has
-# no sleeve cap (sized by risk alone, unchanged). Editing these numbers is an
-# ADR change, exactly like editing CORE_TARGETS.
+# core. A family absent here has no sleeve cap (sized by risk alone); a family
+# at 0.00 is a capital-suspended sleeve whose membership still records for
+# attribution but never allocates. Editing these numbers is an ADR change,
+# exactly like editing CORE_TARGETS.
 SLEEVE_BUDGET_FRACTION: dict[str, Decimal] = {
     "xsmom-pit-tr": Decimal("0.10"),   # momentum sleeve (ADR-0014)
-    "pead-sue-tr": Decimal("0.10"),    # PEAD sleeve (ADR-0014)
+    "pead-sue-tr": Decimal("0.00"),    # PEAD sleeve SUSPENDED (ADR-0015)
 }
 
 
@@ -423,15 +427,25 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
             sleeve_cap: int | None = None
             fams = _sleeve_families(session, _signal_ref_uuids(refs))
             if fams:
+                # ADR-0015: only FUNDED sleeves govern sizing. A zero-budget
+                # (suspended) sleeve's membership records for attribution but
+                # must not veto a funded one — a dual momentum+PEAD winner
+                # deploys under momentum's slice. A name whose ONLY sleeve is
+                # suspended sizes to zero (honest recorded skip).
+                funded = [f for f in fams if SLEEVE_BUDGET_FRACTION[f] > 0]
+                if not funded:
+                    raise _SkipMemo(
+                        f"{symbol}: sleeve(s) {'/'.join(fams)} suspended at "
+                        "zero budget (ADR-0015) — memo recorded, no capital")
                 price_aud = entry * fx_to_aud(session, inst.currency, now.date())
-                # dual-winner name: sized under the TIGHTER of its sleeves'
-                # slices so neither family exceeds its envelope (audit fix)
-                per_name = min(sleeve_budgets[f] for f in fams)
+                # dual-winner name: sized under the TIGHTER of its FUNDED
+                # sleeves' slices so no funded family exceeds its envelope
+                per_name = min(sleeve_budgets[f] for f in funded)
                 sleeve_cap = int(
                     (per_name / price_aud).to_integral_value(ROUND_FLOOR))
                 if sleeve_cap < 1:
                     raise _SkipMemo(
-                        f"{symbol}: {'/'.join(fams)} sleeve envelope full — "
+                        f"{symbol}: {'/'.join(funded)} sleeve envelope full — "
                         f"per-name budget A${per_name:.2f} buys no whole share "
                         f"at A${price_aud:.2f} (ADR-0014)")
             res: ProposalResult = build_proposal(
