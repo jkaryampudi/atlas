@@ -83,6 +83,9 @@ STRATEGY_FAMILY = "xsmom-pit-tr"        # the ADR-0010 signed row
 VENDOR_SOURCE = "EodhdAdapter"          # same vendor-bar discipline as the desk
 UNIVERSE_TYPES = ("stock", "adr")       # US single names (module docstring)
 SIGNAL_STATES = ("paper", "live")       # states whose signals are operational
+SLEEVE_MAX_NAMES = 5                    # live-sleeve cap (Principal 2026-07-16): a
+                                        # 10% sleeve / decile is sub-min at A$100k
+                                        # NAV, so trade only the top-5 by rank
 WINDOW = LOOKBACK + 1                   # 253 sessions ending at t (contiguity)
 _SKIP_IDX = WINDOW - 1 - SKIP           # index of t-SKIP inside the window
 # ~550 calendar days always cover 253 US sessions (365 days ≈ 252 sessions)
@@ -327,7 +330,14 @@ def active_signal_symbols(session: Session, clock: Clock) -> list[str]:
         "  AND NOT EXISTS (SELECT 1 FROM trading.trade_proposals tp "
         "                  WHERE tp.instrument_id = s.instrument_id "
         "                    AND tp.expires_at > :now) "
-        "ORDER BY s.rank, i.symbol"), {"on": on, "now": now}).all()
+        # ADR-0014 + §4 MIN_POSITION_AUD at the current NAV: a 10% sleeve split
+        # across the full winner decile is ~A$1,000/name, below the A$2,000
+        # minimum, so the LIVE sleeve trades only its top-SLEEVE_MAX_NAMES by
+        # rank (rank is per-strategy). The strategy stays validated on the full
+        # decile; this caps only what deploys. (Principal decision 2026-07-16.)
+        "  AND s.rank <= :maxn "
+        "ORDER BY s.rank, i.symbol"),
+        {"on": on, "now": now, "maxn": SLEEVE_MAX_NAMES}).all()
     return list(dict.fromkeys(str(r.symbol) for r in rows))
 
 

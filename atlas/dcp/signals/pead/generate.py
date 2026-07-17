@@ -95,6 +95,8 @@ from atlas.dcp.signals.xsmom.generate import (
 STRATEGY_FAMILY = "pead-sue-tr"          # the ADR-0013 signed row
 VENDOR_SOURCE = "EodhdAdapter"           # same vendor discipline as the desk
 UNIVERSE_TYPES = ("stock", "adr")        # US single names + India ADRs (ADR-0007)
+SLEEVE_MAX_NAMES = 5                     # live-sleeve cap (Principal 2026-07-16):
+                                         # top-5 by rank keeps each ~A$2,000 (§4 min)
 VARIANT = "sue"                          # primary signal (surprise_pct is a cross-check)
 # The panel calendar spans this many calendar days ending at the signal session.
 # It must be comfortably longer than STALENESS_SESSIONS so that (a) every
@@ -325,8 +327,11 @@ def active_pead_signal_symbols(session: Session, clock: Clock) -> list[str]:
         "  AND NOT EXISTS (SELECT 1 FROM trading.trade_proposals tp "
         "                  WHERE tp.instrument_id = s.instrument_id "
         "                    AND tp.expires_at > :now) "
+        # live-sleeve top-N cap (Principal 2026-07-16) — see xsmom generate.py
+        "  AND s.rank <= :maxn "
         "ORDER BY s.rank, i.symbol"),
-        {"fam": STRATEGY_FAMILY, "on": on, "now": now}).all()
+        {"fam": STRATEGY_FAMILY, "on": on, "now": now,
+         "maxn": SLEEVE_MAX_NAMES}).all()
     return list(dict.fromkeys(str(r.symbol) for r in rows))
 
 
