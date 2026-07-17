@@ -114,10 +114,11 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-        "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals",
+        "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
         "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
-    # no approved strategy in this fixture: both ADR-0010 nodes idle honestly
+    # no approved strategy in this fixture: the ADR-0010 nodes idle honestly
     assert results["t5b_bands"] == "bands idle (no banded strategy)"
+    assert results["t5c_cusum"] == "cusum idle (no banded strategy)"
     assert results["t6b_signals"] == ("signals idle (no paper/live "
                                       "xsmom-pit-tr strategy)")
     assert results["t6c_pead_signals"] == ("pead signals idle (no paper/live "
@@ -231,6 +232,32 @@ def test_pead_signal_failure_is_fail_soft(clean_audit, monkeypatch):
     assert n_ex == 1                                          # only the entry fill
 
 
+def test_cusum_failure_is_fail_soft(clean_audit, monkeypatch):
+    """t5c CUSUM is fail-soft exactly like t5b: a detector blow-up pages (the
+    node line records FAILED, t9 flags it) but the settled, protected book
+    stands, t5b's band enforcement is untouched, and every later node runs."""
+    import atlas.ops.daily as daily
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))  # entry fill only
+
+    def exploding_cusum(session, clk):
+        raise RuntimeError("cusum replay exploded")
+
+    monkeypatch.setattr(daily, "check_cusum", exploding_cusum)
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert results["t3_settle"] == "fills=1"                 # trading unaffected
+    assert results["t5b_bands"] == "bands idle (no banded strategy)"  # t5b intact
+    assert results["t5c_cusum"].startswith("cusum FAILED: cusum replay exploded")
+    assert "cusum FAILED" in results["t9_report"]
+    assert list(results.keys()) == NODES                     # every node ran
+    n_ex = s.execute(text("SELECT count(*) FROM trading.executions")).scalar()
+    assert n_ex == 1                                          # only the entry fill
+
+
 def test_desk_skipped_on_non_us_session_day(clean_audit):
     """2026-07-12 is a Sunday in UTC: the desk has nothing new to read, so it
     must not spend a cent — and must say so."""
@@ -257,7 +284,7 @@ def test_desk_skipped_on_non_us_session_day(clean_audit):
 REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
                "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
-         "t5_snapshot", "t5b_bands", "t6_reconcile", "t6b_signals",
+         "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
          "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
 
 
@@ -290,7 +317,7 @@ def test_mid_session_start_is_refused_before_the_checkpoint_exists(
 def test_refused_attempt_then_after_close_run_is_fresh_and_complete(clean_audit):
     """A refusal must not spend the day: the post-close invocation is a FRESH
     full run — every node truly executes (skipped nodes emit no
-    workflow.node.completed audit event, so 12 events = nothing was
+    workflow.node.completed audit event, so len(NODES) events = nothing was
     pre-consumed) and the day's checkpoint completes."""
     s = clean_audit
     _clean(s)

@@ -71,6 +71,7 @@ from sqlalchemy.orm import Session
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
 from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
+from atlas.dcp.learning.drift import CusumDetector
 from atlas.dcp.market_data.calendars import last_completed_session
 from atlas.dcp.market_data.total_return import (
     load_adjusted_dividends,
@@ -83,6 +84,8 @@ BENCHMARK = "SPY"
 EXCESS_SESSIONS = 126                    # ADR-0010: trailing 126-session excess
 DD_BAND_KEY = "max_drawdown_from_sleeve_peak"
 EXCESS_BAND_KEY = "trailing_126_session_excess_vs_spy_tr_pp"
+CUSUM_KEY = "cusum"                      # board item 7: derivation artifact block
+CUSUM_EVENT = "quant.strategy.cusum_breach"
 
 
 @dataclass(frozen=True)
@@ -311,3 +314,167 @@ def check_bands(session: Session, clock: Clock) -> BandReport:
             family=family, state=state, session=on, sleeve_value=value,
             peak=peak, drawdown=dd, excess_pp=excess, action=action))
     return BandReport(statuses=tuple(statuses))
+
+
+# ---------------------------------------------------------------------------
+# CUSUM drift early-warning (board item 7; t5c in the daily cycle)
+#
+# WHY THIS PAGES BUT NEVER DEMOTES (v1, deliberate): the two tolerance bands
+# above are the HARD STOP — signed demotion criteria (ADR-0010/0013) derived
+# tighten-only from the backtest's own record. CUSUM is a different animal:
+# an EARLY-WARNING statistic that accumulates small persistent live-vs-backtest
+# degradation long before either band can breach. No signed criterion says
+# "demote on 5 sigma of cumulative drift", and inventing one in code would be
+# exactly the silent-loosening/silent-tightening move the approval contract
+# forbids in both directions. So a latched CUSUM breach emits an audit event
+# and PAGES the Principal for review; demotion authority stays with the two
+# bands. Auto-demote-on-CUSUM requires its own signed ADR criterion first.
+#
+# Parameters come from the derivation artifact (band_derivation.py) stored in
+# tolerance_bands["cusum"]: the backtest's mean/sigma of DAILY strategy-minus-
+# SPY excess, with the classic k=0.5σ / h=5σ convention the committed
+# CusumDetector (dcp/learning/drift.py) documents. The detector is replayed
+# from the STORED sleeve series every run — no hidden state, deterministic on
+# re-run — and the breach latches within the replay (the detector is latching)
+# and across days (a prior cusum_breach audit event suppresses re-paging).
+# Strategies without a "cusum" block (provisional bands, pre-derivation) are
+# reported and skipped: the early-warning arrives WITH the derived contract.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CusumStatus:
+    family: str
+    state: str
+    session: date
+    observations: int                    # residuals replayed from stored rows
+    pos: float
+    neg: float
+    action: str                          # no-params | ok | breach | latched
+
+    def line(self) -> str:
+        if self.action == "no-params":
+            return f"{self.family}: cusum n/a (no params — provisional bands)"
+        return (f"{self.family}: cusum obs {self.observations} "
+                f"pos {self.pos:.2f} neg {self.neg:.2f} -> {self.action}")
+
+
+@dataclass(frozen=True)
+class CusumReport:
+    statuses: tuple[CusumStatus, ...] = ()
+
+    def summary(self) -> str:
+        if not self.statuses:
+            return "cusum idle (no banded strategy)"
+        return " · ".join(s.line() for s in self.statuses)
+
+
+def _cusum_params(family: str, bands: Any) -> tuple[float, float, float, float] | None:
+    """(k_sigma, h_sigma, mean, sigma) from tolerance_bands["cusum"], or None
+    when the block is absent (provisional bands — CUSUM arrives with the
+    derived contract). A PRESENT but malformed block raises: a derived
+    contract with a broken artifact is a governance breach, not a skip."""
+    if not isinstance(bands, dict) or CUSUM_KEY not in bands:
+        return None
+    block = bands[CUSUM_KEY]
+    try:
+        k = float(block["k_sigma"])
+        h = float(block["h_sigma"])
+        mu = float(block["mean_daily_excess"])
+        sigma = float(block["sigma_daily_excess"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise RuntimeError(f"{family} tolerance_bands.cusum is malformed "
+                           f"({e!r}) — refusing a broken derivation artifact "
+                           "(board item 7)") from e
+    if sigma <= 0 or h <= 0 or k < 0:
+        raise RuntimeError(f"{family} tolerance_bands.cusum has degenerate "
+                           f"parameters (k={k}, h={h}, sigma={sigma}) — "
+                           "refusing a broken derivation artifact")
+    return k, h, mu, sigma
+
+
+def _replay_cusum(session: Session, strategy_id: UUID, *, k: float, h: float,
+                  mu: float, sigma: float) -> tuple[CusumDetector, int]:
+    """Replay the detector over the stored non-NULL sleeve series (value AND
+    SPY TR present — the same stored-rows-only convention as the excess band;
+    a NULL-SPY gap simply contributes no residual)."""
+    rows = session.execute(text(
+        "SELECT sleeve_value, spy_tr_close FROM quant.sleeve_daily "
+        "WHERE strategy_id = :sid AND sleeve_value IS NOT NULL "
+        "  AND spy_tr_close IS NOT NULL ORDER BY session_date"),
+        {"sid": strategy_id}).all()
+    det = CusumDetector(k=k, h=h)
+    n = 0
+    prev: tuple[Decimal, Decimal] | None = None
+    for r in rows:
+        cur = (Decimal(r.sleeve_value), Decimal(r.spy_tr_close))
+        if prev is not None and prev[0] > 0 and prev[1] > 0:
+            residual = (float(cur[0] / prev[0] - 1)
+                        - float(cur[1] / prev[1] - 1) - mu) / sigma
+            det.update(residual)
+            n += 1
+        prev = cur
+    return det, n
+
+
+def check_cusum(session: Session, clock: Clock) -> CusumReport:
+    """Drift early-warning for every paper/live strategy carrying a derived
+    cusum block. A latched breach appends ONE quant.strategy.cusum_breach
+    audit event and pages at high priority; it NEVER changes strategy state
+    (see the module-section comment for the signed rationale). Deterministic
+    and idempotent: the replay reads only stored rows, and the audit event's
+    existence suppresses duplicate pages on later runs."""
+    on = last_completed_session("US", clock.now())
+    strategies = session.execute(text(
+        "SELECT id, family, state, tolerance_bands FROM quant.strategies "
+        "WHERE state IN ('paper','live') ORDER BY family, created_at")).all()
+
+    audit = PostgresAuditLog(session, clock)
+    statuses: list[CusumStatus] = []
+    for st in strategies:
+        strategy_id: UUID = st.id
+        family, state = str(st.family), str(st.state)
+        params = _cusum_params(family, st.tolerance_bands)
+        if params is None:
+            statuses.append(CusumStatus(
+                family=family, state=state, session=on, observations=0,
+                pos=0.0, neg=0.0, action="no-params"))
+            continue
+        k, h, mu, sigma = params
+        det, n = _replay_cusum(session, strategy_id, k=k, h=h, mu=mu,
+                               sigma=sigma)
+        if not det.breached:
+            action = "ok"
+        else:
+            already = session.execute(text(
+                "SELECT 1 FROM audit.decision_events "
+                "WHERE event_type = :et AND entity_id = :eid LIMIT 1"),
+                {"et": CUSUM_EVENT, "eid": str(strategy_id)}).first()
+            if already is not None:
+                action = "latched"       # paged once already; stay quiet
+            else:
+                payload = {"strategy_id": str(strategy_id), "family": family,
+                           "state": state, "session": on.isoformat(),
+                           "observations": n, "pos": det.pos, "neg": det.neg,
+                           "k_sigma": k, "h_sigma": h,
+                           "mean_daily_excess": mu,
+                           "sigma_daily_excess": sigma,
+                           "latching": True, "demoted": False,
+                           "action": "page-only — Principal review; demotion "
+                                     "authority stays with the tolerance "
+                                     "bands (no signed CUSUM-demote "
+                                     "criterion exists)"}
+                audit.append(event_type=CUSUM_EVENT, entity_type="strategy",
+                             entity_id=str(strategy_id), actor_type="dcp",
+                             actor_id="cusum_check", payload=payload)
+                notify(f"Atlas CUSUM drift: {family} live-vs-backtest breach",
+                       f"session {on}: cumulative drift crossed {h}σ "
+                       f"(pos {det.pos:.2f}, neg {det.neg:.2f}, obs {n}). "
+                       "EARLY WARNING — no demotion; Principal review "
+                       "required (demotion stays with the tolerance bands)",
+                       priority="high")
+                action = "breach"
+        statuses.append(CusumStatus(
+            family=family, state=state, session=on, observations=n,
+            pos=det.pos, neg=det.neg, action=action))
+    return CusumReport(statuses=tuple(statuses))

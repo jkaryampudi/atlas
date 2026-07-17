@@ -12,6 +12,13 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   demote a breaching paper strategy to 'suspended' (latching;
                   atlas/dcp/trading/bands.py). Fail-soft: a band-check failure
                   pages but never undoes the settled, protected book
+  T5c cusum       drift EARLY-WARNING (board item 7): replay the CUSUM
+                  detector over the stored sleeve series against the derived
+                  contract's parameters (tolerance_bands.cusum). A latched
+                  breach audits + PAGES for Principal review but NEVER
+                  demotes — demotion authority stays with the t5b bands
+                  (atlas/dcp/trading/bands.py check_cusum documents the
+                  signed rationale). Fail-soft exactly like t5b
   T6 reconcile    internal consistency: positions ≡ open lots, ledger cash
                   finite and NAV recomputable; writes trading.reconciliations
   T6b signals     xsmom paper-strategy signal generation (ADR-0010, migration
@@ -97,7 +104,7 @@ from atlas.dcp.signals.pead.generate import (
     generate_pead_signals,
 )
 from atlas.dcp.signals.xsmom.generate import active_signal_symbols, generate_signals
-from atlas.dcp.trading.bands import check_bands
+from atlas.dcp.trading.bands import check_bands, check_cusum
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
@@ -331,6 +338,19 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["bands"] = report
         return report.summary()
 
+    def t5c_cusum() -> str:
+        # Drift early-warning (board item 7): pages, never demotes — see
+        # bands.check_cusum for the signed rationale. Fail-soft exactly like
+        # t5b: the book is already settled and protected; a SQL failure that
+        # aborts the transaction still kills the run (same caveat).
+        try:
+            report = check_cusum(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["cusum_failed"] = True
+            return f"cusum FAILED: {e}"[:300]
+        state["cusum"] = report
+        return report.summary()
+
     def t6_reconcile() -> str:
         return _reconcile(session, clock)
 
@@ -419,13 +439,15 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         signals_report = state.get("signals")
         pead_signals_report = state.get("pead_signals")
         bands_report = state.get("bands")
+        cusum_report = state.get("cusum")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
                   or bool(state.get("scorecard_failed", False))
                   or bool(state.get("signals_failed", False))
                   or bool(state.get("pead_signals_failed", False))
-                  or bool(state.get("bands_failed", False)))
+                  or bool(state.get("bands_failed", False))
+                  or bool(state.get("cusum_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
@@ -434,6 +456,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  pead_signals_report.summary() if pead_signals_report is not None
                  else "pead signals idle",
                  bands_report.summary() if bands_report is not None else "bands idle",
+                 cusum_report.summary() if cusum_report is not None else "cusum idle",
                  scorecard_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
@@ -447,6 +470,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("pead signals FAILED — see log")
         if state.get("bands_failed"):
             lines.append("bands FAILED — see log")
+        if state.get("cusum_failed"):
+            lines.append("cusum FAILED — see log")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -482,6 +507,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t4_stops", t4_stops),
         Node("t5_snapshot", t5_snapshot),
         Node("t5b_bands", t5b_bands),
+        Node("t5c_cusum", t5c_cusum),
         Node("t6_reconcile", t6_reconcile),
         Node("t6b_signals", t6b_signals),
         Node("t6c_pead_signals", t6c_pead_signals),
@@ -531,7 +557,8 @@ def main() -> None:
               or "bridge FAILED" in (results.get("t8_bridge") or "")
               or "signals FAILED" in (results.get("t6b_signals") or "")
               or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
-              or "bands FAILED" in (results.get("t5b_bands") or ""))
+              or "bands FAILED" in (results.get("t5b_bands") or "")
+              or "cusum FAILED" in (results.get("t5c_cusum") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 
