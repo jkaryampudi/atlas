@@ -213,21 +213,28 @@ def _signal_ref_uuids(refs: list[str]) -> list[uuid.UUID]:
     return out
 
 
-def _sleeve_family(session: Session, signal_uuids: list[uuid.UUID]) -> str | None:
-    """The signed-sleeve FAMILY a memo's signal UUIDs belong to, or None. The
-    attribution join is the one bands.py uses — a signal id maps to its
-    strategy's family — restricted to the paper/live sleeves that carry a
-    budget. Deterministic on the rare overlap (a name that is BOTH a momentum
-    and a PEAD winner): the alphabetically-first family wins."""
+def _sleeve_families(session: Session, signal_uuids: list[uuid.UUID]) -> list[str]:
+    """EVERY signed-sleeve family a memo's signal UUIDs belong to (sorted), or
+    []. The attribution join is the one bands.py and _sleeve_committed_aud use —
+    a signal id maps to its strategy's family — restricted to the paper/live
+    sleeves that carry a budget.
+
+    ALL families, not LIMIT 1 (audit 2026-07-17): a dual-winner name (both a
+    momentum and a PEAD top-5) is a member of BOTH sleeves under the intersect
+    attribution rule, so it must occupy a budget slot in both and be sized
+    under the TIGHTER slice — attributing it to one family let the other
+    deploy its full envelope while still carrying the shared name's exposure
+    (a breach of the signed 10%). The shared name eating a slot in each sleeve
+    under-deploys the aggregate slightly: conservative, never over."""
     if not signal_uuids:
-        return None
-    row = session.execute(text(
-        "SELECT st.family FROM quant.signals s "
+        return []
+    rows = session.execute(text(
+        "SELECT DISTINCT st.family FROM quant.signals s "
         "JOIN quant.strategies st ON st.id = s.strategy_id "
         "WHERE s.id = ANY(:ids) AND st.state IN ('paper','live') "
-        "  AND st.family = ANY(:fams) ORDER BY st.family LIMIT 1"),
-        {"ids": signal_uuids, "fams": list(SLEEVE_BUDGET_FRACTION)}).first()
-    return str(row.family) if row is not None else None
+        "  AND st.family = ANY(:fams) ORDER BY st.family"),
+        {"ids": signal_uuids, "fams": list(SLEEVE_BUDGET_FRACTION)}).all()
+    return [str(r.family) for r in rows]
 
 
 def _sleeve_committed_aud(session: Session, family: str, on: date) -> Decimal:
@@ -282,9 +289,8 @@ def _sleeve_name_budgets(session: Session, clock: Clock,
     counts: dict[str, int] = {}
     for memo in candidates:
         refs = [r for r in memo.evidence_refs if isinstance(r, str) and r]
-        fam = _sleeve_family(session, _signal_ref_uuids(refs))
-        if fam is not None:
-            counts[fam] = counts.get(fam, 0) + 1
+        for fam in _sleeve_families(session, _signal_ref_uuids(refs)):
+            counts[fam] = counts.get(fam, 0) + 1   # dual name: a slot in EACH
     if not counts:
         return {}
     nav = _build_book(session, clock).state.nav_aud
@@ -415,17 +421,19 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
             # non-sleeve memos are sized by risk alone (cap None). A full
             # envelope (< 1 share fits) is an honest recorded skip.
             sleeve_cap: int | None = None
-            fam = _sleeve_family(session, _signal_ref_uuids(refs))
-            if fam is not None:
+            fams = _sleeve_families(session, _signal_ref_uuids(refs))
+            if fams:
                 price_aud = entry * fx_to_aud(session, inst.currency, now.date())
-                per_name = sleeve_budgets[fam]
+                # dual-winner name: sized under the TIGHTER of its sleeves'
+                # slices so neither family exceeds its envelope (audit fix)
+                per_name = min(sleeve_budgets[f] for f in fams)
                 sleeve_cap = int(
                     (per_name / price_aud).to_integral_value(ROUND_FLOOR))
                 if sleeve_cap < 1:
                     raise _SkipMemo(
-                        f"{symbol}: {fam} sleeve envelope full — per-name budget "
-                        f"A${per_name:.2f} buys no whole share at A${price_aud:.2f} "
-                        "(ADR-0014)")
+                        f"{symbol}: {'/'.join(fams)} sleeve envelope full — "
+                        f"per-name budget A${per_name:.2f} buys no whole share "
+                        f"at A${price_aud:.2f} (ADR-0014)")
             res: ProposalResult = build_proposal(
                 session, clock, memo_id=memo_id, symbol=symbol,
                 signal_refs=list(dict.fromkeys(signal_ids.values())),

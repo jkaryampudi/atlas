@@ -285,3 +285,45 @@ def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit):
     # the two sleeves are separate envelopes: 10% + 10% = the signed 20% satellite
     assert SLEEVE_BUDGET_FRACTION["xsmom-pit-tr"] == Decimal("0.10")
     assert SLEEVE_BUDGET_FRACTION["pead-sue-tr"] == Decimal("0.10")
+
+
+def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audit):
+    """Audit fix (2026-07-17): a name that is BOTH a momentum and a PEAD winner
+    carries both signal refs on ONE memo. It must occupy a budget slot in EACH
+    sleeve and be sized under the TIGHTER slice — under the intersect
+    attribution rule (signal_ids && sleeve ids, the rule committed/bands use)
+    NEITHER family's attributed exposure may exceed its 10% envelope. The old
+    LIMIT-1 attribution let the tie-break-losing family reach ~12%."""
+    s = clean_audit
+    _seed(s)
+    mom = _strategy(s, "xsmom-pit-tr")
+    pead = _strategy(s, "pead-sue-tr")
+    # one pure momentum name, one pure PEAD name, and the dual winner ZSLVX
+    _sleeve_name(s, FrozenClock(T0), mom, "xsmom-pit-tr", "ZSLVM0", 100)
+    _sleeve_name(s, FrozenClock(T0), pead, "pead-sue-tr", "ZSLVP0", 100)
+    iid = _instrument(s, "ZSLVX")
+    _ohlc(s, iid, 100)
+    sig_m = _signal(s, mom, iid)
+    sig_p = _signal(s, pead, iid)
+    _memo(s, FrozenClock(T0), "ZSLVX",
+          [f"dcp:signal:xsmom:{sig_m}:{SIG_DATE}",
+           f"dcp:signal:pead:{sig_p}:{SIG_DATE}", BARS_REF])
+
+    report = bridge_memos(s, FrozenClock(T0))
+    assert len(report.built) == 3 and all(b.verdict == "PASS" for b in report.built)
+    props = _proposals(s)
+
+    # each family counts TWO slots (its pure name + the dual name): per-name
+    # slice = 10000/2 = A$5,000 -> 50 shares each at entry 100
+    assert int(props["ZSLVM0"].position_size) == 50
+    assert int(props["ZSLVP0"].position_size) == 50
+    assert int(props["ZSLVX"].position_size) == 50
+    # intersect-rule attributed exposure per family = pure + dual = A$10,000
+    # exactly the envelope; the dual name serves BOTH (aggregate deploy 15k,
+    # not 20k — conservative under-deploy, never a breach)
+    mom_attrib = (Decimal(props["ZSLVM0"].position_value_aud)
+                  + Decimal(props["ZSLVX"].position_value_aud))
+    pead_attrib = (Decimal(props["ZSLVP0"].position_value_aud)
+                   + Decimal(props["ZSLVX"].position_value_aud))
+    assert mom_attrib == SLEEVE_AUD
+    assert pead_attrib == SLEEVE_AUD

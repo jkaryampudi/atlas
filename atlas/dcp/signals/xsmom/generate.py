@@ -325,7 +325,8 @@ def active_signal_symbols(session: Session, clock: Clock) -> list[str]:
         "SELECT i.symbol FROM quant.signals s "
         "JOIN quant.strategies st ON st.id = s.strategy_id "
         "JOIN market.instruments i ON i.id = s.instrument_id "
-        "WHERE st.state IN ('paper','live') AND i.is_active "
+        "WHERE st.family = :fam "
+        "  AND st.state IN ('paper','live') AND i.is_active "
         "  AND s.signal_date <= :on AND s.valid_until >= :on "
         "  AND NOT EXISTS (SELECT 1 FROM trading.trade_proposals tp "
         "                  WHERE tp.instrument_id = s.instrument_id "
@@ -337,7 +338,8 @@ def active_signal_symbols(session: Session, clock: Clock) -> list[str]:
         # decile; this caps only what deploys. (Principal decision 2026-07-16.)
         "  AND s.rank <= :maxn "
         "ORDER BY s.rank, i.symbol"),
-        {"on": on, "now": now, "maxn": SLEEVE_MAX_NAMES}).all()
+        {"on": on, "now": now, "maxn": SLEEVE_MAX_NAMES,
+         "fam": STRATEGY_FAMILY}).all()
     return list(dict.fromkeys(str(r.symbol) for r in rows))
 
 
@@ -361,10 +363,14 @@ def extract_signal_evidence(session: Session, symbol: str, *,
         "FROM quant.signals s "
         "JOIN quant.strategies st ON st.id = s.strategy_id "
         "JOIN market.instruments i ON i.id = s.instrument_id "
-        "WHERE i.symbol = :sym AND st.state IN ('paper','live') "
+        # family filter (audit 2026-07-17): quant.signals now holds SEVERAL
+        # strategies' signals; without it, a later-dated PEAD row would render
+        # here as a fabricated '12-1 momentum winner' with SUE*100 as a return.
+        "WHERE i.symbol = :sym AND st.family = :fam "
+        "  AND st.state IN ('paper','live') "
         "  AND s.signal_date <= :on AND s.valid_until >= :on "
         "ORDER BY s.signal_date DESC, s.rank LIMIT 1"),
-        {"sym": symbol, "on": on}).first()
+        {"sym": symbol, "on": on, "fam": STRATEGY_FAMILY}).first()
     if row is None:
         return None
     ret_pct = float(row.formation_return) * 100
