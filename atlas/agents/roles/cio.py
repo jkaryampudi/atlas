@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.agents.roles.debate import DebateResult
+from atlas.agents.roles.specialists import SpecialistPanel
 from atlas.agents.runtime.llm import LlmClient
 from atlas.agents.runtime.runner import run_agent
 from atlas.agents.runtime.untrusted import wrap_untrusted
@@ -19,6 +20,7 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
                    evidence: list[tuple[str, str]] | None = None,
                    news: list[tuple[str, str]] | None = None,
                    debate: DebateResult | None = None,
+                   specialists: SpecialistPanel | None = None,
                    source: str | None = None) -> CommitteeMemo:
     """`source` (migration 0017) is the external-origin tag for on-demand
     analyses (e.g. 'investing.com'); None = the desk's own work. It is
@@ -35,6 +37,10 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
         parts.append(wrap_untrusted(f"news:{src}", body))
     if debate is not None:
         parts.append(debate.summary_context())
+    if specialists is not None:
+        # rendered AFTER the debate, like the debate: advisory analysis the
+        # CIO weighs; absences are stated honestly (ADR-0011 step 2)
+        parts.append(specialists.summary_context())
     memo, run_id = run_agent(
         session=session, audit=audit, client=client, agent_role="cio",
         template_rel_path="cio/committee_memo.md", context="\n\n".join(parts),
@@ -80,4 +86,18 @@ def committee_memo(*, session: Session, audit: PostgresAuditLog, client: LlmClie
                                 ("bear", debate.bear),
                                 ("bull_rebuttal", debate.bull_rebuttal),
                                 ("bear_rebuttal", debate.bear_rebuttal))])
+    # Specialist provenance (migration 0025, ADR-0011 step 2): each VALIDATED
+    # SpecialistAssessment persisted verbatim with the memo it informed — same
+    # transaction, same provenance-not-cache rationale as memo_debate above.
+    # An ABSENT specialist (fail-soft: cage kill, transport death, or an empty
+    # lane) persists NO row: the table records what the CIO actually read, and
+    # the absence itself is already honest in the memo's rendered context and
+    # in the failed run's own agent_runs/audit rows. A cage-failed memo never
+    # reaches this line, so no memo means no specialist rows.
+    if specialists is not None and specialists.assessments:
+        session.execute(text(
+            "INSERT INTO research.memo_specialists (memo_id, role, payload) "
+            "VALUES (:m, :role, CAST(:p AS jsonb))"),
+            [{"m": memo_id, "role": role, "p": json.dumps(a.model_dump())}
+             for role, a in specialists.assessments.items()])
     return memo

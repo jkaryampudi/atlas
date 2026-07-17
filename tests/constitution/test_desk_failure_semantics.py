@@ -168,7 +168,9 @@ def desk_stubs(monkeypatch):
         return SimpleNamespace(kind="debate", symbol=symbol)
 
     def fake_committee_memo(*, session, audit, client, symbol, question,
-                            evidence, debate, source=None):
+                            evidence, debate, specialists=None, source=None):
+        # specialists (ADR-0011 step 2) is None here: the stub evidence has no
+        # dcp:signal: block, so the desk's signal-lane gate skips the panel
         return SimpleNamespace(recommendation="WATCHLIST", conviction="LOW")
 
     monkeypatch.setattr(desk_mod, "build_evidence", fake_build_evidence)

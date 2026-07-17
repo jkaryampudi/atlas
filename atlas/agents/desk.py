@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 from atlas.agents.live_run import build_evidence
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import run_debate
+from atlas.agents.roles.specialists import has_signal_block, run_specialists
 from atlas.agents.runtime.budget import BudgetExhausted
 from atlas.agents.runtime.registry import build_client
 from atlas.agents.runtime.runner import (
@@ -120,10 +121,31 @@ def run_desk(session: Session, clock: Clock, symbols: list[str],
             try:
                 debate = run_debate(session=session, audit=audit,
                                     symbol=symbol, evidence=evidence)
+                # Specialist panel (ADR-0011 step 2): AFTER the debate, BEFORE
+                # the CIO — and ONLY for signal-lane names (evidence carries a
+                # dcp:signal: block, i.e. names that could become BUYs).
+                # Scanner-only names skip the panel to protect the budget.
+                #
+                # BUDGET ARITHMETIC (honest, reviewed — do NOT raise any cap):
+                # the desk spends ~$0.23/name across ~5 calls today, so one
+                # call is ~$0.03-0.05; the panel adds 3 calls/signal-name at
+                # max_tokens=1200 (< the debate's 2500) ≈ +$0.10-0.15/name.
+                # The shortlist is top-5 momentum + top-5 PEAD (+ scanner 5),
+                # so ≈10 signal-lane names/night ≈ +$1.2 on top of ~$2.5 —
+                # ~$3.7, inside the $6 NIGHTLY sub-cap (ATLAS_BUDGET_NIGHTLY)
+                # with the global $10 breaker above it. The worst case is
+                # already handled: BudgetExhausted from any specialist call
+                # propagates here (specialists are fail-soft for cage and
+                # transport failures ONLY, never for the breaker) and takes
+                # the hold-and-halt path below.
+                panel = (run_specialists(session=session, audit=audit,
+                                         symbol=symbol, evidence=evidence)
+                         if has_signal_block(evidence) else None)
                 memo = committee_memo(session=session, audit=audit,
                                       client=build_client("cio"), symbol=symbol,
                                       question=question, evidence=evidence,
-                                      debate=debate, source=source)
+                                      debate=debate, specialists=panel,
+                                      source=source)
                 memos.append(DeskMemo(symbol=symbol,
                                       recommendation=memo.recommendation,
                                       conviction=memo.conviction))
