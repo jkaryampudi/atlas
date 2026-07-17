@@ -171,13 +171,22 @@ def _debate_from_rows(rows: dict[str, dict[str, object]]) -> DebateView | None:
 
 
 def load_db_bundles(session: Session, *, since: str | None,
-                    limit: int) -> list[MemoBundle]:
-    """Committee memos as persisted, most recent first. Pure SELECTs."""
+                    limit: int,
+                    memo_ids: Sequence[str] | None = None) -> list[MemoBundle]:
+    """Committee memos as persisted, most recent first. Pure SELECTs.
+
+    `memo_ids` restricts the load to an explicit cohort (shadow model
+    comparison: the incumbent side is exactly the memos being re-run) while
+    keeping every column mapping in ONE tested place — finding #18 taught
+    that a duplicated read path is where a thesis<->dissent swap hides."""
     where = "m.memo_type = 'committee'"
     params: dict[str, object] = {"limit": limit}
     if since is not None:
         where += " AND m.created_at >= CAST(:since AS timestamptz)"
         params["since"] = since
+    if memo_ids is not None:
+        where += " AND CAST(m.id AS text) = ANY(:ids)"
+        params["ids"] = [str(i) for i in memo_ids]
     memo_rows = session.execute(text(
         f"SELECT m.id, m.instrument_symbol, m.recommendation, m.conviction, "
         f"       m.thesis, m.kill_criteria, m.evidence_refs, m.dissent, "
