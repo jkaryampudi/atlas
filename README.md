@@ -8,7 +8,10 @@ signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
 
 - **P1 data plane**: EODHD All-In-One, deep backfill 2010→2026, 693 instruments,
   exchange calendars, FX, dividends (total-return capable), earnings calendar,
-  quality gates, nightly incremental ingest.
+  quality gates, nightly incremental ingest; estimate-revisions forward archive
+  (`market.estimate_snapshots`, migration 0028 — append-only daily PIT snapshots
+  of the vendor-overwritten Earnings::Trend consensus, the ADR-0011 forward-
+  paper-trial prerequisite; research-usable after ~6 months of accrual).
 - **P2 agents**: 5 roles + bull/bear debate (per-side model routing, all four
   cases persisted), grounding cage (token-boundary, fail-closed), budget
   sub-caps, red-team suite; committee memos graded by a scorecard (vs SPY at

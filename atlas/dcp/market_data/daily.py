@@ -41,6 +41,17 @@ instrument whose stored calendar is stale (> earnings.STALE_DAYS) or absent
 gets one window refresh, fail-soft per instrument, counts in the report and
 the audit payload. Mechanics (window, supersede-on-refresh, closed-vocabulary
 timing flag) live in market_data/earnings.py.
+
+Estimate-snapshot step (LAST, after earnings): the ADR-0011 forward archive —
+one append-only Earnings::Trend consensus snapshot per ACTIVE US single name
+per session, DAILY cadence (the vendor overwrites this block in place, so a
+missed day is lost forever — deliberately not on the fundamentals step's
+weekly staleness throttle, which is also why it re-fetches the document the
+fundamentals step may have fetched tonight). Gated by the once-daily guard
+(a cycle re-run/replay skips idempotently), fail-soft per instrument, counts
+in the report and the audit payload. Running last + per-instrument fail-soft
+means a vendor failure here can never affect bars/FX/fundamentals/earnings.
+Mechanics live in market_data/estimate_snapshots.py.
 """
 from __future__ import annotations
 
@@ -62,6 +73,9 @@ from atlas.dcp.market_data.calendars import (is_trading_day, last_completed_sess
                                               local_date, previous_trading_day,
                                               trading_days_between)
 from atlas.dcp.market_data.earnings import EarningsDaily, refresh_earnings
+from atlas.dcp.market_data.estimate_snapshots import (EstimateSnapshotDaily,
+                                                       snapshot_estimates,
+                                                       universe_symbols)
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
 from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_split,
                                           upsert_bar, write_gate)
@@ -110,6 +124,7 @@ class DailyIngestReport:
     fx: dict[str, FxPairDaily]
     fundamentals: FundamentalsDaily
     earnings: EarningsDaily
+    estimates: EstimateSnapshotDaily  # ADR-0011 forward archive (daily, guarded)
     failures: tuple[str, ...]  # vendor failures + required FX pairs with no history
 
     @property
@@ -351,9 +366,14 @@ def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter,
     fx = _ingest_fx(session, adapter, now, failures)
     fundamentals = _refresh_fundamentals(session, adapter, now, failures)
     earnings = refresh_earnings(session, adapter, now, failures)
+    # ADR-0011 forward archive: last, once-daily-guarded, fail-soft — a vendor
+    # failure here is counted and alertable but cannot touch the steps above
+    estimates = snapshot_estimates(session, adapter, universe_symbols(session),
+                                   now=now, failures=failures, once_daily=True)
 
     report = DailyIngestReport(markets=results, fx=fx, fundamentals=fundamentals,
-                               earnings=earnings, failures=tuple(failures))
+                               earnings=earnings, estimates=estimates,
+                               failures=tuple(failures))
     PostgresAuditLog(session, clock).append(
         event_type="market.daily_ingest.completed", entity_type="market",
         entity_id=",".join(markets), actor_type="scheduler", actor_id="daily_ingest",
@@ -373,7 +393,12 @@ def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter,
                                   "failed": list(fundamentals.failed)},
                  "earnings": {"fetched": list(earnings.fetched),
                               "fresh": list(earnings.fresh),
-                              "failed": list(earnings.failed)}})
+                              "failed": list(earnings.failed)},
+                 "estimates": {"skipped": estimates.skipped,
+                               "fetched": list(estimates.fetched),
+                               "empty": list(estimates.empty),
+                               "failed": list(estimates.failed),
+                               "rows_stored": estimates.stored}})
     return report
 
 
@@ -415,6 +440,13 @@ def main() -> None:
     print(f"earnings: {len(earn.fetched)} fetched, {len(earn.fresh)} fresh, "
           f"{len(earn.failed)} failed"
           + (f" ({list(earn.failed)})" if earn.failed else ""))
+    est = report.estimates
+    if est.skipped:
+        print("estimates: session already snapshot — once-daily guard skipped")
+    else:
+        print(f"estimates: {len(est.fetched)} fetched ({est.stored} new rows), "
+              f"{len(est.empty)} empty, {len(est.failed)} failed"
+              + (f" ({list(est.failed)})" if est.failed else ""))
     for msg in report.failures:
         print(f"FAILURE: {msg}")
     print("daily ingest via " + type(adapter).__name__ + ": "
