@@ -299,6 +299,9 @@
       <div class="card" style="overflow-x:auto" id="orders-table"><div class="quiet">awaiting data</div></div>
       <h2>Decided</h2>
       <div class="card" style="overflow-x:auto" id="decided-list"><div class="quiet">awaiting data</div></div>
+      <h2>Attribution — Core (Beta) vs Satellite (Alpha)</h2>
+      <div class="note">ADR-0012 consequence 4 — the book decomposed per session so the scorecard measures what the active strategies add over simply holding the index. Core graded vs the signed 55:15 SPY/INDA total-return blend; satellite sleeves and total vs SPY TR; cash vs 0. Returns are flow-adjusted (a fill is capital moving, never performance).</div>
+      <div class="card" style="overflow-x:auto" id="sleeve-attribution"><div class="quiet">awaiting data</div></div>
     </section>
 
     <!-- MARKET -->
@@ -1540,11 +1543,61 @@ async function renderAttribution(){
 }
 document.getElementById("attr-month").addEventListener("change", ()=>renderAttribution());
 
+/* ---------- sleeve attribution — core (beta) vs satellite (alpha) ---------- */
+/* ADR-0012 consequence 4 (reporting.attribution_daily): per-sleeve cumulative
+   compounded return vs its benchmark over the sessions where BOTH legs exist,
+   plus the honest alpha number. Exact strings from the API; null renders dim
+   n/a — never a fabricated figure. */
+async function renderSleeveAttribution(){
+  const el = document.getElementById("sleeve-attribution");
+  const r = await get("/v1/portfolio/attribution/daily");
+  if(r.err) return deg(el, r.err);
+  const d = r.data;
+  if(!d.rows.length){
+    el.innerHTML = `<div class="quiet">no attribution sessions yet — the series accrues from the first snapshot</div>`;
+    return good(el);
+  }
+  const na = `<span style="color:var(--faint)">n/a</span>`;
+  const pctS = v => v==null ? na
+    : `<span class="${+v<0?"num-neg":"num-pos"}">${esc((+v>0?"+":"")+(+v).toFixed(2))}%</span>`;
+  const ppS = v => v==null ? na
+    : `<span class="${+v<0?"num-neg":"num-pos"}">${esc((+v>0?"+":"")+(+v).toFixed(2))} pp</span>`;
+  const lastDate = d.rows[d.rows.length-1].session_date;
+  const latest = Object.fromEntries(
+    d.rows.filter(x=>x.session_date===lastDate).map(x=>[x.sleeve, x]));
+  const BENCH = {core:"55:15 SPY/INDA TR", xsmom:"SPY TR", pead:"SPY TR",
+                 cash:"0", total:"SPY TR"};
+  const money = v => v==null ? "—" : `A$${(+v).toLocaleString("en-AU",{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  const rows = ["core","xsmom","pead","cash","total"].map(s=>{
+    const c = d.cumulative[s] || {};
+    const v = latest[s];
+    return `<tr${s==="total"?' style="border-top:1px solid var(--line-strong)"':""}>
+      <td>${esc(s.toUpperCase())}<span style="color:var(--faint)"> vs ${esc(BENCH[s])}</span></td>
+      <td>${esc(money(v && v.value_aud))}</td>
+      <td>${pctS(c.ret_pct)}</td><td>${pctS(c.benchmark_pct)}</td>
+      <td>${ppS(c.excess_pp)}</td>
+      <td style="color:var(--faint)">${esc(c.sessions ?? 0)} session(s)</td></tr>`;
+  }).join("");
+  const alpha = d.satellite_alpha_pp;
+  el.innerHTML = `<table>
+    <tr><th>SLEEVE</th><th>VALUE (${esc(lastDate)})</th><th>CUM RETURN</th>
+      <th>BENCHMARK</th><th>EXCESS</th><th></th></tr>
+    ${rows}
+  </table>
+  <div style="margin-top:10px;font-family:var(--mono);font-size:11.5px;letter-spacing:0.06em">
+    SATELLITE ALPHA vs HOLDING THE INDEX: ${alpha==null ? na
+      : `<span class="${+alpha<0?"num-neg":"num-pos"}">${esc((+alpha>0?"+":"")+(+alpha).toFixed(2))} pp</span>`}
+    <span style="color:var(--faint)"> — compounded satellite minus compounded SPY TR, cumulative since inception</span>
+  </div>`;
+  good(el);
+}
+
 /* ---------- refresh loop ---------- */
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
-                   renderJobs, renderAttribution, renderStrategy, renderTrading,
+                   renderJobs, renderAttribution, renderSleeveAttribution,
+                   renderStrategy, renderTrading,
                    renderResearch, renderScorecard, renderProgress, renderRuns,
                    renderQuant, renderRisk, renderMarket];
 async function refreshAll(){

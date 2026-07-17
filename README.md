@@ -23,6 +23,13 @@ signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
   settlement→stops/exits→reconciliation; T0–T9 daily cycle (checkpointed,
   atomic per day) on an in-process scheduler; console at `/console` (port 8001)
   is the sole control surface; nightly backups.
+- **Attribution (ADR-0012 cons. 4 + Doc 04 §14)**: daily core(beta)/satellite
+  (alpha)/cash NAV decomposition (`reporting.attribution_daily`, migration
+  0027; flow-adjusted returns, SPY-TR / signed 55:15 blend benchmarks), t8b
+  cycle node, monthly report CLI (`python -m atlas.dcp.reporting.attribution`)
+  with the §14 shortfall standing line, `/v1/portfolio/attribution/daily` +
+  console card. Hand-derived golden pins; contributions sum to the NAV change
+  exactly.
 - **ADR-0010 (2026-07-13)**: `xsmom-pit-tr` (12-1 cross-sectional momentum,
   monthly, winner decile) approved for **paper** on regenerated artifacts —
   +737.31% vs SPY TR +593.89%, p=0.000, DSR 0.995, WF 4/4 — with caveats

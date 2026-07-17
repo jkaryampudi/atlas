@@ -87,6 +87,21 @@ EXCESS_BAND_KEY = "trailing_126_session_excess_vs_spy_tr_pp"
 CUSUM_KEY = "cusum"                      # board item 7: derivation artifact block
 CUSUM_EVENT = "quant.strategy.cusum_breach"
 
+# THE sleeve-attribution join (module docstring, stated once): a tax lot is in
+# a strategy's sleeve iff its execution's order's proposal carries any of the
+# strategy's quant.signals ids. Lifted to a constant (SQL byte-identical to
+# the original inline text) so reporting/attribution.py (ADR-0012 consequence
+# 4) composes its own SELECT over the SAME join instead of forking it —
+# behavior here is unchanged.
+SLEEVE_LOTS_JOIN = (
+    "FROM trading.tax_lots tl "
+    "JOIN trading.executions e ON e.id = tl.execution_id "
+    "JOIN trading.orders o ON o.id = e.order_id "
+    "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+    "JOIN market.instruments i ON i.id = tp.instrument_id "
+    "WHERE tp.signal_ids && ARRAY(SELECT id FROM quant.signals "
+    "                             WHERE strategy_id = :sid)")
+
 
 @dataclass(frozen=True)
 class StrategyBandStatus:
@@ -126,13 +141,7 @@ def _sleeve_lots(session: Session, strategy_id: UUID) -> tuple[
     rows = session.execute(text(
         "SELECT tp.instrument_id, i.currency, tl.qty, tl.cost_aud, "
         "       tl.proceeds_aud, tl.disposed_at "
-        "FROM trading.tax_lots tl "
-        "JOIN trading.executions e ON e.id = tl.execution_id "
-        "JOIN trading.orders o ON o.id = e.order_id "
-        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
-        "JOIN market.instruments i ON i.id = tp.instrument_id "
-        "WHERE tp.signal_ids && ARRAY(SELECT id FROM quant.signals "
-        "                             WHERE strategy_id = :sid)")
+        + SLEEVE_LOTS_JOIN)
         , {"sid": strategy_id}).all()
     open_lots: list[tuple[UUID, int, str]] = []
     realised = Decimal("0")

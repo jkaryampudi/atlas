@@ -47,6 +47,10 @@ def _clean(s) -> None:
     s.execute(text("DELETE FROM workflow.workflow_node_results "
                    "WHERE run_id LIKE 'daily-%'"))
     s.execute(text("DELETE FROM workflow.workflow_runs WHERE run_id LIKE 'daily-%'"))
+    # t8b attribution debris (0027): a leftover stored session from another
+    # suite would give this fixture's day-one decomposition a phantom
+    # predecessor and drift the t8b node line
+    s.execute(text("DELETE FROM reporting.attribution_daily"))
     # ADR-0010 wiring debris from the signal/band suites: without this, a
     # leftover paper strategy row makes t5b/t6b active and the exact node
     # strings below drift
@@ -115,7 +119,13 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
         "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
-        "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
+        "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
+        "t9_report"]
+    # first stored session: values land, returns honestly n/a (two
+    # observations needed), nothing fabricated
+    assert results["t8b_attribution"] == (
+        "attribution: core n/a vs blend n/a · satellite n/a vs SPY n/a "
+        "· alpha n/a cumulative")
     # no approved strategy in this fixture: the ADR-0010 nodes idle honestly
     assert results["t5b_bands"] == "bands idle (no banded strategy)"
     assert results["t5c_cusum"] == "cusum idle (no banded strategy)"
@@ -258,6 +268,37 @@ def test_cusum_failure_is_fail_soft(clean_audit, monkeypatch):
     assert n_ex == 1                                          # only the entry fill
 
 
+def test_attribution_failure_is_fail_soft(clean_audit, monkeypatch):
+    """t8b attribution is fail-soft exactly like t5b/t5c: a decomposition
+    blow-up pages (the node line records FAILED, t9 flags it) but the settled,
+    protected book stands and the run still completes every later node —
+    reporting can never take the book down with it."""
+    import atlas.ops.daily as daily
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))  # entry fill only
+
+    def exploding_attribution(session, clk):
+        raise RuntimeError("decomposition exploded")
+
+    monkeypatch.setattr(daily, "compute_attribution_day", exploding_attribution)
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert results["t3_settle"] == "fills=1"                 # trading unaffected
+    assert results["t6_reconcile"] == "clean"
+    assert results["t8b_attribution"].startswith(
+        "attribution FAILED: decomposition exploded")
+    assert "attribution FAILED" in results["t9_report"]
+    assert list(results.keys()) == NODES                     # every node ran
+    n_ex = s.execute(text("SELECT count(*) FROM trading.executions")).scalar()
+    assert n_ex == 1                                          # only the entry fill
+    # the failed node wrote nothing: the series is untouched
+    assert s.execute(text(
+        "SELECT count(*) FROM reporting.attribution_daily")).scalar() == 0
+
+
 def test_desk_skipped_on_non_us_session_day(clean_audit):
     """2026-07-12 is a Sunday in UTC: the desk has nothing new to read, so it
     must not spend a cent — and must say so."""
@@ -285,7 +326,8 @@ REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
                "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
          "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
-         "t6c_pead_signals", "t7_desk", "t8_bridge", "t9_report"]
+         "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
+         "t9_report"]
 
 
 def test_mid_session_start_is_refused_before_the_checkpoint_exists(

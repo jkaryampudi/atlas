@@ -49,7 +49,15 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   manually-run desk's memos must still bridge next cycle; a
                   bridge failure pages exactly like a desk failure but never
                   undoes the prior steps
-  T9 report       summary incl. desk + bridge results -> audit + operator alert
+  T8b attribution daily core(beta)/satellite(alpha) NAV decomposition (ADR-0012
+                  consequence 4, Doc 04 §14 substrate): upsert today's
+                  reporting.attribution_daily rows from the T5 snapshot
+                  (atlas/dcp/reporting/attribution.py — flow-adjusted returns,
+                  SPY-TR / 55:15-blend benchmarks). Fail-soft exactly like t5b:
+                  a failed decomposition pages, the settled and protected book
+                  stands, and t9 still reports
+  T9 report       summary incl. desk + bridge + attribution results -> audit +
+                  operator alert
 
 The run is checkpointed under run_id = daily-<date> (WorkflowRunner). The
 whole cycle runs in ONE transaction: an in-process node failure that is
@@ -97,6 +105,7 @@ from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
+from atlas.dcp.reporting.attribution import compute_attribution_day
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
 from atlas.dcp.signals.pead.generate import (
@@ -414,6 +423,22 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["bridge"] = report
         return report.summary()
 
+    def t8b_attribution() -> str:
+        # ADR-0012 consequence 4: decompose tonight's snapshot into core
+        # (beta) / satellite (alpha) / cash and upsert the daily rows.
+        # Fail-soft exactly like t5b — the book is already settled and
+        # protected; a SQL failure that aborts the transaction still kills
+        # the run (same caveat as the scanner's).
+        try:
+            report = compute_attribution_day(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["attribution_failed"] = True
+            return f"attribution FAILED: {e}"[:300]
+        if report is None:
+            return "attribution idle (no snapshot yet)"
+        state["attribution"] = report
+        return report.summary()
+
     def t9_report() -> str:
         # scorecard FIRST (memo outcomes mature on this cycle's freshly
         # ingested bars): fail-soft exactly like the desk/bridge — the failure
@@ -440,6 +465,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         pead_signals_report = state.get("pead_signals")
         bands_report = state.get("bands")
         cusum_report = state.get("cusum")
+        attribution_report = state.get("attribution")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
@@ -447,7 +473,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                   or bool(state.get("signals_failed", False))
                   or bool(state.get("pead_signals_failed", False))
                   or bool(state.get("bands_failed", False))
-                  or bool(state.get("cusum_failed", False)))
+                  or bool(state.get("cusum_failed", False))
+                  or bool(state.get("attribution_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
@@ -457,6 +484,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  else "pead signals idle",
                  bands_report.summary() if bands_report is not None else "bands idle",
                  cusum_report.summary() if cusum_report is not None else "cusum idle",
+                 attribution_report.summary() if attribution_report is not None
+                 else "attribution idle",
                  scorecard_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
@@ -472,6 +501,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("bands FAILED — see log")
         if state.get("cusum_failed"):
             lines.append("cusum FAILED — see log")
+        if state.get("attribution_failed"):
+            lines.append("attribution FAILED — see log")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -513,6 +544,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t6c_pead_signals", t6c_pead_signals),
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
+        Node("t8b_attribution", t8b_attribution),
         Node("t9_report", t9_report),
     ]
     return runner.run(f"daily-{day}", [Node(n.name, _live(n.name, n.fn))
@@ -558,7 +590,8 @@ def main() -> None:
               or "signals FAILED" in (results.get("t6b_signals") or "")
               or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
               or "bands FAILED" in (results.get("t5b_bands") or "")
-              or "cusum FAILED" in (results.get("t5c_cusum") or ""))
+              or "cusum FAILED" in (results.get("t5c_cusum") or "")
+              or "attribution FAILED" in (results.get("t8b_attribution") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 
