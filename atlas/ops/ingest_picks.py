@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -41,6 +42,32 @@ from atlas.dcp.research.source_picks import (
     source_edge_report,
 )
 from atlas.ops.analyze import _build_adapter, _prepare_data, _resolve_instrument
+from atlas.tools.backfill_gics import resolve_sector
+
+
+def _backfill_sector(session: Session, instrument_id: str) -> None:
+    """A pick on a non-S&P name comes in as an analysis-only instrument with no
+    GICS sector, so the feature snapshot would carry sector=None. Resolve it
+    from the fundamentals snapshot _prepare_data just fetched (General.GicSector
+    / General.Sector, the same closed mapping backfill_gics uses) and set it —
+    sector is a time-stable attribute, so this is data completeness, not
+    look-ahead. Idempotent: NEVER overwrites an existing sector."""
+    cur = session.execute(text(
+        "SELECT sector_gics FROM market.instruments WHERE id = :i"),
+        {"i": instrument_id}).scalar()
+    if cur and str(cur).strip():
+        return
+    payload = session.execute(text(
+        "SELECT payload FROM market.fundamentals WHERE instrument_id = :i "
+        "ORDER BY as_of DESC LIMIT 1"), {"i": instrument_id}).scalar()
+    if payload is None:
+        return
+    sector = resolve_sector(payload if isinstance(payload, dict) else json.loads(payload))
+    if sector:
+        session.execute(text(
+            "UPDATE market.instruments SET sector_gics = :s "
+            "WHERE id = :i AND (sector_gics IS NULL OR sector_gics = '')"),
+            {"s": sector, "i": instrument_id})
 
 
 @dataclass(frozen=True)
@@ -79,6 +106,7 @@ def ingest_picks(session: Session, clock: Clock, *, source: str,
         except Exception as e:  # noqa: BLE001 — no data is an honest per-ticker skip
             results.append(PickResult(ticker, "no-data", str(e)[:100]))
             continue
+        _backfill_sector(session, iid)   # fill a non-S&P name's sector pre-snapshot
         as_of = _as_of_session(session, iid, recommendation_date)
         if as_of is None:
             results.append(PickResult(ticker, "no-data",

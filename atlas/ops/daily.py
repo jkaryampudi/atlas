@@ -514,6 +514,19 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             state["learning_failed"] = True
             learning_line = f"learning FAILED: {e}"[:200]
+        # source-pick grading (external lists, e.g. investing.com): mature the
+        # 20/60-session excess-vs-SPY outcome on tonight's freshly ingested
+        # bars — the same as the scorecard, so a monthly list grades itself
+        # with no console click. Fail-soft, surfacing-only (measured, never
+        # applied): a failure here can never touch the settled book.
+        try:
+            from atlas.dcp.research.source_picks import grade_picks
+            pg = grade_picks(session, clock)
+            picks_line = (f"source-picks graded {pg.graded}, "
+                          f"{pg.still_immature} immature")
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["picks_failed"] = True
+            picks_line = f"source-picks FAILED: {e}"[:200]
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
@@ -536,7 +549,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                   or bool(state.get("bands_failed", False))
                   or bool(state.get("cusum_failed", False))
                   or bool(state.get("attribution_failed", False))
-                  or bool(state.get("core_failed", False)))
+                  or bool(state.get("core_failed", False))
+                  or bool(state.get("picks_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
@@ -552,6 +566,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  else "core idle",
                  scorecard_line,
                  learning_line,
+                 picks_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
         if state.get("desk_failed"):
@@ -572,6 +587,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("attribution FAILED — see log")
         if state.get("core_failed"):
             lines.append("core FAILED — see log")
+        if state.get("picks_failed"):
+            lines.append("source-picks FAILED — see log")
         if state.get("billing_outage"):
             lines.append("BILLING OUTAGE — API credits exhausted, desk skipped")
         summary = " · ".join(lines)
