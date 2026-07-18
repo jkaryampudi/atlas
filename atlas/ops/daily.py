@@ -105,6 +105,7 @@ from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
+from atlas.dcp.learning.loop import run_learning
 from atlas.dcp.reporting.attribution import compute_attribution_day
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
@@ -455,6 +456,15 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             state["scorecard_failed"] = True
             scorecard_line = f"scorecard FAILED: {e}"[:200]
+        # learning loop AFTER the scorecard (labels grade tonight's freshly
+        # matured outcomes): fail-soft exactly like the scorecard — surfacing
+        # only (Article 10 v1: label + measure, never apply), so a failure
+        # here can never touch the settled, protected book. Same SQL caveat.
+        try:
+            learning_line = run_learning(session, clock).summary()
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["learning_failed"] = True
+            learning_line = f"learning FAILED: {e}"[:200]
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
@@ -470,6 +480,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
                   or bool(state.get("scorecard_failed", False))
+                  or bool(state.get("learning_failed", False))
                   or bool(state.get("signals_failed", False))
                   or bool(state.get("pead_signals_failed", False))
                   or bool(state.get("bands_failed", False))
@@ -487,12 +498,15 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  attribution_report.summary() if attribution_report is not None
                  else "attribution idle",
                  scorecard_line,
+                 learning_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
         if state.get("desk_failed"):
             lines.append("desk FAILED — see log")
         if state.get("bridge_failed"):
             lines.append("bridge FAILED — see log")
+        if state.get("learning_failed"):
+            lines.append("learning FAILED — see log")
         if state.get("signals_failed"):
             lines.append("signals FAILED — see log")
         if state.get("pead_signals_failed"):

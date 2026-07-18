@@ -221,6 +221,9 @@
       <h2>Desk Scorecard — Graded Against SPY</h2>
       <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
       <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
+      <h2>Learning Loop — Measured, Never Applied</h2>
+      <div class="note">Every matured scorecard outcome is labeled into the learning plane the night it matures: the call graded by the one scorecard rule, each specialist seat graded against the realized excess sign, red flags validated when the flagged risk materialized. Brier-scored conviction weights (shrinkage-bounded, clipped 0.5–1.5) are computed and stored nightly — and NOT applied anywhere. Constitution Article 10 puts conviction-weight updates in Tier 1, but activation is the Principal's decision; until then this card is a measurement, not a behavior.</div>
+      <div class="card" id="learning"><div class="quiet">awaiting data</div></div>
       <h2>Committee Memos</h2>
       <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
         <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
@@ -809,6 +812,47 @@ async function renderScorecard(){
     (d.shadow_excluded?`<div class="note" style="margin:10px 0 0">${esc(d.shadow_excluded)} shadow outcome row(s) tracked but excluded from the rates — non-actionable. Dart universe: ${esc((d.dart_tracked||{})["20"]??0)} tracked @20s / ${esc((d.dart_tracked||{})["60"]??0)} @60s, HOLD + shadow included.</div>`
       :(d.dart_tracked&&(d.dart_tracked["20"]||d.dart_tracked["60"])?`<div class="note" style="margin:10px 0 0">Dart universe: ${esc(d.dart_tracked["20"])} tracked @20s / ${esc(d.dart_tracked["60"])} @60s, HOLD + shadow included.</div>`:"")) +
     tbl;
+  good(el);
+}
+
+/* ---------- learning loop — measured, never applied ---------- */
+/* Surfacing only (Article 10 v1): weights from the latest stored calibration
+   snapshot; specialist/source rates recomputed server-side from the same
+   labels. applied:false is asserted, never assumed — if the API ever said
+   otherwise this card would say so out loud. */
+async function renderLearning(){
+  const el = document.getElementById("learning");
+  const r = await get("/v1/learning/summary");
+  if(r.err) return deg(el, r.err);
+  const d = r.data;
+  if(!(d.labels && d.labels.memo)){
+    el.innerHTML = `<div class="quiet">no matured outcomes labeled yet — the loop wakes the night the scorecard grades its first memo</div>`;
+    return good(el);
+  }
+  const wRow = (name, w) => `<span style="color:var(--dim)">${esc(name)}</span> ` +
+    (w && w.weight != null
+      ? `w ${(+w.weight).toFixed(3)}${w.prev_weight!=null?` <span style="color:var(--faint)">(prev ${(+w.prev_weight).toFixed(3)})</span>`:""} · brier ${w.brier!=null?(+w.brier).toFixed(3):"—"} · n=${w.n??0}`
+      : `<span style="color:var(--faint)">no snapshot</span>`);
+  const convLine = Object.entries(d.calibration && d.calibration.by_conviction || {})
+    .map(([k,w])=>wRow(k,w)).join(`<span style="color:var(--faint)"> · </span>`);
+  const specLine = Object.entries(d.specialists||{}).map(([role,s])=>
+    `<span style="color:var(--dim)">${esc(role)}</span> aligned ${s.alignment_rate!=null?Math.round(s.alignment_rate*100)+"%":"—"}/${s.n_graded??0} · flags ${s.flag_validation_rate!=null?Math.round(s.flag_validation_rate*100)+"%":"—"}/${s.n_flagged??0}${s.weight!=null?` · w ${(+s.weight).toFixed(3)}`:""}`)
+    .join(`<span style="color:var(--faint)"> · </span>`);
+  const srcLine = Object.entries(d.sources||{}).map(([src,s])=>{
+    const hs = [20,60].map(h=>{const t=s[`h${h}`]; return t&&t.n_graded?`${t.n_vindicated}/${t.n_graded}@${h}s${t.edge!=null?` edge ${ppS(t.edge)}`:""}`:null;}).filter(Boolean);
+    return `<span style="color:var(--dim)">${esc(src)}</span> ${hs.join(" ")||"0 graded"}`;
+  }).join(`<span style="color:var(--faint)"> · </span>`);
+  el.innerHTML =
+    `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <span class="pill bl">${d.labels.memo} outcome label(s) · ${d.labels.specialist} specialist · ${(d.lessons&&d.lessons.count)||0} lesson(s)</span>
+      <span class="pill gray" title="Article 10: activation is a Principal decision">${d.applied===false?"NOT APPLIED — surfacing only":"APPLIED"}</span>
+      ${d.calibration&&d.calibration.as_of?`<span style="font-family:var(--mono);font-size:10.5px;color:var(--faint)">snapshot ${esc(d.calibration.as_of)}</span>`:""}
+    </div>` +
+    (convLine?`<div style="font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:2px 0 0 2px">CONVICTION&nbsp;&nbsp;${convLine}</div>`:"") +
+    (specLine?`<div style="font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:2px 0 0 2px">SPECIALIST&nbsp;&nbsp;${specLine}</div>`:"") +
+    (srcLine?`<div style="font-family:var(--mono);font-size:10.5px;color:var(--faint);margin:2px 0 0 2px">SOURCE&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${srcLine}</div>`:"") +
+    ((d.lessons&&d.lessons.recent&&d.lessons.recent.length)
+      ? `<div style="font-family:var(--mono);font-size:10.5px;color:var(--dim);margin:8px 0 0 2px">${d.lessons.recent.slice(0,3).map(l=>`— ${esc(l.lesson)}`).join("<br>")}</div>` : "");
   good(el);
 }
 
@@ -1598,7 +1642,8 @@ async function renderSleeveAttribution(){
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderJobs, renderAttribution, renderSleeveAttribution,
                    renderStrategy, renderTrading,
-                   renderResearch, renderScorecard, renderProgress, renderRuns,
+                   renderResearch, renderScorecard, renderLearning,
+                   renderProgress, renderRuns,
                    renderQuant, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
