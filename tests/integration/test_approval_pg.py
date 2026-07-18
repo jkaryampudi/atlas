@@ -35,8 +35,8 @@ def _clean(s):
 def test_refusal_without_artifacts(pg_session):
     s = pg_session
     _clean(s)
-    d = evaluate_approval(s, family="momentum", gate=None, wf=None,
-                          oos_untouched_attested=False)
+    d = evaluate_approval(s, family="momentum", lineage="momentum",
+                          gate=None, wf=None, oos_untouched_attested=False)
     assert not d.approved and len(d.reasons) >= 3
 
 
@@ -44,14 +44,15 @@ def test_refusal_on_trial_count_mismatch(pg_session):
     s = pg_session
     _clean(s)
     for i in range(5):
-        register_trial(s, family="momentum", spec={"i": i}, metrics={})
+        register_trial(s, family="momentum", lineage="momentum",
+                       spec={"i": i}, metrics={})
     s.commit()
     gate = GateReport(strategy_return=1.0, bh_return=0.1, null_p_value=0.0,
                       dsr=0.99, n_trials=1, passed=True, reasons=[])
-    d = evaluate_approval(s, family="momentum", gate=gate, wf=None,
-                          oos_untouched_attested=True)
+    d = evaluate_approval(s, family="momentum", lineage="momentum",
+                          gate=gate, wf=None, oos_untouched_attested=True)
     assert not d.approved
-    assert any("true count" in r for r in d.reasons)
+    assert any("true lineage count" in r for r in d.reasons)
 
 
 def test_full_package_approves_and_transitions(pg_session):
@@ -61,13 +62,14 @@ def test_full_package_approves_and_transitions(pg_session):
         "INSERT INTO quant.strategies (family, name, version, spec, state) "
         "VALUES ('momentum','trend_rs_vol','1.0.0','{}','backtested') RETURNING id"
     )).scalar_one()
-    register_trial(s, family="momentum", spec=SPEC, metrics={"sharpe": 1.85})
+    register_trial(s, family="momentum", lineage="momentum",
+                   spec=SPEC, metrics={"sharpe": 1.85})
     wf = walk_forward(regime_series(), lambda b, t: momentum_v1,
                       k=4, horizon=40, embargo=10, warmup=60)
     gate = GateReport(strategy_return=1.02, bh_return=0.12, null_p_value=0.0,
                       dsr=1.0, n_trials=1, passed=True, reasons=[])
-    d = evaluate_approval(s, family="momentum", gate=gate, wf=wf,
-                          oos_untouched_attested=True)
+    d = evaluate_approval(s, family="momentum", lineage="momentum",
+                          gate=gate, wf=wf, oos_untouched_attested=True)
     assert d.approved
     record_and_transition(s, strategy_id=str(sid), backtest_id=None, decision=d,
                           checklist={"gate": "pass", "wf_positive": wf.positive_folds})
@@ -88,13 +90,14 @@ def _validated_strategy(s) -> str:
         "INSERT INTO quant.strategies (family, name, version, spec, state) "
         "VALUES ('momentum','trend_rs_vol','1.0.0','{}','backtested') RETURNING id"
     )).scalar_one()
-    register_trial(s, family="momentum", spec=SPEC, metrics={"sharpe": 1.85})
+    register_trial(s, family="momentum", lineage="momentum",
+                   spec=SPEC, metrics={"sharpe": 1.85})
     wf = walk_forward(regime_series(), lambda b, t: momentum_v1,
                       k=4, horizon=40, embargo=10, warmup=60)
     gate = GateReport(strategy_return=1.02, bh_return=0.12, null_p_value=0.0,
                       dsr=1.0, n_trials=1, passed=True, reasons=[])
-    d = evaluate_approval(s, family="momentum", gate=gate, wf=wf,
-                          oos_untouched_attested=True)
+    d = evaluate_approval(s, family="momentum", lineage="momentum",
+                          gate=gate, wf=wf, oos_untouched_attested=True)
     record_and_transition(s, strategy_id=str(sid), backtest_id=None, decision=d,
                           checklist={})
     return str(sid)
@@ -168,3 +171,45 @@ def test_paper_transition_refuses_rejected_strategy(pg_session):
         transition_to_paper(s, audit, strategy_id=str(sid),
                             approved_by="test principal",
                             decision_ref="ADR-test", clock=CLOCK)
+
+
+# ---------------------------------------------------------------------------
+# ADR-0016 lineage coherence: the n-consistency check compares the gate's
+# n_trials against the LINEAGE count the gate must have deflated at.
+# ---------------------------------------------------------------------------
+
+def _momentum_lineage_of_five(s) -> None:
+    """Five momentum-lineage trials across family names; the fresh variant
+    'xsmom-impl500-tr' holds exactly ONE of them."""
+    for fam in ("momentum", "xsmom", "xsmom-pit-tr", "xsmom-impl-tr",
+                "xsmom-impl500-tr"):
+        register_trial(s, family=fam, lineage="momentum",
+                       spec={"fam": fam}, metrics={})
+    s.commit()
+
+
+def test_approval_accepts_gate_deflated_at_lineage_count(pg_session):
+    s = pg_session
+    _clean(s)
+    _momentum_lineage_of_five(s)
+    wf = walk_forward(regime_series(), lambda b, t: momentum_v1,
+                      k=4, horizon=40, embargo=10, warmup=60)
+    gate = GateReport(strategy_return=1.02, bh_return=0.12, null_p_value=0.0,
+                      dsr=1.0, n_trials=5, passed=True, reasons=[])
+    d = evaluate_approval(s, family="xsmom-impl500-tr", lineage="momentum",
+                          gate=gate, wf=wf, oos_untouched_attested=True)
+    assert d.approved
+
+
+def test_approval_refuses_gate_deflated_at_family_count(pg_session):
+    """The counting defect itself: a first-in-family gate (n_trials=1) may no
+    longer clear approval when the lineage holds more trials."""
+    s = pg_session
+    _clean(s)
+    _momentum_lineage_of_five(s)
+    gate = GateReport(strategy_return=1.02, bh_return=0.12, null_p_value=0.0,
+                      dsr=1.0, n_trials=1, passed=True, reasons=[])
+    d = evaluate_approval(s, family="xsmom-impl500-tr", lineage="momentum",
+                          gate=gate, wf=None, oos_untouched_attested=True)
+    assert not d.approved
+    assert any("lineage 'momentum' has 5" in r for r in d.reasons)

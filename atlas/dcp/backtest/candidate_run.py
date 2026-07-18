@@ -40,7 +40,7 @@ from atlas.dcp.backtest.real_run import (
     assert_symbol_data_clean,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial, trial_count
 from atlas.dcp.backtest.validation import GateReport, null_model_gate
 from atlas.dcp.backtest.walkforward import WalkForwardResult, walk_forward
 from atlas.dcp.signals.breakout.v1 import SPEC as BREAKOUT_SPEC
@@ -58,6 +58,12 @@ CANDIDATES: dict[str, tuple[Strategy, dict[str, object]]] = {
     "breakout": (breakout_v1, BREAKOUT_SPEC),
 }
 
+# ADR-0016: these candidate families ARE lineage roots — any future variant
+# (e.g. 'trend-tr', 'breakout-pit') must register lineage=the root here, so
+# its deflated Sharpe counts every prior trial in the line.
+CANDIDATE_LINEAGES: dict[str, str] = {
+    "trend": "trend", "meanrev": "meanrev", "breakout": "breakout"}
+
 
 @dataclass(frozen=True)
 class CandidateRun:
@@ -71,6 +77,7 @@ class CandidateRun:
     wf: WalkForwardResult
     trial_id: str
     n_trials: int
+    lineage: str
 
 
 def total_trial_count(session: Session) -> int:
@@ -89,14 +96,15 @@ def run_candidate(session: Session, audit: PostgresAuditLog, family: str,
     n = len(obars)
     result = run_backtest(obars, strategy, COSTS, start_i=WARMUP, end_i=n)
 
+    lineage = CANDIDATE_LINEAGES[family]
     trial_id = register_trial(
-        session, family=family,
+        session, family=family, lineage=lineage,
         spec={**spec, "symbol": symbol, "data": "EODHD real",
               "window": f"{dates[0]}..{dates[-1]}", "warmup": WARMUP},
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown, "hit_rate": result.hit_rate,
                  "n_trades": float(result.n_trades)})
-    n_trials = trial_count(session, family)
+    n_trials = lineage_count(session, lineage)
 
     gate = null_model_gate(bars=obars, strategy=strategy, result=result,
                            avg_stop_frac=AVG_STOP_FRAC, avg_target_frac=AVG_TARGET_FRAC,
@@ -120,7 +128,7 @@ def run_candidate(session: Session, audit: PostgresAuditLog, family: str,
                                                 "not decision-grade")})
     return CandidateRun(family=family, symbol=symbol, n_bars=n, start=dates[0],
                         end=dates[-1], result=result, gate=gate, wf=wf,
-                        trial_id=trial_id, n_trials=n_trials)
+                        trial_id=trial_id, n_trials=n_trials, lineage=lineage)
 
 
 def render_report(runs: list[CandidateRun], *, paths: int,
@@ -155,7 +163,7 @@ def render_report(runs: list[CandidateRun], *, paths: int,
         f"- Walk-forward: purged+embargoed, k={K_FOLDS}, horizon={HORIZON}, "
         f"embargo={EMBARGO}, warmup={WARMUP} (ADR-0002 #3)",
         "- Every run registered in quant.trial_registry; deflated Sharpe uses the "
-        "true family trial count (ADR-0002 #1)",
+        "true LINEAGE trial count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "",
         "## Graveyard context",
         "",
@@ -193,7 +201,7 @@ def render_report(runs: list[CandidateRun], *, paths: int,
                 f"- buy-and-hold return: {g.bh_return:+.2%}",
                 f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ 0.05)",
                 f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-                "(must be ≥ 0.90)",
+                f"(lineage '{r.lineage}', {g.n_trials} trials; must be ≥ 0.90)",
                 f"- trial registry id: `{r.trial_id}`",
                 "",
             ]

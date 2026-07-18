@@ -111,7 +111,7 @@ def _seed(s) -> None:
     s.execute(text("DELETE FROM market.quarterly_fundamentals"))
     s.execute(text("DELETE FROM validation.index_membership"))
     s.execute(text("DELETE FROM quant.trial_registry "
-                   "WHERE strategy_family LIKE 'quality-gpa%'"))
+                   "WHERE lineage = 'quality'"))    # ADR-0016 lineage isolation
     _bars(s, _instrument(s, "SPY", active=True), 0.0004)            # benchmark
     for k, sym in enumerate(RANKED):
         iid = _instrument(s, sym, active=False)

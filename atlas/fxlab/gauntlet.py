@@ -53,7 +53,7 @@ from sqlalchemy.orm import Session
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from atlas.dcp.backtest.real_run import EMBARGO, HORIZON, K_FOLDS
-from atlas.dcp.backtest.registry import register_trial
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.backtest.validation import deflated_sharpe, null_model_gate
 from atlas.dcp.backtest.walkforward import leakage_free, purged_folds
 from atlas.fxlab.candidates import CANDIDATES, WARMUP
@@ -174,11 +174,15 @@ def load_bars(session: Session, pair: str = PAIR) -> list[FxBar]:
                   low=float(r.low), close=float(r.close)) for r in rows]
 
 
+# ADR-0016: every fxlab-* family belongs to the sandbox's own research line.
+FXLAB_LINEAGE = "fxlab"
+
+
 def fxlab_trial_count(session: Session) -> int:
-    """TRUE deflation count: every trial the sandbox has ever registered."""
-    return int(session.execute(text(
-        "SELECT count(*) FROM quant.trial_registry "
-        "WHERE strategy_family LIKE 'fxlab-%'")).scalar() or 0)
+    """TRUE deflation count: every trial the sandbox has ever registered —
+    the 'fxlab' lineage (ADR-0016; legacy rows backfilled by migration 0032,
+    so this equals the historical LIKE 'fxlab-%' count)."""
+    return lineage_count(session, FXLAB_LINEAGE)
 
 
 def run_gauntlet(session: Session, audit: PostgresAuditLog, *,
@@ -199,7 +203,7 @@ def run_gauntlet(session: Session, audit: PostgresAuditLog, *,
     for name, (_, spec) in CANDIDATES.items():
         r = results[name]
         trial_ids[name] = register_trial(
-            session, family=f"fxlab-{name}",
+            session, family=f"fxlab-{name}", lineage=FXLAB_LINEAGE,
             spec={**spec, "data": "EODHD real", "window": window, "warmup": WARMUP,
                   "spread_per_side": SPREAD_PER_SIDE, "swap_per_night": SWAP_PER_NIGHT},
             metrics={"total_return": r.total_return, "sharpe": r.sharpe,
@@ -286,7 +290,8 @@ def render_report(verdicts: list[FxVerdict], *, window: str, n_bars: int,
             f"- strategy return after costs: {r.total_return:+.2%} (must be > 0%)",
             f"- null-model p-value: {v.null_p:.3f} (must be <= {P_MAX})",
             f"- deflated Sharpe: {v.dsr:.3f} at n_trials={v.n_trials} "
-            f"(must be >= {DSR_MIN})",
+            f"(lineage '{FXLAB_LINEAGE}', {v.n_trials} trials; "
+            f"must be >= {DSR_MIN})",
             f"- trial registry id: `{v.trial_id}`",
             "",
         ]

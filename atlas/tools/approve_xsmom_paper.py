@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(run.wf.fold_results)} folds positive")
 
         decision = evaluate_approval(
-            s, family=run.family, gate=g, wf=run.wf,
+            s, family=run.family, lineage=run.lineage, gate=g, wf=run.wf,
             oos_untouched_attested=a.attest_oos_untouched)
         if not decision.approved:
             print("REFUSED — approval gate reasons:")

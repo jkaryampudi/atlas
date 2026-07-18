@@ -23,7 +23,7 @@ from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.core.clock import FrozenClock
 from atlas.dcp.backtest.engine import CostModel, OBar, Result, run_backtest
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.backtest.validation import GateReport, null_model_gate
 from atlas.dcp.backtest.walkforward import WalkForwardResult, walk_forward
 from atlas.dcp.market_data.adjustment import adjust_for_splits
@@ -36,6 +36,8 @@ COSTS = CostModel()
 # (tests/unit/test_validation_gates.py, test_walkforward.py). Not tunable here.
 WARMUP, K_FOLDS, HORIZON, EMBARGO = 60, 4, 40, 10
 AVG_STOP_FRAC, AVG_TARGET_FRAC, TIME_STOP = 0.035, 0.07, 40
+# ADR-0016: deflated Sharpe counts the full research LINEAGE, not the family.
+LINEAGE = "momentum"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class SymbolRun:
     wf: WalkForwardResult
     trial_id: str
     n_trials: int
+    lineage: str = LINEAGE
 
 
 def load_adjusted_obars(session: Session, symbol: str) -> tuple[list[OBar], list[date]]:
@@ -123,13 +126,13 @@ def run_symbol(session: Session, audit: PostgresAuditLog, symbol: str, *,
     result = run_backtest(obars, momentum_v1, COSTS, start_i=WARMUP, end_i=n)
 
     trial_id = register_trial(
-        session, family="momentum",
+        session, family="momentum", lineage=LINEAGE,
         spec={**SPEC, "symbol": symbol, "data": "EODHD real",
               "window": f"{dates[0]}..{dates[-1]}", "warmup": WARMUP},
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown, "hit_rate": result.hit_rate,
                  "n_trades": float(result.n_trades)})
-    n_trials = trial_count(session, "momentum")
+    n_trials = lineage_count(session, LINEAGE)
 
     gate = null_model_gate(bars=obars, strategy=momentum_v1, result=result,
                            avg_stop_frac=AVG_STOP_FRAC, avg_target_frac=AVG_TARGET_FRAC,
@@ -189,7 +192,7 @@ def render_report(runs: list[SymbolRun], *, paths: int) -> str:
         f"- Walk-forward: purged+embargoed, k={K_FOLDS}, horizon={HORIZON}, "
         f"embargo={EMBARGO}, warmup={WARMUP} (ADR-0002 #3)",
         "- Every run registered in quant.trial_registry; deflated Sharpe uses the "
-        "true family trial count (ADR-0002 #1)",
+        "true LINEAGE trial count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "",
     ]
     for r in runs:
@@ -208,7 +211,8 @@ def render_report(runs: list[SymbolRun], *, paths: int) -> str:
             f"- strategy return: {g.strategy_return:+.2%}",
             f"- buy-and-hold return: {g.bh_return:+.2%}",
             f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ 0.05)",
-            f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} (must be ≥ 0.90)",
+            f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
+            f"(lineage '{r.lineage}', {g.n_trials} trials; must be ≥ 0.90)",
             f"- trial registry id: `{r.trial_id}`",
             "",
         ]

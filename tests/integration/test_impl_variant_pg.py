@@ -107,8 +107,8 @@ def _seed(s) -> None:
     s.execute(text("DELETE FROM market.corporate_actions"))
     s.execute(text("DELETE FROM market.earnings_surprises"))
     s.execute(text("DELETE FROM validation.index_membership"))
-    s.execute(text("DELETE FROM quant.trial_registry WHERE strategy_family "
-                   "LIKE '%-impl-tr%'"))
+    s.execute(text("DELETE FROM quant.trial_registry WHERE lineage IN "
+                   "('momentum', 'pead', 'momentum+pead')"))  # ADR-0016
     spy = _instrument(s, "SPY", active=True)
     _bars(s, spy, 0.0004)
     _dividend(s, spy, date(2012, 9, 21), "0.77")   # TR loader fails without it

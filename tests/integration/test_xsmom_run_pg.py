@@ -52,7 +52,10 @@ def _bars(s, iid: str, dates: list[date], rate: float) -> None:
 
 def _seed(s) -> None:
     s.execute(text("DELETE FROM market.price_bars_daily"))       # in-txn only
-    s.execute(text("DELETE FROM quant.trial_registry WHERE strategy_family = 'xsmom'"))
+    # lineage-scoped isolation (ADR-0016): the runner deflates at the
+    # momentum LINEAGE count, so leftovers from committed tests in ANY
+    # momentum-lineage family would inflate n_trials here
+    s.execute(text("DELETE FROM quant.trial_registry WHERE lineage = 'momentum'"))
     _bars(s, _instrument(s, "SPY"), SESSIONS, 0.0004)
     for k, sym in enumerate(STOCKS):                # distinct drifts -> ranking
         _bars(s, _instrument(s, sym), SESSIONS, -0.001 + 0.0003 * k)

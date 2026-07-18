@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
-from atlas.dcp.backtest.registry import trial_count
+from atlas.dcp.backtest.registry import lineage_count, trial_count
 
 
 class GateArtifact(Protocol):
@@ -45,21 +45,26 @@ class ApprovalDecision:
     reasons: list[str]
 
 
-def evaluate_approval(session: Session, *, family: str,
+def evaluate_approval(session: Session, *, family: str, lineage: str,
                       gate: GateArtifact | None,
                       wf: WalkForwardArtifact | None,
                       oos_untouched_attested: bool) -> ApprovalDecision:
+    """The n-consistency check compares the gate's n_trials against the same
+    LINEAGE count the gate must have used (ADR-0016): a gate deflated at the
+    old per-family count no longer clears this check once the lineage holds
+    more trials — stricter going forward, never retroactive."""
     reasons: list[str] = []
-    n = trial_count(session, family)
-    if n == 0:
+    n = lineage_count(session, lineage)
+    if trial_count(session, family) == 0:
         reasons.append("no trials registered — every backtest must be in the registry")
     if gate is None:
         reasons.append("missing null-model gate report")
     elif not gate.passed:
         reasons.append(f"gate failed: {'; '.join(gate.reasons)}")
     elif gate.n_trials != n:
-        reasons.append(f"gate computed with n_trials={gate.n_trials} but registry has {n} "
-                       "— deflated Sharpe must use the true count")
+        reasons.append(f"gate computed with n_trials={gate.n_trials} but lineage "
+                       f"'{lineage}' has {n} trials "
+                       "— deflated Sharpe must use the true lineage count (ADR-0016)")
     if wf is None:
         reasons.append("missing purged walk-forward result")
     elif wf.positive_folds < len(wf.fold_results) // 2 + 1:

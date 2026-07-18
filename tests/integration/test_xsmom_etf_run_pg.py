@@ -55,7 +55,7 @@ def _bars(s, iid: str, rate: float) -> None:
 def _seed(s) -> None:
     s.execute(text("DELETE FROM market.price_bars_daily"))       # in-txn only
     s.execute(text("DELETE FROM quant.trial_registry "
-                   "WHERE strategy_family = 'xsmom-etf'"))
+                   "WHERE lineage = 'momentum'"))   # ADR-0016 lineage isolation
     _bars(s, _instrument(s, "SPY", active=True), 0.0004)
     for k, sym in enumerate(ETFS):                # distinct drifts -> ranking
         _bars(s, _instrument(s, sym, active=False), -0.001 + 0.0003 * k)

@@ -80,7 +80,7 @@ def _seed(s) -> None:
     s.execute(text("DELETE FROM market.price_bars_daily"))       # in-txn only
     s.execute(text("DELETE FROM validation.index_membership"))
     s.execute(text("DELETE FROM quant.trial_registry "
-                   "WHERE strategy_family = 'xsmom-pit'"))
+                   "WHERE lineage = 'momentum'"))   # ADR-0016 lineage isolation
     _bars(s, _instrument(s, "SPY", active=True), 0.0004)
     epoch = date(2005, 1, 3)
     for k, sym in enumerate(MEMBERS):

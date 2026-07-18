@@ -106,7 +106,7 @@ def strategies() -> list[dict[str, object]]:
 
 @router.get("/trials")
 def trials(family: str | None = None, limit: int = 50) -> list[dict[str, object]]:
-    q = ("SELECT id, strategy_family, spec_hash, metrics, created_at "
+    q = ("SELECT id, strategy_family, lineage, spec_hash, metrics, created_at "
          "FROM quant.trial_registry")
     params: dict[str, object] = {"n": limit}
     if family:

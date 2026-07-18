@@ -108,7 +108,7 @@ from atlas.dcp.backtest.real_run import (
     K_FOLDS,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.walkforward import leakage_free, purged_folds
 from atlas.dcp.backtest.xsmom_run import (
@@ -143,6 +143,9 @@ from atlas.dcp.signals.xsmom.v1 import LOOKBACK, SEASONING, SKIP, SPEC, TOP_N
 ROOT = Path(__file__).resolve().parents[3]
 BENCHMARK = "SPY"
 FAMILY = "xsmom-pit"
+# ADR-0016: every xsmom-pit* family is one research line — deflated Sharpe
+# counts the full momentum LINEAGE, so renaming can never reset the penalty.
+LINEAGE = "momentum"
 DECILE = 10  # J&T winner fraction: the top tenth of the ranked universe
 
 # --- total-return mode (board memo 2026-07 items 1+2; additive) -------------
@@ -622,6 +625,7 @@ class XsmomPitRun:
     # --- total-return mode additions (defaults keep the price path intact) ---
     family: str = FAMILY
     return_convention: str = PRICE_CONVENTION
+    lineage: str = LINEAGE
     null_results: tuple[PortfolioResult, ...] = ()   # curves for the exhibit
     wf_spy: PortfolioWalkForwardResult | None = None  # SPY per fold (exhibit)
 
@@ -691,12 +695,12 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
         "data": "EODHD real",
         "costs_bps_per_side": COSTS.commission_bps + COSTS.slippage_bps}
     trial_id = register_trial(
-        session, family=family, spec=spec,
+        session, family=family, lineage=LINEAGE, spec=spec,
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
-    n_trials = trial_count(session, family)
+    n_trials = lineage_count(session, LINEAGE)
     trials_after_total = total_trial_count(session)
 
     null_results: tuple[PortfolioResult, ...] = ()
@@ -756,6 +760,7 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
                        trials_after_total=trials_after_total,
                        member_counts=member_counts,
                        family=family, return_convention=convention,
+                       lineage=LINEAGE,
                        null_results=null_results, wf_spy=wf_spy)
 
 
@@ -918,7 +923,7 @@ def render_pit_report(run: XsmomPitRun, *, paths: int) -> str:
         f"{SEASONING}-session seasoning and keeps every fold past "
         f"{WINDOW_START}) (ADR-0002 #3)",
         "- Registered in quant.trial_registry; deflated Sharpe uses the true "
-        "family trial count (ADR-0002 #1)",
+        "LINEAGE trial count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "- Benchmark: SPY buy-and-hold over the same window — the BINDING "
         "comparison per ADR-0009; SPY carries no membership row and can "
         "never be ranked; equal-weight-all-eligible shown per protocol, NOT "
@@ -1001,7 +1006,7 @@ def render_pit_report(run: XsmomPitRun, *, paths: int) -> str:
         f"protocol, NOT binding): {g.ew_return:+.2%}",
         f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ {P_MAX})",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be ≥ {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be ≥ {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}`",
         "",
     ]
@@ -1033,8 +1038,8 @@ def render_pit_report(run: XsmomPitRun, *, paths: int) -> str:
         f"Implication: {implication}.",
         "",
         f"Trial registry: **{run.trials_before_total} trials before this run "
-        f"→ {run.trials_after_total} after** (ONE {FAMILY} trial; family "
-        f"count now {run.n_trials}).",
+        f"→ {run.trials_after_total} after** (ONE {FAMILY} trial; lineage "
+        f"'{run.lineage}' count now {run.n_trials}).",
         "",
         *_annual_distribution_lines(run),
         "## Approval status",
@@ -1208,7 +1213,7 @@ def _tr_run_lines(run: XsmomPitRun, title: str, extra: list[str]) -> list[str]:
         f"binding): {g.ew_return:+.2%}",
         f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ {P_MAX})",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be ≥ {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be ≥ {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}`",
         "",
     ]
@@ -1316,8 +1321,8 @@ def render_tr_report(full: XsmomPitRun, kill: XsmomPitRun, *,
         "engine/costs/delisting rule (ADR-0002 #2)",
         "- Gate thresholds IMPORTED from the committed validation module — "
         "nothing restated, nothing tuned",
-        "- Deflated Sharpe at each family's true registered trial count "
-        "(ADR-0002 #1)",
+        "- Deflated Sharpe at the full momentum LINEAGE's registered trial "
+        "count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "- Window grade (ADR-0004): "
         + "; ".join(
             f"`{r.family}` {r.start} → {panel.dates[-1]} "
@@ -1503,7 +1508,7 @@ def main() -> None:
           f"missing {len(run.universe.missing_series)}; "
           f"forced liquidations {len(run.run.forced_liquidations)}")
     print(f"trials: {run.trials_before_total} -> {run.trials_after_total} "
-          f"({FAMILY} family: {run.n_trials})")
+          f"(lineage '{run.lineage}': {run.n_trials})")
     print(f"report written: {report_path}")
 
 

@@ -80,7 +80,7 @@ from atlas.dcp.backtest.real_run import (
     K_FOLDS,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.signals.xsmom.v1 import (
     LOOKBACK,
@@ -236,6 +236,7 @@ class XsmomRun:
     trials_after_total: int
     family: str = "xsmom"
     top_n: int = TOP_N
+    lineage: str = "momentum"
 
 
 def total_trial_count(session: Session) -> int:
@@ -286,13 +287,16 @@ def run_xsmom(session: Session, audit: PostgresAuditLog, *,
                                           "10 of ~110 is the winner decile; "
                                           f"{n_pick} of {len(symbols)} keeps "
                                           "the JT fractional construction")})
+    # ADR-0016: every xsmom-* family belongs to the momentum LINEAGE — a new
+    # family name never resets the deflated-Sharpe penalty.
+    lineage = "momentum"
     trial_id = register_trial(
-        session, family=family, spec=spec,
+        session, family=family, lineage=lineage, spec=spec,
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
-    n_trials = trial_count(session, family)
+    n_trials = lineage_count(session, lineage)
     trials_after_total = total_trial_count(session)
 
     nulls = portfolio_null_distribution(panel, costs=COSTS, start=start,
@@ -347,7 +351,7 @@ def run_xsmom(session: Session, audit: PostgresAuditLog, *,
                     ew=ew, gate=gate, wf=wf, trial_id=trial_id,
                     n_trials=n_trials, trials_before_total=trials_before_total,
                     trials_after_total=trials_after_total,
-                    family=family, top_n=n_pick)
+                    family=family, top_n=n_pick, lineage=lineage)
 
 
 def render_report(run: XsmomRun, *, paths: int) -> str:
@@ -402,7 +406,7 @@ def render_report(run: XsmomRun, *, paths: int) -> str:
         f"warmup={SEASONING} (xsmom seasoning replaces the single-series "
         "indicator warmup of 60 — documented in xsmom_run) (ADR-0002 #3)",
         "- Registered in quant.trial_registry; deflated Sharpe uses the true "
-        "family trial count (ADR-0002 #1)",
+        "LINEAGE trial count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "",
         "## Universe and data honesty",
         "",
@@ -434,7 +438,7 @@ def render_report(run: XsmomRun, *, paths: int) -> str:
         f"protocol, NOT binding): {g.ew_return:+.2%}",
         f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ {P_MAX})",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be ≥ {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be ≥ {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}`",
         "",
     ]
@@ -463,8 +467,8 @@ def render_report(run: XsmomRun, *, paths: int) -> str:
         f"| {wf.positive_folds}/{len(wf.fold_results)} | **{verdict}** |",
         "",
         f"Trial registry: **{run.trials_before_total} trials before this run "
-        f"→ {run.trials_after_total} after** (ONE xsmom trial; family count "
-        f"now {run.n_trials}).",
+        f"→ {run.trials_after_total} after** (ONE xsmom trial; lineage "
+        f"'{run.lineage}' count now {run.n_trials}).",
         "",
         "## Approval status",
         "",
@@ -710,7 +714,7 @@ def render_etf_report(run: XsmomRun, *, paths: int) -> str:
         f"horizon={HORIZON}, embargo={EMBARGO} (constants from real_run), "
         f"warmup={SEASONING} (ADR-0002 #3)",
         "- Registered in quant.trial_registry; deflated Sharpe uses the true "
-        "family trial count (ADR-0002 #1)",
+        "LINEAGE trial count (ADR-0002 #1, lineage-scoped per ADR-0016)",
         "- Benchmark: SPY buy-and-hold on a side panel sharing the identical "
         "session axis (SPY is deliberately NOT in the ranked universe); "
         f"equal-weight all-{n_names} shown per protocol, NOT binding",
@@ -747,7 +751,7 @@ def render_etf_report(run: XsmomRun, *, paths: int) -> str:
         f"protocol, NOT binding): {g.ew_return:+.2%}",
         f"- null-model p-value: {g.null_p_value:.3f} (must be ≤ {P_MAX})",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be ≥ {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be ≥ {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}`",
         "",
     ]
@@ -779,8 +783,8 @@ def render_etf_report(run: XsmomRun, *, paths: int) -> str:
         f"Implication: {implication}.",
         "",
         f"Trial registry: **{run.trials_before_total} trials before this run "
-        f"→ {run.trials_after_total} after** (ONE {run.family} trial; family "
-        f"count now {run.n_trials}).",
+        f"→ {run.trials_after_total} after** (ONE {run.family} trial; lineage "
+        f"'{run.lineage}' count now {run.n_trials}).",
         "",
         *_annual_distribution_lines(run),
         "## Approval status",
@@ -851,7 +855,7 @@ def main() -> None:
           f"wf={run.wf.positive_folds}/{len(run.wf.fold_results)} "
           f"(reasons: {list(g.reasons) or 'none'})")
     print(f"trials: {run.trials_before_total} -> {run.trials_after_total} "
-          f"({run.family} family: {run.n_trials})")
+          f"(lineage '{run.lineage}': {run.n_trials})")
     print(f"report written: {report_path}")
 
 

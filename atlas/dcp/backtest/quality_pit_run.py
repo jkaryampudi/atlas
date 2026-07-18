@@ -81,7 +81,7 @@ from atlas.dcp.backtest.portfolio_validation import (
     portfolio_gate,
 )
 from atlas.dcp.backtest.real_run import COSTS, EMBARGO, HORIZON, K_FOLDS
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.xsmom_pit_run import (
     BENCHMARK,
@@ -129,6 +129,9 @@ from atlas.dcp.signals.quality.v1 import (
 ROOT = Path(__file__).resolve().parents[3]
 FAMILY = "quality-gpa"
 FAMILY_TR = "quality-gpa-tr"
+# ADR-0016: every quality-* family is the quality research line — deflated
+# Sharpe counts the full lineage; a new family name never resets the penalty.
+LINEAGE = "quality"
 KILL_START = date(2016, 1, 1)         # pre-committed kill-only TR start (demote only)
 FINANCIALS_SECTOR = "Financials"      # sector_gics label for the -xfin variant
 PRICE_CONVENTION = "price (split-adjusted; dividends not reinvested)"
@@ -337,6 +340,7 @@ class QualityPitRun:
     n_paths: int = 0
     excluded_financials: tuple[str, ...] = ()    # -xfin only; empty by default
     members_null_sector: int = 0                 # unclassifiable when flag on
+    lineage: str = LINEAGE
 
 
 def run_quality_pit(session: Session, audit: PostgresAuditLog, *,
@@ -410,12 +414,12 @@ def run_quality_pit(session: Session, audit: PostgresAuditLog, *,
         "excluded)",
         "costs_bps_per_side": COSTS.commission_bps + COSTS.slippage_bps}
     trial_id = register_trial(
-        session, family=family, spec=spec,
+        session, family=family, lineage=LINEAGE, spec=spec,
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
-    n_trials = trial_count(session, family)
+    n_trials = lineage_count(session, LINEAGE)
     trials_after_total = total_trial_count(session)
 
     null_results = tuple(quality_null_results(
@@ -464,7 +468,7 @@ def run_quality_pit(session: Session, audit: PostgresAuditLog, *,
         trials_after_total=trials_after_total, member_counts=member_counts,
         family=family, return_convention=convention, null_results=null_results,
         n_paths=paths, excluded_financials=tuple(sorted(excluded)),
-        members_null_sector=null_sector)
+        members_null_sector=null_sector, lineage=LINEAGE)
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +606,8 @@ def render_quality_report(run: QualityPitRun, *, paths: int,
         f"bound); costs {COSTS.commission_bps}+{COSTS.slippage_bps} bps/side; "
         f"null {paths}-path monkey MC drawing from the SAME GP/A-eligible set; "
         f"purged walk-forward k={K_FOLDS}, horizon={HORIZON}, embargo={EMBARGO}; "
-        "one registered trial per family; deflated Sharpe at the true count.",
+        "one registered trial per family; deflated Sharpe at the true "
+        "LINEAGE count (ADR-0016).",
         f"- Binding benchmark: SPY "
         f"{'total return' if 'total' in run.return_convention else 'buy-and-hold'} "
         "over the same window (ADR-0009); SPY carries no membership row and can "
@@ -660,7 +665,7 @@ def render_quality_report(run: QualityPitRun, *, paths: int,
         f"{g.ew_return:+.2%}",
         f"- null-model p-value: {g.null_p_value:.3f} (must be <= {P_MAX})",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be >= {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be >= {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}` (family `{run.family}`)",
         "",
     ]
@@ -715,7 +720,8 @@ def render_quality_report(run: QualityPitRun, *, paths: int,
         f"| {wf.positive_folds}/{len(wf.fold_results)} | **{verdict}** |",
         "",
         f"Trial registry: **{run.trials_before_total} → {run.trials_after_total}** "
-        f"(one `{run.family}` trial; family count now {run.n_trials}).",
+        f"(one `{run.family}` trial; lineage '{run.lineage}' count now "
+        f"{run.n_trials}).",
         "",
         *_annual_distribution_lines(run),
         "## Approval status",

@@ -117,7 +117,7 @@ from atlas.dcp.backtest.real_run import (
     K_FOLDS,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import register_trial, trial_count
+from atlas.dcp.backtest.registry import lineage_count, register_trial
 from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.xsmom_pit_run import (
     BENCHMARK,
@@ -168,6 +168,14 @@ FAMILY_XSMOM: Final[str] = "xsmom-impl-tr"
 FAMILY_PEAD: Final[str] = "pead-impl-tr"
 FAMILY_COMBINED: Final[str] = "combined-impl-tr"
 VARIANTS: Final[tuple[str, ...]] = ("xsmom", "pead", "combined")
+
+# ADR-0016 lineage tags: the momentum sleeve counts against the momentum
+# research line, the PEAD sleeve against pead. The combined satellite mixes
+# BOTH parents; v1 records 'momentum+pead' as its OWN lineage — a documented
+# conservative simplification (migration 0032): lineage_count('momentum')
+# does NOT include combined trials.
+IMPL_LINEAGES: Final[dict[str, str]] = {
+    "xsmom": "momentum", "pead": "pead", "combined": "momentum+pead"}
 
 # Full-universe mode (ADR-0016 evidence run): top-5 of the FULL point-in-time
 # S&P 500, no liquidity screen. Momentum only — ADR-0015 sets the PEAD sleeve
@@ -527,6 +535,7 @@ class ImplRun:
     trials_before_total: int
     trials_after_total: int
     counts: tuple[RebalanceCounts, ...]
+    lineage: str = "momentum"
 
 
 def _endpoint_verdicts(strategy: PortfolioResult, spy: PortfolioResult,
@@ -628,13 +637,14 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
                           "proceeds in cash until next rebalance",
         "data": "EODHD real",
         "costs_bps_per_side": COSTS.commission_bps + COSTS.slippage_bps}
+    lineage = IMPL_LINEAGES[variant]
     trial_id = register_trial(
-        session, family=family, spec=spec,
+        session, family=family, lineage=lineage, spec=spec,
         metrics={"total_return": result.total_return, "sharpe": result.sharpe,
                  "max_drawdown": result.max_drawdown,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
-    n_trials = trial_count(session, family)
+    n_trials = lineage_count(session, lineage)
     trials_after_total = total_trial_count(session)
 
     nulls = impl_null_results(panel, sleeves, variant, costs=COSTS,
@@ -687,7 +697,7 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
                    endpoints=endpoints, trial_id=trial_id, n_trials=n_trials,
                    trials_before_total=trials_before_total,
                    trials_after_total=trials_after_total,
-                   counts=tuple(counts))
+                   counts=tuple(counts), lineage=lineage)
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +741,7 @@ def _run_lines(run: ImplRun, title: str) -> list[str]:
         f"monkeys draw {SLEEVE_N} names from the identical eligible set with "
         "the identical construction",
         f"- deflated Sharpe: {g.dsr:.3f} at n_trials={g.n_trials} "
-        f"(must be >= {DSR_MIN})",
+        f"(lineage '{run.lineage}', {g.n_trials} trials; must be >= {DSR_MIN})",
         f"- trial registry id: `{run.trial_id}`",
         "",
     ]
@@ -936,8 +946,9 @@ def render_impl_report(ctx: ImplContext, runs: Mapping[str, ImplRun],
         "SAME budgets, identical engine/costs/delisting rule (ADR-0002 #2)",
         f"- Walk-forward: purged+embargoed, k={K_FOLDS}, horizon={HORIZON}, "
         f"embargo={EMBARGO}, warmup = evaluation-start index (ADR-0002 #3)",
-        "- Deflated Sharpe at each family's true registered trial count "
-        "(ADR-0002 #1); every run registered in quant.trial_registry",
+        "- Deflated Sharpe at each variant's true LINEAGE trial count "
+        "(ADR-0002 #1, lineage-scoped per ADR-0016); every run registered "
+        "in quant.trial_registry",
         "- Binding benchmark: SPY buy-and-hold TOTAL return over the same "
         "window (ADR-0009); SPY holds no membership row and can never be "
         "ranked",
@@ -1211,8 +1222,9 @@ def render_impl500_report(ctx: ImplContext, run: ImplRun, kill: ImplRun, *,
         "engine/costs/delisting rule (ADR-0002 #2)",
         f"- Walk-forward: purged+embargoed, k={K_FOLDS}, horizon={HORIZON}, "
         f"embargo={EMBARGO}, warmup = evaluation-start index (ADR-0002 #3)",
-        "- Deflated Sharpe at the family's true registered trial count "
-        "(ADR-0002 #1); every run registered in quant.trial_registry",
+        "- Deflated Sharpe at the momentum LINEAGE's true registered trial "
+        "count (ADR-0002 #1, lineage-scoped per ADR-0016); every run "
+        "registered in quant.trial_registry",
         "- Binding benchmark: SPY buy-and-hold TOTAL return over the same "
         "window (ADR-0009)",
         f"- Pre-committed kill-only trial: evaluation start {KILL_START} "
