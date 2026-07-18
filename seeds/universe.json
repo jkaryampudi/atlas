@@ -1,110 +1,14 @@
 [
   {
-    "symbol": "SPY",
-    "exchange": "NYSEARCA",
-    "market": "US",
-    "instrument_type": "etf",
-    "name": "SPDR S&P 500 ETF",
-    "sector_gics": "Broad",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
-    "symbol": "QQQ",
-    "exchange": "NASDAQ",
-    "market": "US",
-    "instrument_type": "etf",
-    "name": "Invesco QQQ",
-    "sector_gics": "Broad",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
-    "symbol": "INDA",
-    "exchange": "BATS",
-    "market": "US",
-    "instrument_type": "etf",
-    "name": "iShares MSCI India ETF",
-    "sector_gics": "Broad",
-    "currency": "USD",
-    "economic_exposure": [
-      "IN"
-    ]
-  },
-  {
-    "symbol": "INFY",
-    "exchange": "NYSE",
-    "market": "US",
-    "instrument_type": "adr",
-    "name": "Infosys ADR",
-    "sector_gics": "Information Technology",
-    "currency": "USD",
-    "economic_exposure": [
-      "IN"
-    ]
-  },
-  {
-    "symbol": "HDB",
-    "exchange": "NYSE",
-    "market": "US",
-    "instrument_type": "adr",
-    "name": "HDFC Bank ADR",
-    "sector_gics": "Financials",
-    "currency": "USD",
-    "economic_exposure": [
-      "IN"
-    ]
-  },
-  {
-    "symbol": "IBN",
-    "exchange": "NYSE",
-    "market": "US",
-    "instrument_type": "adr",
-    "name": "ICICI Bank ADR",
-    "sector_gics": "Financials",
-    "currency": "USD",
-    "economic_exposure": [
-      "IN"
-    ]
-  },
-  {
-    "symbol": "AVGO",
-    "exchange": "NASDAQ",
+    "symbol": "A",
+    "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
-    "name": "Broadcom Inc",
-    "sector_gics": "Information Technology",
+    "name": "Agilent Technologies Inc",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
-    ]
-  },
-  {
-    "symbol": "MSFT",
-    "exchange": "NASDAQ",
-    "market": "US",
-    "instrument_type": "stock",
-    "name": "Microsoft Corp",
-    "sector_gics": "Information Technology",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
-    "symbol": "NDIA",
-    "exchange": "ASX",
-    "market": "AU",
-    "instrument_type": "etf",
-    "name": "Global X India Nifty 50 ETF",
-    "sector_gics": "Broad",
-    "currency": "AUD",
-    "economic_exposure": [
-      "IN"
     ]
   },
   {
@@ -132,12 +36,36 @@
     ]
   },
   {
+    "symbol": "ABNB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Airbnb\u00a0Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "ABT",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Abbott Laboratories",
     "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ACGL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Arch Capital Group Ltd.",
+    "sector_gics": "Financials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -168,12 +96,216 @@
     ]
   },
   {
+    "symbol": "ADI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Analog Devices Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ADM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Archer-Daniels-Midland Company",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ADP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Automatic Data Processing Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ADSK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Autodesk Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AEE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ameren Corp",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AEP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "American Electric Power Co Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AES",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The AES Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AFL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Aflac Incorporated",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AIG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "American International Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AIZ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Assurant, Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AJG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Arthur J Gallagher & Co",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AKAM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Akamai Technologies Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ALB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Albemarle Corp",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ALGN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Align Technology Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ALL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The Allstate Corporation",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ALLE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Allegion PLC",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "AMAT",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Applied Materials Inc",
     "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AMCR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Amcor PLC",
+    "sector_gics": "Materials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -192,12 +324,36 @@
     ]
   },
   {
+    "symbol": "AME",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ametek Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "AMGN",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Amgen Inc",
     "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AMP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ameriprise Financial Inc",
+    "sector_gics": "Financials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -228,12 +384,228 @@
     ]
   },
   {
+    "symbol": "ANET",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Arista Networks",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AON",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Aon PLC",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AOS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Smith AO Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "APA Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Air Products and Chemicals Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Amphenol Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Apollo Global Management LLC Class A",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Applovin Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "APTV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Aptiv PLC",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ARE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Alexandria Real Estate Equities Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ARES",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ares Management LP",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ATO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Atmos Energy Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AVB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "AvalonBay Communities Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AVGO",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Broadcom Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AVY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Avery Dennison Corp",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AWK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "American Water Works",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AXON",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Axon Enterprise Inc.",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "AXP",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "American Express Company",
     "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "AZO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "AutoZone Inc",
+    "sector_gics": "Consumer Discretionary",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -264,12 +636,132 @@
     ]
   },
   {
+    "symbol": "BALL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ball Corporation",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BAX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Baxter International Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BBY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Best Buy Co. Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BDX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Becton Dickinson and Company",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BEN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Franklin Resources Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BF-B",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Brown-Forman Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Bunge Global SA",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BIIB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Biogen Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "BKNG",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Booking Holdings Inc",
     "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BKR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Baker Hughes Co",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BLDR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Builders FirstSource Inc",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -312,12 +804,72 @@
     ]
   },
   {
+    "symbol": "BR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Broadridge Financial Solutions Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "BRK-B",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Berkshire Hathaway Inc",
     "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BRO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Brown & Brown Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BSX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Boston Scientific Corp",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Blackstone Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "BXP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "BXP, Inc.",
+    "sector_gics": "Real Estate",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -336,6 +888,42 @@
     ]
   },
   {
+    "symbol": "CAH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cardinal Health Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CARR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Carrier Global\u00a0Corp",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CASY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Caseys General Stores Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "CAT",
     "exchange": "US",
     "market": "US",
@@ -348,11 +936,215 @@
     ]
   },
   {
+    "symbol": "CB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Chubb Ltd",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CBOE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cboe Global Markets Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CBRE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CBRE Group Inc Class A",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CCI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Crown Castle",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CCL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Carnival Corporation",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CDNS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cadence Design Systems Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CDW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CDW Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CEG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Constellation Energy Corp",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CF Industries Holdings Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CFG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Citizens Financial Group, Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CHD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Church & Dwight Company Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CHRW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CH Robinson Worldwide Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CHTR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Charter Communications Inc",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cigna Corp",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CIEN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ciena Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CINF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cincinnati Financial Corporation",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "CL",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Colgate-Palmolive Company",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CLX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The Clorox Company",
     "sector_gics": "Consumer Staples",
     "currency": "USD",
     "economic_exposure": [
@@ -372,12 +1164,120 @@
     ]
   },
   {
+    "symbol": "CME",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CME Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CMG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Chipotle Mexican Grill Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CMI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cummins Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CMS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CMS Energy Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CNC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Centene Corp",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CNP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CenterPoint Energy Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "COF",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Capital One Financial Corporation",
     "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "COHR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Coherent Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "COIN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Coinbase Global Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "COO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The Cooper Companies, Inc",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -396,12 +1296,84 @@
     ]
   },
   {
+    "symbol": "COR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cencora Inc.",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "COST",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Costco Wholesale Corp",
     "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CPAY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Corpay Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CPRT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Copart Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CPT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Camden Property Trust",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CRH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CRH PLC ADR",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CRL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Charles River Laboratories",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -420,12 +1392,96 @@
     ]
   },
   {
+    "symbol": "CRWD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Crowdstrike Holdings Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "CSCO",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Cisco Systems Inc",
     "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CSGP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CoStar Group Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CSX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "CSX Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CTAS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cintas Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CTSH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Cognizant Technology Solutions Corp Class A",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CTVA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Corteva Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "CVNA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Carvana Co",
+    "sector_gics": "Consumer Discretionary",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -456,12 +1512,132 @@
     ]
   },
   {
+    "symbol": "D",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dominion Energy Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DAL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Delta Air Lines Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DASH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "DoorDash, Inc. Class A Common Stock",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dupont De Nemours Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DDOG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Datadog Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "DE",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Deere & Company",
     "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DECK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Deckers Outdoor Corporation",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DELL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dell Technologies Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dollar General Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DGX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Quest Diagnostics Incorporated",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DHI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "DR Horton Inc",
+    "sector_gics": "Consumer Discretionary",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -492,12 +1668,264 @@
     ]
   },
   {
+    "symbol": "DLR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Digital Realty Trust Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DLTR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dollar Tree Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DOC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Healthpeak Properties Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DOV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dover Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DOW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Dow Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DPZ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Domino's Pizza Inc Common Stock",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DRI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Darden Restaurants Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DTE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "DTE Energy Company",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "DUK",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Duke Energy Corporation",
     "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DVA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "DaVita HealthCare Partners Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DVN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Devon Energy Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "DXCM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "DexCom Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Electronic Arts Inc",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EBAY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "eBay Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ECL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ecolab Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ED",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Consolidated Edison Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EFX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Equifax Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Everest Group Ltd",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EIX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Edison International",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Estee Lauder Companies Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ELV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Elevance Health Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EME",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "EMCOR Group Inc",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -516,11 +1944,455 @@
     ]
   },
   {
+    "symbol": "EOG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "EOG Resources Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EPI",
+    "exchange": "NYSEARCA",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "WisdomTree India Earnings Fund",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "EQIX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Equinix Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EQR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Equity Residential",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EQT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "EQT Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ERIE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Erie Indemnity Company",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ES",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Eversource Energy",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ESS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Essex Property Trust Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ETN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Eaton Corporation PLC",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ETR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Entergy Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EVRG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Evergy, Inc.",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Edwards Lifesciences Corp",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EXC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Exelon Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EXE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Expand Energy Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EXPD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Expeditors International of Washington, Inc.",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EXPE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Expedia Group Inc.",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "EXR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Extra Space Storage Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "F",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ford Motor Company",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FANG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Diamondback Energy Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FAST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fastenal Company",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FCX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Freeport-McMoran Copper & Gold Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FDS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "FactSet Research Systems Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "FDX",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "FedEx Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FDXF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "FedEx Freight Holding Company, Inc.",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "FirstEnergy Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FFIV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "F5 Networks Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FICO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fair Isaac Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FIS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fidelity National Information Services Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FISV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fiserv, Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FITB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fifth Third Bancorp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FIX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Comfort Systems USA Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FLEX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Flex Ltd",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FOX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fox Corp Class B",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FOXA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fox Corp Class A",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FRT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Federal Realty Investment Trust",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FSLR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "First Solar Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FTNT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fortinet Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "FTV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Fortive Corp",
     "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
@@ -540,12 +2412,48 @@
     ]
   },
   {
+    "symbol": "GDDY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Godaddy Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "GE",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "GE Aerospace",
     "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GEHC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "GE HealthCare Technologies Inc.",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GEN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Gen Digital Inc.",
+    "sector_gics": "Information Technology",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -576,12 +2484,60 @@
     ]
   },
   {
+    "symbol": "GIS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "General Mills Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Globe Life Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GLW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Corning Incorporated",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "GM",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "General Motors Company",
     "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GNRC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Generac Holdings Inc",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -612,12 +2568,108 @@
     ]
   },
   {
+    "symbol": "GPC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Genuine Parts Co",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GPN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Global Payments Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GRMN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Garmin Ltd",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "GS",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Goldman Sachs Group Inc",
     "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "GWW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "WW Grainger Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HAL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Halliburton Company",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HAS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hasbro Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HBAN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Huntington Bancshares Incorporated",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HCA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "HCA Healthcare, Inc.",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -636,12 +2688,204 @@
     ]
   },
   {
+    "symbol": "HDB",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "HDFC Bank ADR",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "HIG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hartford Financial Services Group",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HII",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Huntington Ingalls Industries Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HLT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hilton Worldwide Holdings Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HON",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Honeywell International Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "HONA",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Honeywell Aerospace Inc",
     "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HOOD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Robinhood Markets Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HPE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hewlett Packard Enterprise Co",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HPQ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "HP Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HRL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hormel Foods Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HSIC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Henry Schein Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Host Hotels & Resorts Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HSY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hershey Co",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HUBB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Hubbell Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HUM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Humana Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "HWM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Howmet Aerospace\u00a0Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IBKR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Interactive Brokers Group Inc",
+    "sector_gics": "Financials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -657,6 +2901,114 @@
     "currency": "USD",
     "economic_exposure": [
       "US"
+    ]
+  },
+  {
+    "symbol": "IBN",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "ICICI Bank ADR",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "ICE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Intercontinental Exchange Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IDXX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "IDEXX Laboratories Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IEX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "IDEX Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IFF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "International Flavors & Fragrances Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "INCY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Incyte Corporation",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "INDA",
+    "exchange": "BATS",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "iShares MSCI India ETF",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "INDY",
+    "exchange": "NYSEARCA",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "iShares India 50 ETF",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "INFY",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "Infosys ADR",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
     ]
   },
   {
@@ -684,12 +3036,156 @@
     ]
   },
   {
+    "symbol": "INVH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Invitation Homes Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "International Paper",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IQV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "IQVIA Holdings Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IRM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Iron Mountain Incorporated",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "ISRG",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Intuitive Surgical Inc",
     "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Gartner Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ITW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Illinois Tool Works Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "IVZ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Invesco Plc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "J",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Jacobs Solutions Inc.",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "JBHT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "JB Hunt Transport Services Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "JBL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Jabil Circuit Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "JCI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Johnson Controls International PLC",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "JKHY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Jack Henry & Associates Inc",
+    "sector_gics": "Financials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -720,6 +3216,114 @@
     ]
   },
   {
+    "symbol": "KDP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Keurig Dr Pepper Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KEY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "KeyCorp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KEYS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Keysight Technologies Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KHC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kraft Heinz Co",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KIM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kimco Realty Corporation",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KKR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "KKR & Co. Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KLAC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "KLA Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KMB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kimberly-Clark Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KMI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kinder Morgan Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "KO",
     "exchange": "US",
     "market": "US",
@@ -732,12 +3336,120 @@
     ]
   },
   {
+    "symbol": "KR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kroger Company",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "KVUE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Kenvue Inc.",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "L",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Loews Corp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LDOS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Leidos Holdings Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LEN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Lennar Corporation",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Laboratory Corporation of America Holdings",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LHX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "L3Harris Technologies Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LII",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Lennox International Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "LIN",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Linde plc Ordinary Shares",
     "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LITE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Lumentum Holdings Inc",
+    "sector_gics": "Information Technology",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -768,6 +3480,18 @@
     ]
   },
   {
+    "symbol": "LNT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Alliant Energy Corp",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "LOW",
     "exchange": "US",
     "market": "US",
@@ -792,6 +3516,66 @@
     ]
   },
   {
+    "symbol": "LULU",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Lululemon Athletica Inc.",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LUV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Southwest Airlines Company",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LVS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Las Vegas Sands Corp",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LYB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "LyondellBasell Industries NV",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "LYV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Live Nation Entertainment Inc",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "MA",
     "exchange": "US",
     "market": "US",
@@ -804,12 +3588,84 @@
     ]
   },
   {
+    "symbol": "MAA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Mid-America Apartment Communities Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MAR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Marriott International Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MAS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Masco Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "MCD",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "McDonald\u2019s Corporation",
     "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MCHP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Microchip Technology Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MCK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "McKesson Corporation",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MCO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Moodys Corporation",
+    "sector_gics": "Financials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -840,12 +3696,60 @@
     ]
   },
   {
+    "symbol": "MET",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "MetLife Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "META",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Meta Platforms Inc.",
     "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MGM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "MGM Resorts International",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MKC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "McCormick & Company Incorporated",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MLM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Martin Marietta Materials Inc",
+    "sector_gics": "Materials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -864,12 +3768,60 @@
     ]
   },
   {
+    "symbol": "MNST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Monster Beverage Corp",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "MO",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Altria Group",
     "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MOS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The Mosaic Company",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MPC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Marathon Petroleum Corp",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MPWR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Monolithic Power Systems Inc",
+    "sector_gics": "Information Technology",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -888,12 +3840,108 @@
     ]
   },
   {
+    "symbol": "MRNA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Moderna Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MRSH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Marsh & McLennan Companies, Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MRVL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Marvell Technology Group Ltd",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "MS",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Morgan Stanley",
     "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MSCI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "MSCI Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MSFT",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Microsoft Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MSI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Motorola Solutions Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MTB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "M&T Bank Corporation",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "MTD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Mettler-Toledo International Inc",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -912,12 +3960,72 @@
     ]
   },
   {
+    "symbol": "NCLH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Norwegian Cruise Line Holdings Ltd",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NDAQ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Nasdaq Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NDIA",
+    "exchange": "ASX",
+    "market": "AU",
+    "instrument_type": "etf",
+    "name": "Global X India Nifty 50 ETF",
+    "sector_gics": "Broad",
+    "currency": "AUD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "NDSN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Nordson Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "NEE",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Nextera Energy Inc",
     "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NEM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Newmont Goldcorp Corp",
+    "sector_gics": "Materials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -936,12 +4044,36 @@
     ]
   },
   {
+    "symbol": "NI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "NiSource Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "NKE",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Nike Inc",
     "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NOC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Northrop Grumman Corporation",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -960,11 +4092,179 @@
     ]
   },
   {
+    "symbol": "NRG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "NRG Energy Inc.",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NSC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Norfolk Southern Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NTAP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "NetApp Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NTRS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Northern Trust Corporation",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NUE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Nucor Corp",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "NVDA",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "NVIDIA Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NVR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "NVR Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NWS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "News Corp B",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NWSA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "News Corp A",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "NXPI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "NXP Semiconductors NV",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "O",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Realty Income Corporation",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ODFL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Old Dominion Freight Line Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "OKE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "ONEOK Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "OMC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Omnicom Group Inc",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ON",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "ON Semiconductor Corporation",
     "sector_gics": "Information Technology",
     "currency": "USD",
     "economic_exposure": [
@@ -978,6 +4278,102 @@
     "instrument_type": "stock",
     "name": "Oracle Corporation",
     "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ORLY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "O\u2019Reilly Automotive Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "OTIS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Otis Worldwide Corp",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "OXY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Occidental Petroleum Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PANW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Palo Alto Networks Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PAYX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Paychex Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PCAR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PACCAR Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PCG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PG&E Corp",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PEG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Public Service Enterprise Group Inc",
+    "sector_gics": "Utilities",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1008,12 +4404,84 @@
     ]
   },
   {
+    "symbol": "PFG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Principal Financial Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "PG",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Procter & Gamble Company",
     "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PGR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Progressive Corp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Parker-Hannifin Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PHM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PulteGroup Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PKG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Packaging Corp of America",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PLD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Prologis Inc",
+    "sector_gics": "Real Estate",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1044,6 +4512,174 @@
     ]
   },
   {
+    "symbol": "PNC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PNC Financial Services Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PNR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Pentair PLC",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PNW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Pinnacle West Capital Corp",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PODD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Insulet Corporation",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PPG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PPG Industries Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PPL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PPL Corporation",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PRU",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Prudential Financial, Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PSA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Public Storage",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PSKY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Paramount Skydance Corporation Class B Common Stock",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PSX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Phillips 66",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PTC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PTC Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PWR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Quanta Services Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "PYPL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "PayPal Holdings Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "Q",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Qnity Electronics, Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "QCOM",
     "exchange": "US",
     "market": "US",
@@ -1056,12 +4692,216 @@
     ]
   },
   {
+    "symbol": "QQQ",
+    "exchange": "NASDAQ",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "Invesco QQQ",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RCL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Royal Caribbean Cruises Ltd",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RDY",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "Dr. Reddy's Laboratories ADR",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "REG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Regency Centers Corporation",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "REGN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Regeneron Pharmaceuticals Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Regions Financial Corporation",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RJF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Raymond James Financial Inc.",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ralph Lauren Corp Class A",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RMD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "ResMed Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ROK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Rockwell Automation Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ROL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Rollins Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ROP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Roper Technologies Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ROST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ross Stores Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RSG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Republic Services Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "RTX",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "RTX Corporation",
     "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "RVTY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Revvity Inc.",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SATS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "EchoStar Corporation",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SBAC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "SBA Communications Corp",
+    "sector_gics": "Real Estate",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1092,12 +4932,108 @@
     ]
   },
   {
+    "symbol": "SHW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Sherwin-Williams Co",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SJM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The J. M. Smucker Company",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SLB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Schlumberger NV",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SMCI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Super Micro Computer Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SNA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Snap-On Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SNDK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Sandisk Corp",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SNPS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Synopsys Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "SO",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Southern Company",
     "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SOLV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Solventum Corp.",
+    "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1116,11 +5052,299 @@
     ]
   },
   {
+    "symbol": "SPGI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "S&P Global Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SPY",
+    "exchange": "NYSEARCA",
+    "market": "US",
+    "instrument_type": "etf",
+    "name": "SPDR S&P 500 ETF",
+    "sector_gics": "Broad",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SRE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Sempra Energy",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "STE",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "STERIS plc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "STLD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Steel Dynamics Inc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "STT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "State Street Corp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "STX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Seagate Technology PLC",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "STZ",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Constellation Brands Inc Class A",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Smurfit WestRock plc",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SWK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Stanley Black & Decker Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SWKS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Skyworks Solutions Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SYF",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Synchrony Financial",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SYK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Stryker Corporation",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "SYY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Sysco Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "T",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "AT&T Inc.",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TAP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Molson Coors Brewing Co Class B",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TDG",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Transdigm Group Incorporated",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TDY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Teledyne Technologies Incorporated",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TECH",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Bio-Techne Corp",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TEL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "TE Connectivity Ltd",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TER",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Teradyne Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TFC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Truist Financial Corp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TGT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Target Corporation",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TJX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The TJX Companies Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TKO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "TKO Group Holdings, Inc.",
     "sector_gics": "Communication Services",
     "currency": "USD",
     "economic_exposure": [
@@ -1152,12 +5376,144 @@
     ]
   },
   {
+    "symbol": "TPL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Texas Pacific Land Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TPR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Tapestry Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TRGP",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Targa Resources Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TRMB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Trimble Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TROW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "T. Rowe Price Group Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TRV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "The Travelers Companies Inc",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TSCO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Tractor Supply Company",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "TSLA",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Tesla Inc",
     "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TSN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Tyson Foods Inc",
+    "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Trane Technologies plc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TTD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Trade Desk Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TTWO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Take-Two Interactive Software Inc",
+    "sector_gics": "Communication Services",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1176,12 +5532,84 @@
     ]
   },
   {
+    "symbol": "TXT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Textron Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "TYL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Tyler Technologies Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "UAL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "United Airlines Holdings Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "UBER",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Uber Technologies Inc",
     "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "UDR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "UDR Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "UHS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Universal Health Services Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ULTA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ulta Beauty Inc",
+    "sector_gics": "Consumer Discretionary",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1224,6 +5652,18 @@
     ]
   },
   {
+    "symbol": "URI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "United Rentals Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "USB",
     "exchange": "US",
     "market": "US",
@@ -1248,12 +5688,228 @@
     ]
   },
   {
+    "symbol": "VEEV",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Veeva Systems Inc Class A",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VICI",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "VICI Properties Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VLO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Valero Energy Corporation",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VLTO",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Veralto Corporation",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VMC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Vulcan Materials Company",
+    "sector_gics": "Materials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VRSK",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Verisk Analytics Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VRSN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "VeriSign Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VRT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Vertiv Holdings Co",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VRTX",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Vertex Pharmaceuticals Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Vistra Corp.",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VTR",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Ventas Inc",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "VTRS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Viatris Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "VZ",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Verizon Communications Inc",
     "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WAT",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Waters Corporation",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WBD",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Warner Bros Discovery Inc",
+    "sector_gics": "Communication Services",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WDAY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Workday Inc",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WDC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Western Digital Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WEC",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "WEC Energy Group Inc",
+    "sector_gics": "Utilities",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WELL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Welltower Inc",
+    "sector_gics": "Real Estate",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1272,12 +5928,132 @@
     ]
   },
   {
+    "symbol": "WIT",
+    "exchange": "NYSE",
+    "market": "US",
+    "instrument_type": "adr",
+    "name": "Wipro Limited ADR",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "IN"
+    ]
+  },
+  {
+    "symbol": "WM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Waste Management Inc",
+    "sector_gics": "Industrials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WMB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Williams Companies Inc",
+    "sector_gics": "Energy",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
     "symbol": "WMT",
     "exchange": "US",
     "market": "US",
     "instrument_type": "stock",
     "name": "Walmart Inc.",
     "sector_gics": "Consumer Staples",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WRB",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "W. R. Berkley Corp",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WSM",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Williams-Sonoma Inc",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WST",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "West Pharmaceutical Services Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WTW",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Willis Towers Watson PLC",
+    "sector_gics": "Financials",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WY",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Weyerhaeuser Company",
+    "sector_gics": "Real Estate",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "WYNN",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Wynn Resorts Limited",
+    "sector_gics": "Consumer Discretionary",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "XEL",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Xcel Energy Inc",
+    "sector_gics": "Utilities",
     "currency": "USD",
     "economic_exposure": [
       "US"
@@ -1296,51 +6072,75 @@
     ]
   },
   {
-    "symbol": "INDY",
-    "exchange": "NYSEARCA",
+    "symbol": "XYL",
+    "exchange": "US",
     "market": "US",
-    "instrument_type": "etf",
-    "name": "iShares India 50 ETF",
-    "sector_gics": "Broad",
+    "instrument_type": "stock",
+    "name": "Xylem Inc",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
-      "IN"
+      "US"
     ]
   },
   {
-    "symbol": "EPI",
-    "exchange": "NYSEARCA",
+    "symbol": "XYZ",
+    "exchange": "US",
     "market": "US",
-    "instrument_type": "etf",
-    "name": "WisdomTree India Earnings Fund",
-    "sector_gics": "Broad",
+    "instrument_type": "stock",
+    "name": "Block, Inc",
+    "sector_gics": "Industrials",
     "currency": "USD",
     "economic_exposure": [
-      "IN"
+      "US"
     ]
   },
   {
-    "symbol": "WIT",
-    "exchange": "NYSE",
+    "symbol": "YUM",
+    "exchange": "US",
     "market": "US",
-    "instrument_type": "adr",
-    "name": "Wipro Limited ADR",
-    "sector_gics": "Information Technology",
+    "instrument_type": "stock",
+    "name": "Yum! Brands Inc",
+    "sector_gics": "Consumer Discretionary",
     "currency": "USD",
     "economic_exposure": [
-      "IN"
+      "US"
     ]
   },
   {
-    "symbol": "RDY",
-    "exchange": "NYSE",
+    "symbol": "ZBH",
+    "exchange": "US",
     "market": "US",
-    "instrument_type": "adr",
-    "name": "Dr. Reddy's Laboratories ADR",
+    "instrument_type": "stock",
+    "name": "Zimmer Biomet Holdings Inc",
     "sector_gics": "Health Care",
     "currency": "USD",
     "economic_exposure": [
-      "IN"
+      "US"
+    ]
+  },
+  {
+    "symbol": "ZBRA",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Zebra Technologies Corporation",
+    "sector_gics": "Information Technology",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
+    ]
+  },
+  {
+    "symbol": "ZTS",
+    "exchange": "US",
+    "market": "US",
+    "instrument_type": "stock",
+    "name": "Zoetis Inc",
+    "sector_gics": "Health Care",
+    "currency": "USD",
+    "economic_exposure": [
+      "US"
     ]
   }
 ]
