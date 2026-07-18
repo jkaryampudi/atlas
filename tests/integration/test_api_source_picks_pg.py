@@ -118,3 +118,37 @@ def test_list_and_edge_read_recorded_picks(client):
     edge = {(e["source"], e["horizon"]): e for e in c.get("/v1/research/source-picks/edge").json()}
     e20 = edge[("investing.com", 20)]
     assert e20["n_matured"] == 1 and e20["outperform_rate"] == 1.0
+
+
+def test_dossier_composes_pick_memo_and_cross_check(client):
+    c, s = client
+    pid = s.execute(text(
+        "INSERT INTO research.source_picks (source, ticker, recommendation_date, "
+        " as_of_session, feature_version, features, excess_20) "
+        "VALUES ('investing.com','ZED','2026-01-02','2026-01-02','v1', "
+        " CAST(:f AS jsonb), 0.05) RETURNING id"),
+        {"f": '{"mom_12_1": 0.4, "sector_gics": "Energy", "spy_regime": "bull"}'}
+        ).scalar()
+    # Atlas's committee analyzed the same name, and DISAGREED (WATCHLIST).
+    s.execute(text(
+        "INSERT INTO research.memos (memo_type, instrument_symbol, recommendation, "
+        " conviction, thesis, dissent, evidence_refs, source) "
+        "VALUES ('committee','ZED','WATCHLIST','LOW','thin edge','could pop','[]','investing.com')"))
+    s.commit()
+
+    d = c.get(f"/v1/research/source-picks/{pid}/dossier").json()
+    assert d["ticker"] == "ZED"
+    assert d["cross_check"]["source_call"] == "BUY"
+    assert d["cross_check"]["atlas_committee"] == "WATCHLIST"
+    assert d["cross_check"]["atlas_agrees"] is False          # BUY vs WATCHLIST -> diverge
+    assert d["cross_check"]["momentum_supports"] is True      # mom_12_1 > 0
+    assert d["cross_check"]["outcome_so_far"] == "outperforming"   # excess_20 = +0.05
+    assert d["memo"]["recommendation"] == "WATCHLIST"
+    assert d["features"]["sector_gics"] == "Energy"
+
+
+def test_dossier_unknown_pick_is_404(client):
+    c, _ = client
+    r = c.get("/v1/research/source-picks/00000000-0000-0000-0000-000000000000/dossier")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"

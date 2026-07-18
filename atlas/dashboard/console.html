@@ -237,7 +237,9 @@
         </div>
       </div>
       <div class="card" id="sp-edge"><div class="quiet">no matured picks yet — grade after a couple of monthly rounds mature (20+ sessions)</div></div>
+      <div class="note" style="margin:0 0 8px">Click any ticker for its full dossier — fingerprint, performance, Atlas's own committee view and signal-engine flags, and the cross-check of where they agree or diverge. Print it to PDF from there.</div>
       <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
+      <div class="card" id="sp-dossier" style="display:none"></div>
 
       <h2>Desk Scorecard — Graded Against SPY</h2>
       <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
@@ -859,13 +861,113 @@ async function renderPickList(){
     ${r.data.map(p=>`<tr style="border-top:1px solid var(--line)">
       <td style="padding:4px 8px;color:var(--dim)">${esc(p.recommendation_date)}</td>
       <td style="color:var(--gold)">${esc(p.source)}</td>
-      <td class="sym">${esc(p.ticker)}</td>
+      <td><button class="sp-dossier-btn sym" data-id="${esc(p.id)}" data-ticker="${esc(p.ticker)}" style="background:none;border:none;color:var(--blue);cursor:pointer;font-family:inherit;font-size:inherit;padding:0;text-decoration:underline;text-underline-offset:2px">${esc(p.ticker)}</button></td>
       <td style="color:var(--dim)">${esc(p.sector||"—")}</td>
       <td style="color:var(--dim)">${esc(p.spy_regime||"—")}</td>
       <td>${p.mom_12_1===null||p.mom_12_1===undefined?"—":(p.mom_12_1*100).toFixed(0)+"%"}</td>
       ${[p.excess_5,p.excess_10,p.excess_20,p.excess_60].map(x=>`<td>${x===null||x===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x)}">${x>0?"+":""}${spPct(x)}</span>`}</td>`).join("")}
     </tr>`).join("")}
   </table>`;
+  el.querySelectorAll("button.sp-dossier-btn").forEach(b=>b.onclick=()=>openDossier(b.dataset.id, b.dataset.ticker));
+}
+
+/* ---- per-stock dossier: recommendation vs models vs performance ---- */
+function ck(v){ return v===true?'<span class="pill g">✓ agree</span>':v===false?'<span class="pill r">✗ diverge</span>':'<span class="pill gray">—</span>'; }
+function fmtFeat(v,pct){ return v===null||v===undefined?"—":(pct?(v*100).toFixed(1)+"%":(typeof v==="number"?v.toLocaleString(undefined,{maximumFractionDigits:2}):esc(String(v)))); }
+let lastDossier = null;
+
+async function openDossier(id, ticker){
+  const el = document.getElementById("sp-dossier");
+  el.style.display = "block";
+  el.innerHTML = `<div class="quiet">loading ${esc(ticker)} dossier…</div>`;
+  el.scrollIntoView({behavior:"smooth", block:"nearest"});
+  const r = await get(`/v1/research/source-picks/${encodeURIComponent(id)}/dossier`);
+  if(r.err || r.status===404) return el.innerHTML = `<div class="quiet">could not load dossier — ${esc(r.err||"not found")}</div>`;
+  lastDossier = r.data;
+  el.innerHTML = dossierHTML(r.data, id);
+  const ab = document.getElementById("dsr-analyze");
+  if(ab) ab.onclick = async()=>{
+    ab.disabled = true; ab.textContent = "DESK RUNNING…";
+    const rr = await postFull("/v1/research/analyze", {symbol: r.data.ticker, source: r.data.source});
+    if(rr.err || rr.status!==200){ ab.disabled=false; ab.textContent="ANALYZE WITH DESK — RETRY"; return; }
+    ab.textContent = rr.data.started ? "DESK RUNNING… (~2 min, then reopen)" : "DESK BUSY — one at a time";
+  };
+  const pb = document.getElementById("dsr-print");
+  if(pb) pb.onclick = ()=>printDossier(r.data);
+}
+
+function dossierHTML(d, id){
+  const f = d.features||{}, x = d.excess||{}, c = d.cross_check||{}, m = d.memo, sig = d.atlas_signals||[];
+  const perf = [5,10,20,60].map(h=>`<span style="margin-right:14px">@${h}s ${x[h]===null||x[h]===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x[h])}">${x[h]>0?"+":""}${(x[h]*100).toFixed(1)}%</span>`}</span>`).join("");
+  const feats = [["12-1 momentum","mom_12_1",true],["20d return","ret_20d",true],["63d return","ret_63d",true],["vol (20d, ann)","vol_20d_ann",true],["RSI(14)","rsi_14",false],["trailing P/E","trailing_pe",false],["forward P/E","forward_pe",false],["P/S ttm","ps_ttm",false],["rev growth yoy","revenue_growth_yoy",true],["ROE","roe",true],["profit margin","profit_margin",true],["mkt cap","market_cap",false],["sessions to earnings","sessions_to_next_earnings",false]];
+  return `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+      <div><span class="sym" style="font-size:16px">${esc(d.ticker)}</span> <span class="chip" style="color:var(--gold);border-color:rgba(226,185,91,0.5)">${esc(d.source)}: ${esc(d.source_recommendation)}</span> <span class="quiet">recommended ${esc(d.recommendation_date)} · features as of ${esc(d.as_of_session)}</span></div>
+      <div style="display:flex;gap:8px">
+        <button id="dsr-analyze" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;padding:6px 12px;cursor:pointer">${m?"RE-ANALYZE WITH DESK":"ANALYZE WITH DESK"}</button>
+        <button id="dsr-print" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;padding:6px 12px;cursor:pointer">PRINT / PDF</button>
+      </div>
+    </div>
+    <h3 style="margin:12px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">CROSS-CHECK — do they agree?</h3>
+    <table style="border-collapse:collapse;font-family:var(--mono);font-size:12px">
+      <tr><td style="padding:3px 14px 3px 0">Source vs Atlas committee</td><td>${ck(c.atlas_agrees)}</td><td style="color:var(--dim);padding-left:10px">${esc(c.source_call)} vs ${esc(c.atlas_committee)}</td></tr>
+      <tr><td style="padding:3px 14px 3px 0">Momentum supports the call</td><td>${ck(c.momentum_supports)}</td><td style="color:var(--dim);padding-left:10px">12-1 momentum ${fmtFeat(f.mom_12_1,true)}</td></tr>
+      <tr><td style="padding:3px 14px 3px 0">Atlas's own signal engine flags it</td><td>${(c.atlas_signal_flags||[]).length?'<span class="pill g">✓ '+esc(c.atlas_signal_flags.join(", "))+'</span>':'<span class="pill gray">— none</span>'}</td><td style="color:var(--dim);padding-left:10px">${sig.length?sig.map(s=>esc(s.family)+" rank "+(s.rank??"—")).join(" · "):"not a current signal winner"}</td></tr>
+      <tr><td style="padding:3px 14px 3px 0">Outcome so far (vs SPY @20s)</td><td>${c.outcome_so_far==="outperforming"?'<span class="pill g">outperforming</span>':c.outcome_so_far==="underperforming"?'<span class="pill r">underperforming</span>':'<span class="pill gray">'+esc(c.outcome_so_far)+'</span>'}</td><td></td></tr>
+    </table>
+    <h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">PERFORMANCE vs SPY</h3>
+    <div style="font-family:var(--mono);font-size:12px">${perf}</div>
+    <h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">FINGERPRINT — point-in-time features</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px 18px;font-family:var(--mono);font-size:12px">
+      ${feats.map(([lab,key,pct])=>`<div><span class="quiet">${lab}:</span> ${fmtFeat(f[key],pct)}</div>`).join("")}
+      <div><span class="quiet">sector:</span> ${esc(f.sector_gics||"—")}</div>
+      <div><span class="quiet">SPY regime:</span> ${esc(f.spy_regime||"—")}</div>
+    </div>
+    ${m?`<h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">ATLAS COMMITTEE VIEW</h3>
+      <div style="border-left:2px solid var(--line-strong);padding-left:12px">
+        <div><span class="rec ${esc(m.recommendation)}">${esc(m.recommendation)}</span> <span class="quiet">conviction ${esc(m.conviction)} · ${esc(ts(m.created_at))}</span></div>
+        <p style="margin:6px 0"><span class="quiet">thesis:</span> ${esc(m.thesis)}</p>
+        <p style="margin:6px 0;color:rgba(255,92,92,0.85)"><span class="quiet" style="color:var(--dim)">dissent:</span> ${esc(m.dissent)}</p>
+        ${(m.kill_criteria||[]).length?`<div class="quiet">kill criteria:</div><ul style="margin:2px 0">${m.kill_criteria.map(k=>`<li>${esc(k)}</li>`).join("")}</ul>`:""}
+      </div>`
+    :`<div class="note" style="margin-top:14px">Atlas's committee hasn't analyzed this name yet. Press ANALYZE WITH DESK to run the six-seat committee on it (~2 min, ~$0.23) — then reopen this dossier to see its BUY/WATCHLIST/REJECT and whether it agrees with the source.</div>`}`;
+}
+
+function printDossier(d){
+  const f = d.features||{}, x = d.excess||{}, c = d.cross_check||{}, m = d.memo, sig = d.atlas_signals||[];
+  const row=(k,v)=>`<tr><td>${k}</td><td>${v}</td></tr>`;
+  const pct=v=>v===null||v===undefined?"—":(v*100).toFixed(1)+"%";
+  const w = window.open("", "_blank");
+  if(!w) return;
+  w.document.write(`<html><head><title>${esc(d.ticker)} — Atlas dossier ${esc(d.recommendation_date)}</title>
+    <style>body{font-family:Georgia,serif;color:#111;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.5}
+    h1{font-size:22px;margin:0 0 2px} .sub{color:#666;font-size:13px;margin-bottom:20px}
+    h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#666;border-bottom:1px solid #ddd;padding-bottom:4px;margin:22px 0 8px}
+    table{border-collapse:collapse;width:100%;font-size:13px} td{padding:3px 10px 3px 0;vertical-align:top}
+    td:first-child{color:#666;width:230px} .g{color:#1a7f37;font-weight:bold} .r{color:#b32020;font-weight:bold}
+    .thesis{border-left:3px solid #ccc;padding-left:12px} .diss{color:#8a2020}
+    @media print{body{margin:0}}</style></head><body>
+    <h1>${esc(d.ticker)}</h1>
+    <div class="sub">${esc(d.source)} recommendation: <b>${esc(d.source_recommendation)}</b> · ${esc(d.recommendation_date)} · features as of ${esc(d.as_of_session)} · generated by Atlas AI Capital (paper mode — not investment advice)</div>
+    <h2>Cross-check</h2><table>
+      ${row("Source vs Atlas committee", (c.atlas_agrees===true?'<span class="g">agree</span>':c.atlas_agrees===false?'<span class="r">diverge</span>':'—')+" ("+esc(c.source_call)+" vs "+esc(c.atlas_committee)+")")}
+      ${row("Momentum supports the call", c.momentum_supports===true?'<span class="g">yes</span>':c.momentum_supports===false?'<span class="r">no</span>':"—")}
+      ${row("Atlas signal engine flags it", (c.atlas_signal_flags||[]).length?'<span class="g">'+esc(c.atlas_signal_flags.join(", "))+'</span>':"none")}
+      ${row("Outcome so far (vs SPY @20s)", esc(c.outcome_so_far))}
+    </table>
+    <h2>Performance vs SPY</h2><table>
+      ${[5,10,20,60].map(h=>row("@"+h+" sessions", pct(x[h]))).join("")}</table>
+    <h2>Fingerprint (point-in-time)</h2><table>
+      ${row("12-1 momentum",pct(f.mom_12_1))}${row("20-day return",pct(f.ret_20d))}${row("63-day return",pct(f.ret_63d))}
+      ${row("volatility (20d, annualized)",pct(f.vol_20d_ann))}${row("RSI(14)",f.rsi_14?f.rsi_14.toFixed(1):"—")}
+      ${row("trailing P/E",f.trailing_pe??"—")}${row("forward P/E",f.forward_pe??"—")}${row("P/S ttm",f.ps_ttm??"—")}
+      ${row("revenue growth yoy",pct(f.revenue_growth_yoy))}${row("ROE",pct(f.roe))}${row("profit margin",pct(f.profit_margin))}
+      ${row("sector",esc(f.sector_gics||"—"))}${row("SPY regime",esc(f.spy_regime||"—"))}${row("sessions to next earnings",f.sessions_to_next_earnings??"—")}</table>
+    <h2>Atlas signal engine</h2>${sig.length?`<table>${sig.map(s=>row(esc(s.family),"rank "+(s.rank??"—")+" · formation "+pct(s.formation_return))).join("")}</table>`:"<p>Not a current signal winner.</p>"}
+    <h2>Atlas committee view</h2>${m?`<div class="thesis"><p><b>${esc(m.recommendation)}</b> · conviction ${esc(m.conviction)}</p><p>${esc(m.thesis)}</p><p class="diss"><i>Dissent:</i> ${esc(m.dissent)}</p></div>`:"<p>Not analyzed by the committee.</p>"}
+    <p style="color:#999;font-size:11px;margin-top:30px">Measured, never applied — this pick carries no path to capital. Paper mode. Not investment advice.</p>
+    </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(), 300);
 }
 
 let spTimer = null;

@@ -248,6 +248,83 @@ def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[
     return out
 
 
+@router.get("/source-picks/{pick_id}/dossier")
+def source_pick_dossier(pick_id: str) -> Any:
+    """One pick's full research dossier: the recommendation, its point-in-time
+    fingerprint, performance vs SPY across horizons, Atlas's own committee memo
+    (if the desk analyzed it), Atlas's independent signal-engine flags for the
+    same name, and a CROSS-CHECK — where the source call, Atlas's view, the
+    momentum model, and the actual outcome AGREE or DIVERGE. Divergence is where
+    the learning lives. Strictly a read of what's recorded."""
+    with session_scope() as s:
+        pick = s.execute(text(
+            "SELECT id, source, ticker, recommendation_date, as_of_session, "
+            " source_recommendation, excess_5, excess_10, excess_20, excess_60, "
+            " features FROM research.source_picks WHERE id = :id"),
+            {"id": pick_id}).mappings().first()
+        if pick is None:
+            return JSONResponse(status_code=404, content={"error": {
+                "code": "NOT_FOUND", "message": f"unknown pick {pick_id}",
+                "details": None}})
+        ticker = pick["ticker"]
+        feats = pick["features"] or {}
+
+        memo = s.execute(text(
+            "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
+            " source, created_at FROM research.memos "
+            "WHERE instrument_symbol = :t ORDER BY created_at DESC LIMIT 1"),
+            {"t": ticker}).mappings().first()
+
+        # Atlas's OWN statistical signals still valid for this name (the models
+        # independently flagging it): family + rank + formation return.
+        signals = [dict(r) for r in s.execute(text(
+            "SELECT st.family, sig.rank, sig.formation_return, sig.valid_until "
+            "FROM quant.signals sig "
+            "JOIN market.instruments i ON i.id = sig.instrument_id "
+            "JOIN quant.strategies st ON st.id = sig.strategy_id "
+            "WHERE i.symbol = :t AND sig.valid_until >= :d "
+            "ORDER BY sig.rank NULLS LAST"),
+            {"t": ticker, "d": pick["recommendation_date"]}).mappings()]
+
+        excess = {h: (float(pick[f"excess_{h}"]) if pick[f"excess_{h}"] is not None
+                      else None) for h in (5, 10, 20, 60)}
+        mom = feats.get("mom_12_1")
+
+        # ---- cross-check: does everyone agree? ----
+        atlas_rec = memo["recommendation"] if memo else None
+        source_bullish = pick["source_recommendation"] == "BUY"
+        cross = {
+            "source_call": pick["source_recommendation"],
+            "atlas_committee": atlas_rec or "not analyzed",
+            "atlas_agrees": (None if atlas_rec is None else
+                             (atlas_rec == "BUY") == source_bullish),
+            "momentum_supports": (None if mom is None else mom > 0),
+            "atlas_signal_flags": [sig["family"] for sig in signals],
+            "outcome_so_far": (
+                "too early" if excess[20] is None else
+                ("outperforming" if excess[20] > 0 else
+                 "underperforming" if excess[20] < 0 else "flat")),
+        }
+        return {
+            "ticker": ticker, "source": pick["source"],
+            "source_recommendation": pick["source_recommendation"],
+            "recommendation_date": pick["recommendation_date"].isoformat(),
+            "as_of_session": pick["as_of_session"].isoformat(),
+            "features": feats, "excess": excess,
+            "memo": (None if memo is None else {
+                "recommendation": memo["recommendation"],
+                "conviction": memo["conviction"], "thesis": memo["thesis"],
+                "dissent": memo["dissent"], "kill_criteria": memo["kill_criteria"],
+                "source": memo["source"],
+                "created_at": memo["created_at"].isoformat()}),
+            "atlas_signals": [{"family": sig["family"], "rank": sig["rank"],
+                               "formation_return": (float(sig["formation_return"])
+                                                    if sig["formation_return"] is not None
+                                                    else None)} for sig in signals],
+            "cross_check": cross,
+        }
+
+
 @router.get("/memos/{memo_id}/decision-flow")
 def decision_flow(memo_id: str) -> Any:
     """One memo's journey through the funnel, stage by stage: SCANNER (why the
