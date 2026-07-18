@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 935 passing (isolated to the atlas_test database)
+pytest             # currently 1354 passing (isolated to the atlas_test database)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
@@ -59,7 +59,8 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 7. ~~**P5 trading API + console**~~ DONE (`atlas/api/routers/trading.py`, console TRADING page).
 8. ~~**P5 exits + daily pipeline**~~ DONE — GO-LIVE stack: exit engine (`atlas/dcp/trading/exits.py`: pre-authorized stop exits, discretionary close), sell settlement + FIFO lots, nightly incremental ingest (`atlas/dcp/market_data/daily.py` + `seeds/universe.json`), T0–T9 cycle (`atlas/ops/daily.py`, one atomic checkpointed transaction/day, settle-before-stops ordering), paper reconciliation (break = kill), alerts (`atlas/ops/alerts.py`, set `ATLAS_ALERT_URL`), launchd supervision + nightly `pg_dump` (`make install-ops`).
 9. ~~**Memo→proposal bridge**~~ DONE (ADR-0006 stop derivation + ADR-0010 signal wiring; earnings calendar + regime + scanner context + SIGNALS in the evidence corpus; scorecard with dartboard baseline + source slices).
-10. **Next**: implementable-variant backtest (ADR-0010 obligation: validate the recipe on the ADR-0007 trading universe); approval-contract refinement (percentile bands + sleeve sub-accounting, board item 7); index-core allocation ADR (Principal); EODHD fundamentals into evidence; DD2/DD3 dual-confirm human clearing; monthly §14 attribution job; Linux-box migration (board #1; iCloud conflict-copy risk).
+10. ~~**Post-ADR-0010 hardening bundle**~~ DONE — implementable variants (xsmom PASS; PEAD FAIL → ADR-0015 sleeve to 0), derived tighten-only bands + CUSUM, index-core 70/10/20 (ADR-0012/0014/0015), specialists + fundamentals in evidence, DD2/DD3 dual-confirm clearing (`risk/clearance.py`), attribution (0027), feature store p1 (0024), learning loop measured-only (0030), reliability layer (0031), **S&P 500 expansion + lineage-scoped DSR counting (ADR-0016 executed 2026-07-18: 511 US active, migration 0032, `activate_universe --reconcile` for semi-annual drift)**.
+11. **Next**: shadow-comparison completion (blocked on API credits); feature-store phase 2 (generators/backtests onto the store); learning-loop Tier-1 activation (Principal decision; needs ~60 sessions of matured labels); Linux-box migration (board #1 — deferred by Principal 2026-07-18); NIFTY 50 direct (blocked: EODHD has zero NSE coverage; vendor procurement is a Principal decision).
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.
