@@ -23,6 +23,7 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.research.stock_models import compute_models
 from atlas.dcp.scorecard import dartboard_baseline, dissent_right, vindicated
 
 router = APIRouter()
@@ -258,9 +259,9 @@ def source_pick_dossier(pick_id: str) -> Any:
     the learning lives. Strictly a read of what's recorded."""
     with session_scope() as s:
         pick = s.execute(text(
-            "SELECT id, source, ticker, recommendation_date, as_of_session, "
-            " source_recommendation, excess_5, excess_10, excess_20, excess_60, "
-            " features FROM research.source_picks WHERE id = :id"),
+            "SELECT id, instrument_id, source, ticker, recommendation_date, "
+            " as_of_session, source_recommendation, excess_5, excess_10, "
+            " excess_20, excess_60, features FROM research.source_picks WHERE id = :id"),
             {"id": pick_id}).mappings().first()
         if pick is None:
             return JSONResponse(status_code=404, content={"error": {
@@ -268,6 +269,8 @@ def source_pick_dossier(pick_id: str) -> Any:
                 "details": None}})
         ticker = pick["ticker"]
         feats = pick["features"] or {}
+        models = (compute_models(s, pick["instrument_id"], ticker, pick["as_of_session"])
+                  if pick["instrument_id"] is not None else None)
 
         memo = s.execute(text(
             "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
@@ -321,6 +324,7 @@ def source_pick_dossier(pick_id: str) -> Any:
                                "formation_return": (float(sig["formation_return"])
                                                     if sig["formation_return"] is not None
                                                     else None)} for sig in signals],
+            "models": models,
             "cross_check": cross,
         }
 

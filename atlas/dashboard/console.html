@@ -896,6 +896,21 @@ async function openDossier(id, ticker){
   if(pb) pb.onclick = ()=>printDossier(r.data);
 }
 
+function mBadge(s){ if(!s) return '<span class="pill gray">—</span>'; const g=s.indexOf("Buy")>=0, r=s.indexOf("Sell")>=0; return `<span class="pill ${g?"g":r?"r":"gray"}">${esc(s)}</span>`; }
+function mNum(v,d){ return v===null||v===undefined?"—":(typeof v==="number"?v.toFixed(d===undefined?2:d):esc(String(v))); }
+function mPct(v){ return v===null||v===undefined?"—":(v*100).toFixed(1)+"%"; }
+function mKV(pairs){ return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:3px 16px;font-family:var(--mono);font-size:12px">${pairs.map(p=>`<div><span class="quiet">${p[0]}:</span> ${p[1]}</div>`).join("")}</div>`; }
+function modelsHTML(m){
+  const t=m.technical||{}, mo=m.momentum||{}, v=m.valuation||{}, q=m.quality||{}, rk=m.risk||{};
+  const hd=s=>`<div style="font-weight:600;font-size:11px;color:var(--dim);margin:8px 0 2px">${s}</div>`;
+  return `<h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">STATISTICAL MODELS — deterministic, point-in-time</h3>
+    <div style="font-family:var(--mono);font-size:12px;margin-bottom:4px">Technical summary: ${mBadge(t.summary)} <span class="quiet">(${t.bullish_signals}/${t.total_signals} indicators bullish)</span></div>
+    ${hd("TECHNICAL")}${mKV([["price",mNum(m.price)],["SMA 20",mNum(t.sma_20)],["SMA 50",mNum(t.sma_50)],["SMA 100",mNum(t.sma_100)],["SMA 200",mNum(t.sma_200)],["EMA 20",mNum(t.ema_20)],["EMA 50",mNum(t.ema_50)],["RSI(14)",mNum(t.rsi_14,1)],["MACD hist",mNum(t.macd_hist,3)],["Stochastic %K",mNum(t.stochastic_k,0)],["ATR %",mPct(t.atr_pct)],["52w high",mNum(t.high_52w)],["52w low",mNum(t.low_52w)],["% of 52w range",t.pct_of_52w_range==null?"—":t.pct_of_52w_range.toFixed(0)+"%"]])}
+    ${hd("MOMENTUM / RELATIVE STRENGTH")}${mKV([["12-1 momentum",mPct(mo.mom_12_1)],["20d",mPct(mo.ret_20d)],["63d",mPct(mo.ret_63d)],["6m",mPct(mo.ret_126d)],["1y",mPct(mo.ret_252d)],["RS vs SPY (1y)",mPct(mo.rs_vs_spy_252d)]])}
+    ${hd("VALUATION")}${mKV([["trailing P/E",mNum(v.trailing_pe)],["forward P/E",mNum(v.forward_pe)],["P/S ttm",mNum(v.ps_ttm)],["EV/EBITDA",mNum(v.ev_ebitda)],["P/B",mNum(v.price_book)],["PEG",mNum(v.peg)],["div yield",mPct(v.dividend_yield)],["analyst target",mNum(v.analyst_target)],["implied upside",mPct(v.upside_pct)]])}
+    ${hd("QUALITY")}${mKV([["ROE",mPct(q.roe)],["gross margin",mPct(q.gross_margin)],["operating margin",mPct(q.operating_margin)],["profit margin",mPct(q.profit_margin)],["rev growth yoy",mPct(q.revenue_growth_yoy)],["EPS ttm",mNum(q.eps_ttm)]])}
+    ${hd("RISK")}${mKV([["volatility (20d ann)",mPct(rk.vol_20d_ann)],["beta vs SPY",mNum(rk.beta_vs_spy)],["ATR %",mPct(rk.atr_pct)]])}`;
+}
 function dossierHTML(d, id){
   const f = d.features||{}, x = d.excess||{}, c = d.cross_check||{}, m = d.memo, sig = d.atlas_signals||[];
   const perf = [5,10,20,60].map(h=>`<span style="margin-right:14px">@${h}s ${x[h]===null||x[h]===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x[h])}">${x[h]>0?"+":""}${(x[h]*100).toFixed(1)}%</span>`}</span>`).join("");
@@ -916,6 +931,7 @@ function dossierHTML(d, id){
     </table>
     <h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">PERFORMANCE vs SPY</h3>
     <div style="font-family:var(--mono);font-size:12px">${perf}</div>
+    ${d.models?modelsHTML(d.models):""}
     <h3 style="margin:14px 0 4px;font-size:12px;letter-spacing:0.1em;color:var(--dim)">FINGERPRINT — point-in-time features</h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px 18px;font-family:var(--mono);font-size:12px">
       ${feats.map(([lab,key,pct])=>`<div><span class="quiet">${lab}:</span> ${fmtFeat(f[key],pct)}</div>`).join("")}
@@ -956,6 +972,13 @@ function printDossier(d){
     </table>
     <h2>Performance vs SPY</h2><table>
       ${[5,10,20,60].map(h=>row("@"+h+" sessions", pct(x[h]))).join("")}</table>
+    ${(function(){ if(!d.models) return ""; const M=d.models, t=M.technical||{}, mo=M.momentum||{}, v=M.valuation||{}, q=M.quality||{}, rk=M.risk||{}; const nm=x=>x==null?"—":(typeof x==="number"?x.toFixed(2):x);
+      return `<h2>Statistical models (deterministic, point-in-time)</h2>
+      <p><b>Technical summary: ${esc(t.summary||"—")}</b> — ${t.bullish_signals}/${t.total_signals} indicators bullish</p>
+      <table>${row("price",nm(M.price))}${row("SMA 20 / 50",nm(t.sma_20)+" / "+nm(t.sma_50))}${row("SMA 100 / 200",nm(t.sma_100)+" / "+nm(t.sma_200))}${row("EMA 20 / 50",nm(t.ema_20)+" / "+nm(t.ema_50))}${row("RSI(14)",nm(t.rsi_14))}${row("MACD histogram",nm(t.macd_hist))}${row("Stochastic %K",t.stochastic_k==null?"—":t.stochastic_k.toFixed(0))}${row("ATR %",pct(t.atr_pct))}${row("52-week high / low",nm(t.high_52w)+" / "+nm(t.low_52w))}${row("% of 52-week range",t.pct_of_52w_range==null?"—":t.pct_of_52w_range.toFixed(0)+"%")}</table>
+      <table>${row("12-1 momentum",pct(mo.mom_12_1))}${row("returns 20d / 63d",pct(mo.ret_20d)+" / "+pct(mo.ret_63d))}${row("returns 6m / 1y",pct(mo.ret_126d)+" / "+pct(mo.ret_252d))}${row("relative strength vs SPY (1y)",pct(mo.rs_vs_spy_252d))}</table>
+      <table>${row("trailing / forward P/E",nm(v.trailing_pe)+" / "+nm(v.forward_pe))}${row("P/S ttm / EV-EBITDA",nm(v.ps_ttm)+" / "+nm(v.ev_ebitda))}${row("P/B / PEG",nm(v.price_book)+" / "+nm(v.peg))}${row("dividend yield",pct(v.dividend_yield))}${row("analyst target / upside",nm(v.analyst_target)+" / "+pct(v.upside_pct))}</table>
+      <table>${row("ROE",pct(q.roe))}${row("gross / operating margin",pct(q.gross_margin)+" / "+pct(q.operating_margin))}${row("profit margin / rev growth",pct(q.profit_margin)+" / "+pct(q.revenue_growth_yoy))}${row("volatility (20d ann) / beta",pct(rk.vol_20d_ann)+" / "+nm(rk.beta_vs_spy))}</table>`; })()}
     <h2>Fingerprint (point-in-time)</h2><table>
       ${row("12-1 momentum",pct(f.mom_12_1))}${row("20-day return",pct(f.ret_20d))}${row("63-day return",pct(f.ret_63d))}
       ${row("volatility (20d, annualized)",pct(f.vol_20d_ann))}${row("RSI(14)",f.rsi_14?f.rsi_14.toFixed(1):"—")}
