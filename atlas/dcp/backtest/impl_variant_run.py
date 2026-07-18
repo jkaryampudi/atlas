@@ -55,8 +55,22 @@ Do NOT tune anything to pass — a failed gate is a valid, reportable result,
 and a FAIL here means the LIVE sleeves rest on an unvalidated extrapolation
 (a Principal decision follows; the verdict is the deliverable).
 
+FULL-UNIVERSE MODE (--top-universe 0; ADR-0016 evidence run, ADDITIVE — the
+default TOP-100 path above is byte-identical without the flag): the proposed
+universe expansion would make ~500 names active, so the LIVE momentum sleeve
+becomes top-5 of the FULL point-in-time S&P 500 — the extreme tail of a ~5x
+wider cross-section with NO liquidity screen. No existing trial covers that
+portfolio. With the flag, the per-rebalance base is the ENTIRE point-in-time
+eligible set (no dollar-volume filter; the dollar-volume matrix is not even
+loaded, proving structurally that no liquidity data is read), and ONE variant
+runs through the IDENTICAL gauntlet: family `xsmom-impl500-tr` plus the
+pre-committed `xsmom-impl500-tr-2016` kill sibling. PEAD and combined are NOT
+run at full universe — ADR-0015 sets the PEAD sleeve budget to 0, so no
+impl500 family exists for them (refused, not silently skipped).
+
 Usage: python -m atlas.dcp.backtest.impl_variant_run [--paths 1000]
            [--seed 7] [--window-end 2026-07-15] [--report PATH]
+           [--top-universe {100,0}]
 """
 from __future__ import annotations
 
@@ -134,6 +148,7 @@ from atlas.dcp.signals.xsmom.v1 import LOOKBACK, SEASONING, SKIP
 
 ROOT = Path(__file__).resolve().parents[3]
 REPORT = ROOT / "docs" / "reports" / "implementable-variant-2026-07.md"
+REPORT_500 = ROOT / "docs" / "reports" / "sp500-impl-variant-2026-07.md"
 
 # The live book shape: top-5 per sleeve (Principal 2026-07-16, imported from
 # the production signal generators — the ONE number this test exists to honor).
@@ -154,6 +169,11 @@ FAMILY_PEAD: Final[str] = "pead-impl-tr"
 FAMILY_COMBINED: Final[str] = "combined-impl-tr"
 VARIANTS: Final[tuple[str, ...]] = ("xsmom", "pead", "combined")
 
+# Full-universe mode (ADR-0016 evidence run): top-5 of the FULL point-in-time
+# S&P 500, no liquidity screen. Momentum only — ADR-0015 sets the PEAD sleeve
+# budget to 0, so no impl500 family exists for pead/combined.
+FAMILY_XSMOM_500: Final[str] = "xsmom-impl500-tr"
+
 # The vendor's CURRENT S&P 100 component codes (OEX.INDX `Components`,
 # fetched 2026-07-18 during the feasibility probe — the same call that proved
 # HistoricalTickerComponents absent). Used ONLY for the report's
@@ -171,9 +191,17 @@ OEX_COMPONENTS_2026_07_18: Final[tuple[str, ...]] = (
     "TXN", "UBER", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WFC", "WMT", "XOM")
 
 
-def impl_family(variant: str, window_start: date | None) -> str:
+def impl_family(variant: str, window_start: date | None, *,
+                full_universe: bool = False) -> str:
     base = {"xsmom": FAMILY_XSMOM, "pead": FAMILY_PEAD,
             "combined": FAMILY_COMBINED}[variant]
+    if full_universe:
+        if variant != "xsmom":
+            raise ValueError(
+                "full-universe mode registers momentum only — the PEAD sleeve "
+                f"budget is 0 (ADR-0015), so no impl500 family exists for "
+                f"{variant!r}")
+        base = FAMILY_XSMOM_500
     return base if window_start is None else f"{base}-{window_start.year}"
 
 
@@ -237,10 +265,16 @@ class AdvSelector:
     session has a dollar-volume observation (asserted). Deterministic
     tie-break (-adv, symbol); results cached per rebalance index — a pure
     property of panel + membership + volumes, shared by strategy, monkey null
-    and the equal-weight benchmark by construction."""
+    and the equal-weight benchmark by construction.
+
+    top_universe=0 (ADR-0016 evidence mode) disables the screen entirely: the
+    base IS the whole point-in-time eligible set, sorted, and no dollar-volume
+    observation is ever read (an empty matrix is valid input in that mode)."""
 
     def __init__(self, members: Mapping[str, MembershipRow],
-                 dollar_volume: Mapping[str, list[float | None]]) -> None:
+                 dollar_volume: Mapping[str, list[float | None]], *,
+                 top_universe: int = TOP_UNIVERSE) -> None:
+        self.top_universe = top_universe
         self._members = members
         self._prefix: dict[str, list[float]] = {}
         self._have: dict[str, list[bool]] = {}
@@ -257,8 +291,13 @@ class AdvSelector:
         got = self._cache.get(t)
         if got is not None:
             return got
+        elig = pit_eligible(view, self._members)
+        if self.top_universe == 0:
+            top = tuple(sorted(elig))
+            self._cache[t] = top
+            return top
         scored: list[tuple[float, str]] = []
-        for s in pit_eligible(view, self._members):
+        for s in elig:
             lo = t + 1 - ADV_WINDOW
             assert lo >= 0 and all(self._have[s][lo:t + 1]), \
                 f"{s}: dollar-volume gap inside ADV window at t={t}"
@@ -266,7 +305,7 @@ class AdvSelector:
             adv = (p[t + 1] - p[lo]) / ADV_WINDOW
             scored.append((-adv, s))
         scored.sort()
-        top = tuple(sorted(s for _, s in scored[:TOP_UNIVERSE]))
+        top = tuple(sorted(s for _, s in scored[:self.top_universe]))
         self._cache[t] = top
         return top
 
@@ -429,24 +468,31 @@ class ImplContext:
     window_end: date
 
 
-def load_impl_context(session: Session, *,
-                      window_end: date | None = None) -> ImplContext:
+def load_impl_context(session: Session, *, window_end: date | None = None,
+                      top_universe: int = TOP_UNIVERSE) -> ImplContext:
     """One total-return panel for everything (strategy, monkeys, EW, SPY —
     the convention is identical on both sides of every comparison by
     construction, exactly as in the decile runs), the dollar-volume matrix on
-    the PRICE basis, and the point-in-time earnings view."""
+    the PRICE basis, and the point-in-time earnings view.
+
+    top_universe=0 (full-universe mode): the dollar-volume matrix is NOT
+    loaded at all — the base is the whole eligible set, so no liquidity data
+    can influence any selection, structurally."""
     universe = load_pit_panel(session, window_end=window_end, total_return=True)
     panel = universe.panel
     dropped: tuple[str, ...] = ()
     if window_end is not None:
         panel, dropped = truncate_panel(panel, window_end)
     members = {s: r for s, r in universe.members.items() if s in panel.closes}
-    dollar_volume = load_dollar_volume(session, sorted(members), panel)
+    dollar_volume: dict[str, list[float | None]] = (
+        {} if top_universe == 0
+        else load_dollar_volume(session, sorted(members), panel))
     earnings, coverage = load_pead_signals(session, sorted(members),
                                            panel.dates, members)
     return ImplContext(
         universe=universe, panel=panel, members=members,
-        sleeves=ImplSleeves(AdvSelector(members, dollar_volume), earnings),
+        sleeves=ImplSleeves(AdvSelector(members, dollar_volume,
+                                        top_universe=top_universe), earnings),
         coverage=coverage, dropped_by_truncation=dropped,
         window_end=panel.dates[-1])
 
@@ -519,7 +565,8 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
     if window_start is not None and window_start <= WINDOW_START:
         raise ValueError(f"window_start {window_start} must be after the "
                          f"membership-reliability bound {WINDOW_START}")
-    family = impl_family(variant, window_start)
+    full_universe = ctx.sleeves.adv.top_universe == 0
+    family = impl_family(variant, window_start, full_universe=full_universe)
     panel, sleeves = ctx.panel, ctx.sleeves
     eval_start = WINDOW_START if window_start is None else window_start
     start_i = bisect_left(panel.dates, eval_start)
@@ -546,16 +593,23 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
             base=len(sleeves.momentum_base(view)),
             pead_base=len(sleeves.pead_base(view))))
 
+    universe_spec: str = (
+        f"point-in-time {INDEX_CODE} membership "
+        "(validation.index_membership, fail-closed interval rule), FULL "
+        "eligible set per rebalance — NO liquidity screen (ADR-0016 "
+        "expansion evidence run: top-5 of the whole point-in-time S&P 500)"
+        if full_universe else
+        f"point-in-time {INDEX_CODE} membership "
+        "(validation.index_membership, fail-closed interval rule) "
+        f"restricted per rebalance to the TOP-{TOP_UNIVERSE} by "
+        f"trailing {ADV_WINDOW}-session mean dollar volume "
+        "(split-adjusted close x vendor split-adjusted volume; "
+        "S&P 100 approximation — OEX.INDX serves no "
+        "HistoricalTickerComponents, probed 2026-07-18)")
     trials_before_total = total_trial_count(session)
     spec: dict[str, object] = {
         "family": family, "variant": variant, "version": "1.0.0",
-        "universe": f"point-in-time {INDEX_CODE} membership "
-                    "(validation.index_membership, fail-closed interval rule) "
-                    f"restricted per rebalance to the TOP-{TOP_UNIVERSE} by "
-                    f"trailing {ADV_WINDOW}-session mean dollar volume "
-                    "(split-adjusted close x vendor split-adjusted volume; "
-                    "S&P 100 approximation — OEX.INDX serves no "
-                    "HistoricalTickerComponents, probed 2026-07-18)",
+        "universe": universe_spec,
         "signals": {"xsmom": "12-1 formation (signals/xsmom/v1: LOOKBACK=252, "
                              "SKIP=21), imported",
                     "pead": "SUE (signals/pead/v1, corrected no-double-adjust "
@@ -604,9 +658,13 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
         event_type="quant.backtest.completed", entity_type="strategy",
         entity_id=f"{family}/portfolio", actor_type="dcp",
         actor_id="impl_variant_run",
-        payload={"universe": f"point-in-time {INDEX_CODE} top-{TOP_UNIVERSE} "
-                             f"by {ADV_WINDOW}-session dollar volume "
-                             "(S&P 100 approximation; OEX history unavailable)",
+        payload={"universe": (f"point-in-time {INDEX_CODE} FULL eligible set "
+                              "(no liquidity screen; ADR-0016 evidence run)"
+                              if full_universe else
+                              f"point-in-time {INDEX_CODE} top-{TOP_UNIVERSE} "
+                              f"by {ADV_WINDOW}-session dollar volume "
+                              "(S&P 100 approximation; OEX history "
+                              "unavailable)"),
                  "variant": variant, "sleeve_n": SLEEVE_N,
                  "return_convention": TR_CONVENTION,
                  "trial_id": trial_id, "n_trials": n_trials,
@@ -1036,6 +1094,293 @@ def render_impl_report(ctx: ImplContext, runs: Mapping[str, ImplRun],
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Full-universe report (ADR-0016 evidence run). Honest-renderer discipline:
+# verdicts verbatim, numbers from this run only, no robustness language —
+# the one prior-run figure quoted (the top-5-of-100 max drawdown) is a cited
+# constant from the published report, labelled as such, never recomputed.
+# ---------------------------------------------------------------------------
+
+# Cited from docs/reports/implementable-variant-2026-07.md (xsmom-impl-tr,
+# same window/seed/paths): the validated top-5-of-100 run's max drawdown.
+IMPL100_MAX_DD_CITED: Final[str] = "-51.97%"
+
+
+def render_impl500_report(ctx: ImplContext, run: ImplRun, kill: ImplRun, *,
+                          paths: int) -> str:
+    panel = ctx.panel
+    tr = ctx.universe.tr
+    assert tr is not None
+    assert all(c.base == c.eligible for c in run.counts), \
+        "full-universe mode must rank the whole eligible set"
+    last_reb = run.counts[-1]
+    r, kr = run.run.result, kill.run.result
+    decision_grade = (panel.dates[-1] - run.start).days >= 3650
+
+    def verdict(x: ImplRun) -> str:
+        return "PASS" if x.gate.passed else "FAIL"
+
+    strat_years = calendar_year_returns(r)
+    spy_years = {y.year: y for y in calendar_year_returns(run.spy)}
+
+    lines = [
+        "# TOP-5 OF THE FULL S&P 500 — the expansion's live form through the "
+        "identical gauntlet (2026-07)",
+        "",
+        "> ## WHY THIS TEST EXISTS (ADR-0016, pending — the missing trial)",
+        "> The live momentum sleeve was validated as `xsmom-impl-tr`: top-5 "
+        "of the TOP-100-by-dollar-volume",
+        "> subset of the point-in-time S&P 500 "
+        "(docs/reports/implementable-variant-2026-07.md). The proposed",
+        "> universe expansion (ADR-0016) would make ~500 names active, so "
+        "the LIVE form becomes top-5 of",
+        "> the FULL point-in-time S&P 500 — the extreme tail of a ~5x wider "
+        "cross-section with NO liquidity",
+        "> screen. That is a materially different portfolio and NO existing "
+        "trial covered it. This run",
+        "> registers it — family `" + FAMILY_XSMOM_500 + "` plus the "
+        "pre-committed kill sibling — and the",
+        "> verdicts land verbatim, pass or fail. PEAD is not run: its sleeve "
+        "budget is 0 (ADR-0015).",
+        "",
+        *(["> ## DECISION-GRADE WINDOW (ADR-0004 condition satisfied)",
+           f"> Evaluation window {run.start} → {panel.dates[-1]} (>= 10 "
+           "years); verdicts are decision-grade",
+           "> FOR THE EXPANSION QUESTION — pass or fail, recorded verbatim.",
+           ""] if decision_grade else
+          ["> ## ⚠️ SMALL-SAMPLE WARNING (ADR-0004)",
+           "> Short window; verdicts are **not decision-grade**.",
+           ""]),
+        "## Universe construction",
+        "",
+        "The point-in-time S&P 500 (validation.index_membership, fail-closed "
+        "interval rule,",
+        "delisted names included — the same membership the decile runs and "
+        "the impl-variant",
+        "run validated on), with **no liquidity screen of any kind**: at "
+        "each rebalance the",
+        "base IS the whole eligible set (member at t + price at t + "
+        f"{SEASONING} sessions of",
+        "history). The dollar-volume matrix is not even loaded in this mode "
+        "— no liquidity",
+        "data can influence selection, structurally. Consequences stated up "
+        "front:",
+        "",
+        "- The ranked cross-section is ~5x wider than the validated top-100 "
+        "base, and the",
+        "  top-5 sits in its extreme momentum tail — names the ADV screen "
+        "existed to exclude",
+        "  (thinner, smaller, closer to delisting) are now selectable.",
+        f"- Forced delisting liquidations this run: "
+        f"{len(run.run.forced_liquidations)} (the top-5-of-100 run recorded "
+        f"5 — cited); unfilled buys: {len(run.run.unfilled_buys)}.",
+        "- India ADRs remain excluded (no US index membership exists for "
+        "them); the India",
+        "  sleeve remains unvalidated by construction.",
+        "- The early-window membership undercount that flattered every PIT "
+        "run flatters this",
+        "  one identically.",
+        "",
+        "### Panel and coverage (inherited loaders, unchanged)",
+        "",
+        f"- Panel {panel.dates[0]} → {panel.dates[-1]} "
+        f"({len(panel.dates)} aligned XNYS sessions), total-return "
+        "convention on every series",
+        "  (dividends reinvested at the ex-date close; identical on both "
+        "sides of every comparison)",
+        f"- Members with usable series: {len(ctx.members)} "
+        f"({ctx.universe.included_delisted} delisted); missing series: "
+        f"{len(ctx.universe.missing_series)}; SPY carries "
+        f"{tr.spy_dividends} reinvested distributions (asserted non-zero)",
+        f"- Rebalance-set sizes at the final rebalance ({last_reb.day}): "
+        f"{last_reb.members} members / {last_reb.eligible} eligible / "
+        f"base == eligible (no screen)",
+        "- December snapshots (members/eligible = base): "
+        + "; ".join(f"{c.day.year}: {c.members}/{c.eligible}"
+                    for c in run.counts if c.day.month == 12),
+        "",
+        "## Method (everything imported, nothing restated)",
+        "",
+        f"- Construction: top-{SLEEVE_N} equal weight (SLEEVE_MAX_NAMES — "
+        "the live cap, imported); monthly rebalance at month-end close, "
+        "execution next session's open; costs "
+        f"{COSTS.commission_bps:.0f}+{COSTS.slippage_bps:.0f} bps/side on "
+        "turnover",
+        f"- Null model: {paths}-path monkey MC, min({SLEEVE_N}, |eligible|) "
+        "names drawn uniformly from the SAME full eligible set, identical "
+        "engine/costs/delisting rule (ADR-0002 #2)",
+        f"- Walk-forward: purged+embargoed, k={K_FOLDS}, horizon={HORIZON}, "
+        f"embargo={EMBARGO}, warmup = evaluation-start index (ADR-0002 #3)",
+        "- Deflated Sharpe at the family's true registered trial count "
+        "(ADR-0002 #1); every run registered in quant.trial_registry",
+        "- Binding benchmark: SPY buy-and-hold TOTAL return over the same "
+        "window (ADR-0009)",
+        f"- Pre-committed kill-only trial: evaluation start {KILL_START} "
+        "(imported board commitment) — it can only demote, never validate",
+        "",
+        *_run_lines(run, f"Full window — `{run.family}`: momentum 12-1, "
+                         f"top-{SLEEVE_N} of the FULL PIT S&P 500"),
+        *_run_lines(kill, f"Pre-committed 2016 kill — `{kill.family}`: "
+                          "same recipe, demote-only"),
+        "## Exhibit: max drawdown — concentration at the wider tail",
+        "",
+        "The top-5-of-100 validation run drew down "
+        f"{IMPL100_MAX_DD_CITED} (cited from "
+        "docs/reports/implementable-variant-2026-07.md, `xsmom-impl-tr`, "
+        "same window/seed/paths). The full-universe tail portfolio:",
+        "",
+        "| portfolio | window | max drawdown |",
+        "|---|---|---|",
+        f"| `{run.family}` (top-5 of FULL S&P 500) | {run.start} → "
+        f"{panel.dates[-1]} | **{r.max_drawdown:.2%}** |",
+        f"| `{kill.family}` | {kill.start} → {panel.dates[-1]} "
+        f"| **{kr.max_drawdown:.2%}** |",
+        f"| `xsmom-impl-tr` (top-5 of top-100 ADV; cited) | 2012-07-02 → "
+        f"2026-07-15 | {IMPL100_MAX_DD_CITED} |",
+        f"| SPY buy-and-hold (same window as full run) | {run.start} → "
+        f"{panel.dates[-1]} | {run.spy.max_drawdown:.2%} |",
+        "",
+        "A 5-name book at 20% a name carries single-name gap risk no "
+        "drawdown statistic",
+        "captures; the number above is the historical realisation, not a "
+        "bound.",
+        "",
+        "### Exhibit: per-calendar-year total returns vs SPY TR",
+        "",
+        "| year | " + run.family + " | SPY TR |",
+        "|---|---|---|",
+        *[f"| {y.year} | {y.ret:+.2%} | {spy_years[y.year].ret:+.2%} |"
+          for y in strat_years],
+        "",
+        "## Summary",
+        "",
+        "| trial | window | strategy TR | SPY TR | margin | null p | DSR (n) "
+        "| WF+ | endpoints beat/pass | max DD | verdict |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for x in (run, kill):
+        g = x.gate
+        lines.append(
+            f"| `{x.family}` | {x.start} → {panel.dates[-1]} "
+            f"| {g.strategy_return:+.2%} | {g.spy_bh_return:+.2%} "
+            f"| {g.strategy_return - g.spy_bh_return:+.2%} "
+            f"| {g.null_p_value:.3f} | {g.dsr:.3f} ({g.n_trials}) "
+            f"| {x.wf.positive_folds}/{len(x.wf.fold_results)} "
+            f"| {sum(1 for e in x.endpoints if e.beats_spy)}/"
+            f"{sum(1 for e in x.endpoints if e.passed)}"
+            f"/{len(x.endpoints)} | {x.run.result.max_drawdown:.2%} "
+            f"| **{verdict(x)}** |")
+    lines += [
+        "",
+        f"Trial registry: **{run.trials_before_total} trials before this run "
+        f"→ {kill.trials_after_total} after** (two trials: the full-window "
+        "family and its pre-committed kill).",
+        "",
+        "## What this means for the expansion (ADR-0016)",
+        "",
+    ]
+    if run.gate.passed and kill.gate.passed:
+        lines += [
+            "Both trials cleared the binding bar: the portfolio the "
+            "expansion would actually",
+            "trade — top-5 of the full point-in-time S&P 500, no liquidity "
+            "screen — now has its",
+            "own registered evidence, on the same gauntlet the validated "
+            "top-5-of-100 form",
+            "passed. What this run does NOT settle, and ADR-0016 must still "
+            "answer before",
+            "signing:",
+            "",
+            f"- **Drawdown**: {r.max_drawdown:.2%} max drawdown on the full "
+            "window (exhibit above,",
+            f"  vs {IMPL100_MAX_DD_CITED} for top-5-of-100 and "
+            f"{run.spy.max_drawdown:.2%} for SPY). The tolerance bands and "
+            "DD breakers",
+            "  (ADR-0010, DD1-DD3) were tuned against the narrower book; "
+            "re-derive them before",
+            "  the expanded form goes live.",
+            "- **Tradability**: 10 bps/side is the validated-universe cost "
+            "convention. Without a",
+            "  liquidity screen the top-5 can land in the thinnest tail of "
+            "the index; the cost",
+            "  model has no evidence there — small-AUM fills likely help, "
+            "but that is an",
+            "  argument, not a measurement.",
+            "- **The overlay is still unmodeled**: stops (ADR-0006), L9 "
+            "staggered entries and L5",
+            "  caps are not in this backtest, exactly as they were not in "
+            "the impl-variant run.",
+        ]
+    elif run.gate.passed and not kill.gate.passed:
+        lines += [
+            "MIXED: the full-window trial cleared the bar but the "
+            "pre-committed 2016 kill —",
+            "which exists precisely to strip the flattered early window — "
+            "FAILED. Under the",
+            "board's own commitment a kill FAIL is a strike: the expansion's "
+            "live form does NOT",
+            "carry clean evidence, and ADR-0016 should not be signed on this "
+            "run. The validated",
+            "top-5-of-100 form remains the only momentum sleeve with a "
+            "passing implementable",
+            "trial.",
+        ]
+    else:
+        lines += [
+            "The full-universe form FAILED the binding bar"
+            + ("" if kill.gate.passed else " (and so did the pre-committed "
+               "kill)") + ". The expansion would move",
+            "the live momentum sleeve onto a portfolio whose own backtest "
+            "evidence does not",
+            "clear the fund's gates — the validated evidence covers "
+            "top-5-of-100 ONLY, and it",
+            "does not transfer. Signing ADR-0016 as proposed would put the "
+            "sleeve on an",
+            "unvalidated (here: invalidated) construction. Options: keep "
+            "the ADV screen in the",
+            "expanded universe (the validated form), or accept and sign the "
+            "gap explicitly.",
+            "This verdict is the deliverable.",
+        ]
+    lines += [
+        "",
+        "Caveats that survive any verdict: (1) the early-window membership "
+        "undercount",
+        "flatters this run exactly as it flattered every PIT run; (2) "
+        "endpoint",
+        "concentration must be read from the exhibit, not assumed away; (3) "
+        "costs are the",
+        "10 bps/side convention with no liquidity screen behind them; (4) "
+        "the ADR-0006",
+        "stop/entry overlay has no backtest evidence of its own; (5) the "
+        "India sleeve is",
+        "untested by construction.",
+        "",
+        "## Reproduction",
+        "",
+        "Deterministic re-run (official registration against the dev "
+        "database, after review):",
+        "",
+        "```bash",
+        f"python -m atlas.dcp.backtest.impl_variant_run --top-universe 0 "
+        f"--paths {paths} --seed 7 --window-end {panel.dates[-1]}",
+        "```",
+        "",
+        "The `--window-end` pin makes the run byte-identical even after "
+        "later nightly ingests extend the stored history.",
+        "",
+        "## Approval status",
+        "",
+        "**None sought here — by design.** This is a VALIDATION run on the "
+        "membership-gated universe; it does not qualify or disqualify any "
+        "strategy row by itself. Gates were not modified; verdicts are "
+        "recorded verbatim; whether ADR-0016 is signed is a Principal "
+        "decision made on this evidence.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def main() -> None:
     from atlas.core.db import session_scope
 
@@ -1048,8 +1393,20 @@ def main() -> None:
                    help="pin the panel's final session (reproducibility "
                         "across later ingests); default = last stored bar")
     p.add_argument("--report", type=Path, default=None)
+    p.add_argument("--top-universe", type=int, default=TOP_UNIVERSE,
+                   help=f"{TOP_UNIVERSE} = the validated large-cap screen "
+                        "(default); 0 = NO liquidity screen — top-5 of the "
+                        "full point-in-time S&P 500 (ADR-0016 evidence run, "
+                        "momentum only). No other value is sanctioned.")
     a = p.parse_args()
-    report_path: Path = a.report or REPORT
+    if a.top_universe not in (0, TOP_UNIVERSE):
+        raise SystemExit(
+            f"--top-universe must be {TOP_UNIVERSE} (the validated screen) "
+            "or 0 (full universe) — ad-hoc universe sizes would register "
+            "unsanctioned trial families")
+    full = a.top_universe == 0
+    variants: tuple[str, ...] = ("xsmom",) if full else VARIANTS
+    report_path: Path = a.report or (REPORT_500 if full else REPORT)
 
     with session_scope() as s:
         last_bar = s.execute(text(
@@ -1061,10 +1418,11 @@ def main() -> None:
         clock = FrozenClock(datetime(last_bar.year, last_bar.month,
                                      last_bar.day, 22, 0, tzinfo=UTC))
         audit = PostgresAuditLog(s, clock)
-        ctx = load_impl_context(s, window_end=a.window_end)
+        ctx = load_impl_context(s, window_end=a.window_end,
+                                top_universe=a.top_universe)
         runs: dict[str, ImplRun] = {}
         kills: dict[str, ImplRun] = {}
-        for variant in VARIANTS:
+        for variant in variants:
             runs[variant] = run_impl_variant(s, audit, ctx, variant=variant,
                                              paths=a.paths, seed=a.seed)
             kills[variant] = run_impl_variant(s, audit, ctx, variant=variant,
@@ -1083,11 +1441,13 @@ def main() -> None:
                       f"/{len(r.endpoints)} "
                       f"(reasons: {list(g.reasons) or 'none'})", flush=True)
 
-    report = render_impl_report(ctx, runs, kills, paths=a.paths)
+    report = (render_impl500_report(ctx, runs["xsmom"], kills["xsmom"],
+                                    paths=a.paths)
+              if full else render_impl_report(ctx, runs, kills, paths=a.paths))
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
     print(f"trials: {runs['xsmom'].trials_before_total} -> "
-          f"{kills['combined'].trials_after_total}")
+          f"{kills[variants[-1]].trials_after_total}")
     print(f"report written: {report_path}")
 
 
