@@ -56,8 +56,28 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   SPY-TR / 55:15-blend benchmarks). Fail-soft exactly like t5b:
                   a failed decomposition pages, the settled and protected book
                   stands, and t9 still reports
-  T9 report       summary incl. desk + bridge + attribution results -> audit +
-                  operator alert
+  T8c core        standing-core maintenance (ADR-0012 + ops-reliability build):
+                  the passive core is a STANDING POLICY, not a timely signal —
+                  if the book is outside its drift band and no live core
+                  proposal covers a leg, regenerate it through the existing
+                  build_core_proposals path (risk-checked, 72h TTL) so the
+                  core is ALWAYS one click away each morning; live proposals
+                  are never duplicated, expired/rejected ones stay history
+                  (atlas/dcp/trading/core_allocation.maintain_core_proposals).
+                  Fail-soft exactly like t5b
+  T9 report       summary incl. desk + bridge + attribution + core results ->
+                  audit + operator alert
+  T9b brief       the Principal's morning brief: ASSEMBLE (never compute) the
+                  session's cycle results, approval queue with expiry
+                  countdowns, memos, attribution, band/CUSUM status, learning
+                  line, budget spend and urgent alerts into ONE persisted
+                  jsonb row (reporting.morning_brief, migration 0031; GET
+                  /v1/reporting/brief/latest; the console BRIEF card). Also
+                  fires the once-per-proposal expiring-soon pages
+                  (atlas/ops/alerts.check_expiring_proposals). Runs AFTER t9
+                  so the brief sees every node line including t9's own.
+                  Fail-soft: a brief failure flags the run's exit code (the
+                  scheduler pages) but never touches the book or the report
 
 The run is checkpointed under run_id = daily-<date> (WorkflowRunner). The
 whole cycle runs in ONE transaction: an in-process node failure that is
@@ -107,6 +127,7 @@ from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
 from atlas.dcp.learning.loop import run_learning
 from atlas.dcp.reporting.attribution import compute_attribution_day
+from atlas.dcp.reporting.brief import persist_brief
 from atlas.dcp.scanner.v1 import scan
 from atlas.dcp.scorecard import compute_memo_outcomes, vendor_adapter_for
 from atlas.dcp.signals.pead.generate import (
@@ -116,9 +137,14 @@ from atlas.dcp.signals.pead.generate import (
 from atlas.dcp.signals.xsmom.generate import active_signal_symbols, generate_signals
 from atlas.dcp.trading.bands import check_bands, check_cusum
 from atlas.dcp.trading.bridge import bridge_memos
+from atlas.dcp.trading.core_allocation import maintain_core_proposals
 from atlas.dcp.trading.exits import scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
-from atlas.ops.alerts import notify
+from atlas.ops.alerts import (
+    check_expiring_proposals,
+    maybe_billing_outage_alert,
+    notify,
+)
 from atlas.tools.verify_chain import run as verify_chain
 
 
@@ -401,6 +427,14 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         except Exception as e:  # noqa: BLE001 — a desk failure pages, but the
             #                     book is already settled and protected
             state["desk_failed"] = True
+            # Billing-outage detector (ops-reliability build): a NON-TRANSIENT
+            # client HTTP error (4xx≠429 — runner.py propagates that class
+            # raw; the vendor's 400-credit signature) with ZERO completed LLM
+            # calls today pages ONCE per day at high priority and lands an
+            # audit event the morning brief reads. Four silent billing
+            # outages in five days are why this exists.
+            if maybe_billing_outage_alert(session, clock, exc=e):
+                state["billing_outage"] = True
             return f"desk FAILED: {e}"[:300]
         state["desk"] = report
         if getattr(report, "scan_failed", False):
@@ -440,6 +474,21 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["attribution"] = report
         return report.summary()
 
+    def t8c_core() -> str:
+        # Standing-core maintenance (module docstring): the drift band is a
+        # STANDING policy, so this runs every cycle — regenerate any uncovered
+        # drifted leg (72h TTL, risk-checked), never duplicate a live one.
+        # Fail-soft exactly like t5b: the settled, protected book stands; a
+        # SQL failure that aborts the transaction still kills the run (same
+        # caveat as the scanner's).
+        try:
+            report = maintain_core_proposals(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["core_failed"] = True
+            return f"core FAILED: {e}"[:300]
+        state["core"] = report
+        return report.summary()
+
     def t9_report() -> str:
         # scorecard FIRST (memo outcomes mature on this cycle's freshly
         # ingested bars): fail-soft exactly like the desk/bridge — the failure
@@ -476,6 +525,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         bands_report = state.get("bands")
         cusum_report = state.get("cusum")
         attribution_report = state.get("attribution")
+        core_report = state.get("core")
         failed = (bool(state.get("ingest_failed", False))
                   or bool(state.get("desk_failed", False))
                   or bool(state.get("bridge_failed", False))
@@ -485,7 +535,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                   or bool(state.get("pead_signals_failed", False))
                   or bool(state.get("bands_failed", False))
                   or bool(state.get("cusum_failed", False))
-                  or bool(state.get("attribution_failed", False)))
+                  or bool(state.get("attribution_failed", False))
+                  or bool(state.get("core_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
@@ -497,6 +548,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  cusum_report.summary() if cusum_report is not None else "cusum idle",
                  attribution_report.summary() if attribution_report is not None
                  else "attribution idle",
+                 core_report.summary() if core_report is not None
+                 else "core idle",
                  scorecard_line,
                  learning_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
@@ -517,6 +570,10 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("cusum FAILED — see log")
         if state.get("attribution_failed"):
             lines.append("attribution FAILED — see log")
+        if state.get("core_failed"):
+            lines.append("core FAILED — see log")
+        if state.get("billing_outage"):
+            lines.append("BILLING OUTAGE — API credits exhausted, desk skipped")
         summary = " · ".join(lines)
         PostgresAuditLog(session, clock).append(
             event_type="daily_cycle.completed", entity_type="pipeline",
@@ -526,6 +583,24 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         notify(f"Atlas daily {day}", summary,
                priority="high" if failed else "default")
         return summary
+
+    def t9b_brief() -> str:
+        # Morning brief + expiring-proposal pages (module docstring). Alerts
+        # run FIRST so tonight's ops.alert.urgent events are already on the
+        # chain when the brief reads them. Fail-soft: t9's report and page
+        # already landed; a brief failure flags the exit code (the scheduler
+        # pages FAILED) but never undoes anything. Same SQL-abort caveat as
+        # the scanner's.
+        try:
+            fired = check_expiring_proposals(session, clock)
+            brief = persist_brief(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["brief_failed"] = True
+            return f"brief FAILED: {e}"[:300]
+        line = brief.summary()
+        if fired:
+            line += f" · paged {len(fired)} expiring proposal(s)"
+        return line
 
     def _live(name, fn):
         """Wrap a node with @@CYCLE progress lines on stdout: the run is ONE
@@ -559,7 +634,9 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
         Node("t8b_attribution", t8b_attribution),
+        Node("t8c_core", t8c_core),
         Node("t9_report", t9_report),
+        Node("t9b_brief", t9b_brief),
     ]
     return runner.run(f"daily-{day}", [Node(n.name, _live(n.name, n.fn))
                                        for n in nodes])
@@ -605,7 +682,9 @@ def main() -> None:
               or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
               or "bands FAILED" in (results.get("t5b_bands") or "")
               or "cusum FAILED" in (results.get("t5c_cusum") or "")
-              or "attribution FAILED" in (results.get("t8b_attribution") or ""))
+              or "attribution FAILED" in (results.get("t8b_attribution") or "")
+              or "core FAILED" in (results.get("t8c_core") or "")
+              or "brief FAILED" in (results.get("t9b_brief") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 

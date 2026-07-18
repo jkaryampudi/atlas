@@ -282,6 +282,7 @@
     <section class="view" id="view-trading">
       <h1>Trading — Approval Desk</h1>
       <div class="sub">Every trade needs your seal. The machine proposes; deterministic code sizes and vetoes; you decide.</div>
+      <div id="trading-brief" style="margin-bottom:16px"><div class="quiet">awaiting data</div></div>
       <div class="card" style="border-left:2px solid var(--gold);font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--dim)">
         THE FRESH CHECK IS AUTHORITATIVE — the risk check you see below is proposal-time history.
         Clicking APPROVE re-runs all of L1–L11 against the live book at that instant; a now-FAIL
@@ -439,6 +440,56 @@ async function renderBrief(){
     <div style="font-size:10px;letter-spacing:0.2em;color:var(--faint);margin-bottom:6px">MORNING BRIEF — ${today}</div>
     <div>${needsYou}</div>
     <div style="color:var(--dim)">Memos today: ${mToday.length} (${recs}) · cage kills: <span style="color:${kills?"var(--gold)":"var(--dim)"}">${kills}</span> · spend $${((cost.data||{}).spent_usd??0).toFixed(2)} of $${((cost.data||{}).daily_cap_usd??10).toFixed(0)}</div>
+  </div>`;
+  good(el);
+}
+
+/* ---------- persisted brief (Trading page) ----------
+   The SERVER-ASSEMBLED morning brief (reporting.morning_brief, t9b): one
+   deterministic document per session, rendered verbatim — this card computes
+   nothing. Prominent flags: expiring proposals (with hour countdowns), any
+   FAILED node, band/CUSUM events, and the billing-outage signature (desk
+   spend $0.00 on a night memos were expected). */
+async function renderTradingBrief(){
+  const el = document.getElementById("trading-brief");
+  const r = await get("/v1/reporting/brief/latest");
+  if(r.err){
+    if(String(r.err).startsWith("404"))
+      { el.innerHTML = `<div class="quiet">no persisted brief yet — the daily cycle assembles one after T9</div>`; return good(el); }
+    return deg(el, r.err);
+  }
+  const p = r.data.payload || {};
+  const flags = p.flags || {}, q = p.queue || {proposals:[]}, desk = p.desk || {};
+  const banners = [];
+  if(flags.billing_outage_suspected)
+    banners.push(`<div class="alert-red">■ BILLING-OUTAGE SIGNATURE — desk spend $0.00, zero memos on a night the desk was expected. Check API credits.</div>`);
+  if((flags.failed_nodes||[]).length)
+    banners.push(`<div class="alert-red">■ CYCLE NODE FAILED — ${esc((flags.failed_nodes||[]).join(", "))}. See the jobs board / log.</div>`);
+  if((flags.expiring_proposals||[]).length)
+    banners.push(`<div class="alert-red">■ ${(flags.expiring_proposals||[]).length} PROPOSAL(S) EXPIRING SOON — approve or reject below before they die unactioned.</div>`);
+  if((flags.band_or_cusum_events||[]).length)
+    banners.push(`<div class="alert-red">■ BAND/CUSUM EVENT — ${esc((flags.band_or_cusum_events||[]).join(", "))}. See the strategy card.</div>`);
+  if(flags.no_cycle_run)
+    banners.push(`<div class="alert-red">■ NO CYCLE RUN recorded for ${esc(p.session_date)} — the machine did not run itself.</div>`);
+  const na = `<span style="color:var(--faint)">n/a</span>`;
+  const queueRows = (q.proposals||[]).map(x=>`<tr>
+      <td>${esc(x.symbol||"?")}</td><td>${esc(x.origin)}</td><td>${esc(x.action)}</td>
+      <td>${esc(x.qty)}</td><td>A$${esc(x.value_aud)}</td>
+      <td class="${x.expiring_soon?"num-neg":""}">${esc(x.hours_left)}h left${x.expiring_soon?" ⚠":""}</td></tr>`).join("");
+  const queueTable = (q.proposals||[]).length
+    ? `<table style="margin-top:8px"><tr><th>SYMBOL</th><th>ORIGIN</th><th>ACTION</th><th>QTY</th><th>VALUE</th><th>EXPIRY</th></tr>${queueRows}</table>`
+    : `<div style="color:var(--faint);margin-top:6px">queue empty — nothing awaits your seal</div>`;
+  const b = p.budget || {};
+  const strat = (p.strategies||[]).map(s=>
+    `${esc(s.family)} ${esc(s.state)}${s.cusum_breached?' <span class="num-neg">CUSUM</span>':""}${s.demoted_today?' <span class="num-neg">DEMOTED</span>':""}`).join(" · ") || "none banded";
+  el.innerHTML = banners.join("") + `<div class="card" style="border-left:2px solid var(--line-strong);font-family:var(--mono);font-size:11.5px;line-height:2">
+    <div style="font-size:10px;letter-spacing:0.2em;color:var(--faint);margin-bottom:6px">BRIEF — ${esc(p.session_date)} · cycle ${esc((p.cycle||{}).run_status||"?")} · persisted ${esc(ts(r.data.updated_at))}</div>
+    ${queueTable}
+    <div style="color:var(--dim);margin-top:8px">
+      memos ${esc((p.memos||[]).length)} · desk ${desk.failed?'<span class="num-neg">FAILED</span>':esc(desk.expected?"ran":"idle")} · spend $${(+(b.spend_usd??0)).toFixed(2)} of $${(+(b.daily_cap_usd??10)).toFixed(0)} (nightly watermark $${(+(b.nightly_watermark_usd??6)).toFixed(0)})<br>
+      ${p.attribution?esc(p.attribution.line):na} <br>
+      ${esc(p.learning_line||"")} · strategies: ${strat}
+    </div>
   </div>`;
   good(el);
 }
@@ -1641,6 +1692,7 @@ async function renderSleeveAttribution(){
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderJobs, renderAttribution, renderSleeveAttribution,
+                   renderTradingBrief,
                    renderStrategy, renderTrading,
                    renderResearch, renderScorecard, renderLearning,
                    renderProgress, renderRuns,

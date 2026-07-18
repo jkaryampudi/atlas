@@ -51,6 +51,9 @@ def _clean(s) -> None:
     # suite would give this fixture's day-one decomposition a phantom
     # predecessor and drift the t8b node line
     s.execute(text("DELETE FROM reporting.attribution_daily"))
+    # t9b brief debris (0031): a leftover persisted brief from another suite
+    # would make this fixture's "one row per session" assertions ambiguous
+    s.execute(text("DELETE FROM reporting.morning_brief"))
     # ADR-0010 wiring debris from the signal/band suites: without this, a
     # leftover paper strategy row makes t5b/t6b active and the exact node
     # strings below drift
@@ -62,6 +65,13 @@ def _clean(s) -> None:
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol LIKE 'ZCY%')"))
     s.execute(text("DELETE FROM market.instruments WHERE symbol LIKE 'ZCY%'"))
+    # t8c standing-core debris: OTHER suites commit SPY/INDA instruments with
+    # their own bar histories, which would make t8c's maintenance line
+    # nondeterministic here (stale closes -> 'core FAILED'). Deactivating them
+    # inside this test's transaction (rolled back on exit) pins the honest
+    # 'core not in universe' idle line without deleting anyone's fixtures.
+    s.execute(text("UPDATE market.instruments SET is_active = false "
+                   "WHERE symbol IN ('SPY', 'INDA')"))
 
 
 def _seed_entered_position(s, clock) -> str:
@@ -120,7 +130,11 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
         "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
         "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
-        "t9_report"]
+        "t8c_core", "t9_report", "t9b_brief"]
+    # standing-core maintenance idles honestly in a fixture without SPY/INDA
+    assert results["t8c_core"] == "core not in universe INDA, SPY"
+    # the brief landed: one persisted row for the session, honest counts
+    assert results["t9b_brief"].startswith("brief 2026-07-15: queue 0")
     # first stored session: values land, returns honestly n/a (two
     # observations needed), nothing fabricated
     assert results["t8b_attribution"] == (
@@ -327,7 +341,7 @@ REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
          "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
          "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
-         "t9_report"]
+         "t8c_core", "t9_report", "t9b_brief"]
 
 
 def test_mid_session_start_is_refused_before_the_checkpoint_exists(
@@ -432,3 +446,96 @@ def test_cli_exits_with_the_distinct_refused_code(clean_audit):
         "guard", "refused", REFUSED_MSG)
     assert s.execute(text("SELECT count(*) FROM workflow.workflow_runs "
                           "WHERE run_id = 'daily-2026-07-13'")).scalar() == 0
+
+
+# ---- ops-reliability build (2026-07): t8c standing core, t9b brief, and the
+# billing-outage detector inside the cycle ----------------------------------
+
+def test_core_maintenance_failure_is_fail_soft(clean_audit, monkeypatch):
+    """t8c is fail-soft exactly like t5b: a maintenance blow-up pages (the
+    node line records FAILED, t9 flags it) but the settled, protected book
+    stands and every later node — including the brief — still runs."""
+    import atlas.ops.daily as daily
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+
+    def exploding_core(session, clk):
+        raise RuntimeError("core maintenance exploded")
+
+    monkeypatch.setattr(daily, "maintain_core_proposals", exploding_core)
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert results["t3_settle"] == "fills=1"                 # trading unaffected
+    assert results["t6_reconcile"] == "clean"
+    assert results["t8c_core"].startswith("core FAILED: core maintenance")
+    assert "core FAILED" in results["t9_report"]
+    assert list(results.keys()) == NODES                     # every node ran
+    # the brief still landed and honestly counts the failed node
+    payload = s.execute(text(
+        "SELECT payload FROM reporting.morning_brief")).scalar_one()
+    assert "t8c_core" in payload["flags"]["failed_nodes"]
+
+
+def test_brief_failure_is_fail_soft_after_the_report(clean_audit, monkeypatch):
+    """t9b runs AFTER t9: a brief failure can never take the day's report (or
+    anything else) with it — the node line records FAILED and the run still
+    completes every node."""
+    import atlas.ops.daily as daily
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+
+    def exploding_brief(session, clk):
+        raise RuntimeError("brief assembly exploded")
+
+    monkeypatch.setattr(daily, "persist_brief", exploding_brief)
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
+    assert results["t9b_brief"].startswith("brief FAILED: brief assembly")
+    assert list(results.keys()) == NODES
+    assert results["t9_report"]                              # t9 already landed
+    assert s.execute(text(
+        "SELECT count(*) FROM reporting.morning_brief")).scalar() == 0
+
+
+def test_desk_400_with_zero_runs_pages_the_billing_outage(clean_audit):
+    """The 400-credit signature end to end inside the cycle: a desk that dies
+    on a raw non-transient client error with zero completed LLM calls today
+    pages ONCE (ops.alert.urgent, billing_outage:<date>), stamps t9, and the
+    brief flags it — the four-silent-outages failure mode, closed."""
+    import httpx
+
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    _seed_entered_position(s, clock)
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+
+    def credit_exhausted_desk(session, clk):
+        req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        raise httpx.HTTPStatusError(
+            "Client error '400 Bad Request' — credit balance too low",
+            request=req, response=httpx.Response(400, request=req))
+
+    results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES),
+                              desk=credit_exhausted_desk)
+    assert results["t7_desk"].startswith("desk FAILED: Client error '400")
+    assert "BILLING OUTAGE" in results["t9_report"]
+    ev = s.execute(text(
+        "SELECT payload FROM audit.decision_events "
+        "WHERE event_type = 'ops.alert.urgent' "
+        "  AND entity_id = 'billing_outage:2026-07-14'")).scalar_one()
+    assert ev["kind"] == "billing_outage"
+    payload = s.execute(text(
+        "SELECT payload FROM reporting.morning_brief")).scalar_one()
+    assert payload["flags"]["billing_outage_suspected"] is True
+    assert any(a["kind"] == "billing_outage"
+               for a in payload["urgent_alerts"])
+    # trading untouched, as ever
+    assert results["t3_settle"] == "fills=1"
+    assert results["t6_reconcile"] == "clean"

@@ -25,6 +25,7 @@ from atlas.api.routers import (
     market,
     portfolio,
     quant,
+    reporting,
     research,
     risk,
     system,
@@ -66,3 +67,4 @@ app.include_router(research.router, prefix="/v1/research", tags=["research"])
 app.include_router(risk.router, prefix="/v1/risk", tags=["risk"])
 app.include_router(trading.router, prefix="/v1/trading", tags=["trading"])
 app.include_router(learning.router, prefix="/v1/learning", tags=["learning"])
+app.include_router(reporting.router, prefix="/v1/reporting", tags=["reporting"])
