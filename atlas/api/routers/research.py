@@ -222,7 +222,8 @@ def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[
     """Recorded picks, newest first, with their forward-return outcome and a
     few headline features for the console table. Read-only."""
     q = ("SELECT id, source, ticker, recommendation_date, as_of_session, "
-         " source_recommendation, excess_20, excess_60, features, created_at "
+         " source_recommendation, excess_5, excess_10, excess_20, excess_60, "
+         " features, created_at "
          "FROM research.source_picks")
     params: dict[str, object] = {"n": max(1, min(limit, 1000))}
     if source:
@@ -237,6 +238,8 @@ def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[
                 "id": str(r["id"]), "source": r["source"], "ticker": r["ticker"],
                 "recommendation_date": r["recommendation_date"].isoformat(),
                 "source_recommendation": r["source_recommendation"],
+                "excess_5": (float(r["excess_5"]) if r["excess_5"] is not None else None),
+                "excess_10": (float(r["excess_10"]) if r["excess_10"] is not None else None),
                 "excess_20": (float(r["excess_20"]) if r["excess_20"] is not None else None),
                 "excess_60": (float(r["excess_60"]) if r["excess_60"] is not None else None),
                 "sector": f.get("sector_gics"), "mom_12_1": f.get("mom_12_1"),

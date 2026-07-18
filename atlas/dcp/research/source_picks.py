@@ -42,11 +42,15 @@ from atlas.dcp.market_data.adjustment import adjust_for_splits
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.market_data.fundamentals import _get, _number
 from atlas.dcp.market_data.models import Bar, Split
-from atlas.dcp.scorecard import HORIZONS, VENDOR_SOURCE, anchor_index, dartboard_baseline
+from atlas.dcp.scorecard import VENDOR_SOURCE, anchor_index, dartboard_baseline
 from atlas.dcp.signals.regime.v1 import TREND_WINDOW, VOL_WINDOW, classify_series
 from atlas.dcp.backtest.engine import OBar
 
 PICK_FEATURE_VERSION = "v1"
+# Excess-vs-SPY horizons in trading SESSIONS. 5/10 (~1-2 weeks) give the
+# Principal early visibility; 20/60 (~1-3 months) are where signal separates
+# from noise — a filter is validated on the longer ones (0034 docstring).
+PICK_HORIZONS: tuple[int, ...] = (5, 10, 20, 60)
 _MIN_REGIME_BARS = max(TREND_WINDOW, VOL_WINDOW + 1) + 1
 _RET6 = Decimal("0.000001")                 # match the memo_outcomes excess quantum
 
@@ -255,12 +259,12 @@ class GradeReport:
 
 
 def grade_picks(session: Session, clock: Clock) -> GradeReport:
-    """Fill excess_20/excess_60 for matured, ungraded picks — WRITE-ONCE
-    (WHERE ... IS NULL, so a graded outcome is a fact, never revised). excess =
-    pick_return - SPY_return over the pick's own priceable sessions from the
-    recommendation anchor, the scorecard's rule (excess > 0 = OUTperformed).
-    Fail-closed: a pick whose instrument or SPY series can't anchor is skipped,
-    not guessed."""
+    """Fill excess at every PICK_HORIZON for matured, ungraded picks —
+    WRITE-ONCE (WHERE ... IS NULL, so a graded outcome is a fact, never
+    revised). excess = pick_return - SPY_return over the pick's own priceable
+    sessions from the recommendation anchor, the scorecard's rule (excess > 0 =
+    OUTperformed). Fail-closed: a pick whose instrument or SPY series can't
+    anchor is skipped, not guessed."""
     on = clock.now().date()
     spy_iid = session.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = 'SPY' "
@@ -268,10 +272,12 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
     spy = _adjusted_closes(session, spy_iid, on) if spy_iid is not None else []
     spy_dates = [d for d, _ in spy]
     graded = immature = 0
+    cols = ", ".join(f"excess_{h}" for h in PICK_HORIZONS)
+    null_any = " OR ".join(f"excess_{h} IS NULL" for h in PICK_HORIZONS)
     rows = session.execute(text(
-        "SELECT id, instrument_id, recommendation_date, excess_20, excess_60 "
+        f"SELECT id, instrument_id, recommendation_date, {cols} "
         "FROM research.source_picks "
-        "WHERE (excess_20 IS NULL OR excess_60 IS NULL) AND instrument_id IS NOT NULL")).all()
+        f"WHERE ({null_any}) AND instrument_id IS NOT NULL")).all()
     for r in rows:
         series = _adjusted_closes(session, r.instrument_id, on)
         dates = [d for d, _ in series]
@@ -281,7 +287,8 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
             immature += 1
             continue
         updates: dict[str, Decimal] = {}
-        for h, col in ((20, "excess_20"), (60, "excess_60")):
+        for h in PICK_HORIZONS:
+            col = f"excess_{h}"
             if getattr(r, col) is not None:
                 continue
             if a + h >= len(series) or sa + h >= len(spy):
@@ -323,7 +330,7 @@ def source_edge_report(session: Session) -> list[SourceEdge]:
     out: list[SourceEdge] = []
     for source in [r.source for r in session.execute(text(
             "SELECT DISTINCT source FROM research.source_picks ORDER BY source")).all()]:
-        for h in HORIZONS:
+        for h in PICK_HORIZONS:
             col = f"excess_{h}"
             excesses = [Decimal(r.e) for r in session.execute(text(
                 f"SELECT {col} AS e FROM research.source_picks "

@@ -855,7 +855,7 @@ async function renderPickList(){
   if(r.err) return;
   if(!r.data.length){ el.innerHTML = `<div class="quiet">no picks recorded yet — paste a list above and INGEST</div>`; return; }
   el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
-    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">DATE</th><th>SOURCE</th><th>TICKER</th><th>SECTOR</th><th>REGIME</th><th>MOM 12-1</th><th>vs SPY @20s</th><th>vs SPY @60s</th></tr>
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">DATE</th><th>SOURCE</th><th>TICKER</th><th>SECTOR</th><th>REGIME</th><th>MOM 12-1</th><th>vs SPY @5s</th><th>vs SPY @10s</th><th>vs SPY @20s</th><th>vs SPY @60s</th></tr>
     ${r.data.map(p=>`<tr style="border-top:1px solid var(--line)">
       <td style="padding:4px 8px;color:var(--dim)">${esc(p.recommendation_date)}</td>
       <td style="color:var(--gold)">${esc(p.source)}</td>
@@ -863,8 +863,7 @@ async function renderPickList(){
       <td style="color:var(--dim)">${esc(p.sector||"—")}</td>
       <td style="color:var(--dim)">${esc(p.spy_regime||"—")}</td>
       <td>${p.mom_12_1===null||p.mom_12_1===undefined?"—":(p.mom_12_1*100).toFixed(0)+"%"}</td>
-      <td>${p.excess_20===null?'<span class="quiet">immature</span>':`<span class="pill ${spSign(p.excess_20)}">${p.excess_20>0?"+":""}${spPct(p.excess_20)}</span>`}</td>
-      <td>${p.excess_60===null?'<span class="quiet">immature</span>':`<span class="pill ${spSign(p.excess_60)}">${p.excess_60>0?"+":""}${spPct(p.excess_60)}</span>`}</td>
+      ${[p.excess_5,p.excess_10,p.excess_20,p.excess_60].map(x=>`<td>${x===null||x===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x)}">${x>0?"+":""}${spPct(x)}</span>`}</td>`).join("")}
     </tr>`).join("")}
   </table>`;
 }

@@ -123,20 +123,23 @@ def test_grade_is_scorecard_excess_and_write_once(pg_session):
                 recommendation_date=rd, as_of_session=rd)
 
     g = grade_picks(s, CLOCK)
-    assert g.graded == 2                                    # both horizons matured
-    row = s.execute(text("SELECT excess_20, excess_60, graded_at FROM research.source_picks")
-                    ).mappings().one()
-    # pick grew 0.4%/session vs SPY 0.1% -> excess strongly positive (outperformed)
-    assert row["excess_20"] > 0 and row["excess_60"] > row["excess_20"]
+    assert g.graded == 4                        # all four horizons matured (5/10/20/60)
+    row = s.execute(text(
+        "SELECT excess_5, excess_10, excess_20, excess_60, graded_at "
+        "FROM research.source_picks")).mappings().one()
+    # pick grows 0.4%/session vs SPY 0.1% -> excess is positive and RISES with
+    # the horizon (the outperformance compounds over more sessions).
+    assert 0 < row["excess_5"] < row["excess_10"] < row["excess_20"] < row["excess_60"]
     assert row["graded_at"] is not None
 
     # WRITE-ONCE: re-grading changes nothing (a matured outcome is a fact).
-    before = (row["excess_20"], row["excess_60"])
+    before = tuple(row[c] for c in ("excess_5", "excess_10", "excess_20", "excess_60"))
     g2 = grade_picks(s, CLOCK)
     assert g2.graded == 0
-    after = s.execute(text("SELECT excess_20, excess_60 FROM research.source_picks")
-                      ).mappings().one()
-    assert (after["excess_20"], after["excess_60"]) == before
+    after = s.execute(text(
+        "SELECT excess_5, excess_10, excess_20, excess_60 "
+        "FROM research.source_picks")).mappings().one()
+    assert tuple(after[c] for c in ("excess_5", "excess_10", "excess_20", "excess_60")) == before
 
 
 def test_source_edge_report_scores_against_dartboard(pg_session):
