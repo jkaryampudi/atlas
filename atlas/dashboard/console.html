@@ -219,7 +219,7 @@
         <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
       <h2>Source Picks — Monthly Lists</h2>
-      <div class="note">Paste a monthly list of external recommendations (e.g. investing.com). Each pick is logged with a POINT-IN-TIME feature snapshot — the substrate for a future filter — and tracked against SPY at 20/60 sessions. Nothing here becomes a trade: picks are MEASURED, NEVER APPLIED, with no path to capital. GRADE &amp; EDGE answers the honest first question — does this source beat a direction-blind dartboard? Near-zero edge means there is no skill to filter. A filter that skews the book toward the outperformers would first have to clear the full validation gauntlet and a signature.</div>
+      <div class="note">Paste a monthly list (e.g. investing.com). Each pick is logged with a point-in-time snapshot and tracked vs SPY. Measured, never traded. GRADE &amp; EDGE shows whether the source beats a dartboard.</div>
       <div class="card" style="margin-bottom:10px">
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
           <select id="sp-src">
@@ -237,9 +237,8 @@
         </div>
       </div>
       <div class="card" id="sp-edge"><div class="quiet">no matured picks yet — grade after a couple of monthly rounds mature (20+ sessions)</div></div>
-      <div class="note" style="margin:0 0 8px">Click any ticker for its full dossier — fingerprint, performance, Atlas's own committee view and signal-engine flags, and the cross-check of where they agree or diverge. Print it to PDF from there.</div>
+      <div class="note" style="margin:0 0 8px">Click a ticker to open its full dossier (opens a new tab) — every statistic, the cross-check, and a Print/PDF.</div>
       <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
-      <div class="card" id="sp-dossier" style="display:none"></div>
 
       <h2>Desk Scorecard — Graded Against SPY</h2>
       <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
@@ -868,7 +867,7 @@ async function renderPickList(){
       ${[p.excess_5,p.excess_10,p.excess_20,p.excess_60].map(x=>`<td>${x===null||x===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x)}">${x>0?"+":""}${spPct(x)}</span>`}</td>`).join("")}
     </tr>`).join("")}
   </table>`;
-  el.querySelectorAll("button.sp-dossier-btn").forEach(b=>b.onclick=()=>openDossier(b.dataset.id, b.dataset.ticker));
+  el.querySelectorAll("button.sp-dossier-btn").forEach(b=>b.onclick=()=>window.open(`/console/dossier?id=${encodeURIComponent(b.dataset.id)}`, "_blank"));
 }
 
 /* ---- per-stock dossier: recommendation vs models vs performance ---- */

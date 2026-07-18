@@ -33,6 +33,7 @@ from atlas.api.routers import (
 )
 
 _CONSOLE = Path(__file__).resolve().parents[1] / "dashboard" / "console.html"
+_DOSSIER = Path(__file__).resolve().parents[1] / "dashboard" / "dossier.html"
 
 
 @asynccontextmanager
@@ -58,6 +59,13 @@ def root() -> RedirectResponse:
 @app.get("/console", include_in_schema=False)
 def console() -> FileResponse:
     return FileResponse(_CONSOLE, media_type="text/html")
+
+
+@app.get("/console/dossier", include_in_schema=False)
+def dossier() -> FileResponse:
+    """Standalone full-page stock dossier (reads ?id=<source_pick_id> and
+    fetches /v1/research/source-picks/{id}/dossier)."""
+    return FileResponse(_DOSSIER, media_type="text/html")
 app.include_router(system.router, prefix="/v1/system", tags=["system"])
 app.include_router(market.router, prefix="/v1/market", tags=["market"])
 app.include_router(portfolio.router, prefix="/v1/portfolio", tags=["portfolio"])

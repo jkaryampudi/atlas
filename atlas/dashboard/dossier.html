@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas — Stock Dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070a12; --panel:#0e1424; --panel2:#0a0f1c; --line:rgba(150,170,210,0.12);
+    --line2:rgba(150,170,210,0.22);
+    --txt:#e7edf8; --dim:rgba(210,220,242,0.62); --faint:rgba(210,220,242,0.4);
+    --green:#35d98a; --red:#ff5c5c; --gold:#e2b95b; --blue:#5aa7ff;
+    --mono:'JetBrains Mono',monospace; --disp:'Space Grotesk',Inter,sans-serif; --sans:Inter,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 28px 80px}
+  a{color:var(--blue);text-decoration:none}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* top bar */
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:26px}
+  .top .back{font-family:var(--mono);font-size:12px;letter-spacing:0.08em;color:var(--dim)}
+  .top .back:hover{color:var(--txt)}
+  .btn{font-family:var(--mono);font-size:11px;letter-spacing:0.1em;padding:8px 16px;border:1px solid var(--line2);color:var(--dim);background:none;cursor:pointer;border-radius:6px}
+  .btn:hover{border-color:var(--blue);color:var(--blue)}
+  .actions{display:flex;gap:10px}
+
+  /* hero */
+  .hero{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .tkr{font-family:var(--mono);font-weight:600;font-size:38px;letter-spacing:0.02em}
+  .srcbadge{font-family:var(--mono);font-size:12px;letter-spacing:0.06em;color:var(--gold);border:1px solid rgba(226,185,91,0.45);border-radius:6px;padding:5px 12px}
+  .herometa{color:var(--dim);font-size:13px;margin-bottom:24px}
+
+  /* verdict band */
+  .band{display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin-bottom:22px}
+  .verdict{text-align:center;padding-right:22px;border-right:1px solid var(--line)}
+  .verdict .lab{font-family:var(--mono);font-size:9.5px;letter-spacing:0.2em;color:var(--faint)}
+  .verdict .val{font-family:var(--disp);font-weight:700;font-size:22px;margin-top:4px}
+  .verdict .sub{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:2px}
+  .checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .check .lab{font-size:11px;color:var(--dim);margin-bottom:3px}
+  .check .st{font-family:var(--mono);font-size:12px;display:flex;align-items:center;gap:6px}
+  .g{color:var(--green)} .r{color:var(--red)} .neu{color:var(--dim)}
+
+  /* section cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px}
+  .card.full{grid-column:1/-1}
+  .ctitle{font-family:var(--mono);font-size:10px;letter-spacing:0.2em;color:rgba(140,185,255,0.75);text-transform:uppercase;margin-bottom:14px;display:flex;justify-content:space-between;align-items:baseline}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:8px 16px;font-size:13.5px}
+  .kv .k{color:var(--dim)}
+  .kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+
+  .perf{display:flex;gap:26px;flex-wrap:wrap}
+  .perf .h{text-align:center}
+  .perf .hl{font-family:var(--mono);font-size:10px;letter-spacing:0.1em;color:var(--faint)}
+  .perf .hv{font-family:var(--mono);font-size:18px;margin-top:4px}
+  .imm{color:var(--faint);font-size:12px;font-style:italic}
+
+  .memo .rec{font-family:var(--disp);font-weight:700;font-size:14px;padding:3px 12px;border:1.5px solid;border-radius:6px;display:inline-block}
+  .memo .rec.BUY{color:var(--green);border-color:var(--green)}
+  .memo .rec.WATCHLIST{color:var(--blue);border-color:var(--blue)}
+  .memo .rec.REJECT{color:var(--red);border-color:var(--red)}
+  .memo p{font-size:13.5px;line-height:1.7;color:rgba(220,230,248,0.85);margin:10px 0}
+  .memo .diss{border-left:2px solid var(--red);padding-left:12px;color:rgba(255,150,150,0.9)}
+  .fnote{color:var(--faint);font-size:12px;margin-top:14px}
+
+  .loading{color:var(--dim);font-family:var(--mono);padding:60px 0;text-align:center}
+
+  @media print{
+    :root{--bg:#fff;--panel:#fff;--panel2:#fff;--txt:#111;--dim:#555;--faint:#888;--line:#ddd;--line2:#ccc}
+    body{font-size:12px} .top .actions{display:none} .band,.card{break-inside:avoid}
+    a{color:#111}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="back" href="/console#research">&larr; back to console</a>
+    <div class="actions">
+      <button class="btn" id="analyze">ANALYZE WITH DESK</button>
+      <button class="btn" onclick="window.print()">PRINT / PDF</button>
+    </div>
+  </div>
+  <div id="body"><div class="loading">loading dossier…</div></div>
+</div>
+<script>
+"use strict";
+const id = new URLSearchParams(location.search).get("id");
+const $ = s => document.getElementById(s);
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function pct(v){ return v==null?"—":(v*100).toFixed(1)+"%"; }
+function num(v,d){ return v==null?"—":(typeof v==="number"?v.toFixed(d==null?2:d):esc(v)); }
+function sign(v){ return v==null?"neu":(v>0?"g":v<0?"r":"neu"); }
+function kv(pairs){ return `<div class="kv">${pairs.map(p=>`<div class="k">${p[0]}</div><div class="v ${p[2]||''}">${p[1]}</div>`).join("")}</div>`; }
+function badgeClass(s){ if(!s) return "neu"; return s.indexOf("Buy")>=0?"g":s.indexOf("Sell")>=0?"r":"neu"; }
+function checkMark(v){ return v===true?'<span class="g">✓ agree</span>':v===false?'<span class="r">✗ diverge</span>':'<span class="neu">— n/a</span>'; }
+
+async function load(){
+  if(!id){ $("body").innerHTML = '<div class="loading">no pick id in the URL</div>'; return; }
+  let r;
+  try{ r = await fetch(`/v1/research/source-picks/${encodeURIComponent(id)}/dossier`); }
+  catch(e){ $("body").innerHTML = '<div class="loading">could not reach the API</div>'; return; }
+  if(!r.ok){ $("body").innerHTML = `<div class="loading">dossier not found (${r.status})</div>`; return; }
+  const d = await r.json();
+  render(d);
+}
+
+function render(d){
+  const f=d.features||{}, x=d.excess||{}, c=d.cross_check||{}, m=d.memo, sig=d.atlas_signals||[];
+  const M=d.models||{}, t=M.technical||{}, mo=M.momentum||{}, v=M.valuation||{}, q=M.quality||{}, rk=M.risk||{};
+  document.title = `${d.ticker} — Atlas dossier`;
+  const perf = [5,10,20,60].map(h=>`<div class="h"><div class="hl">vs SPY @${h}s</div><div class="hv ${sign(x[h])}">${x[h]==null?'<span class="imm">immature</span>':(x[h]>0?"+":"")+pct(x[h])}</div></div>`).join("");
+
+  $("body").innerHTML = `
+    <div class="hero">
+      <div class="tkr">${esc(d.ticker)}</div>
+      <div class="srcbadge">${esc(d.source)} · ${esc(d.source_recommendation)}</div>
+    </div>
+    <div class="herometa">Recommended ${esc(d.recommendation_date)} · features point-in-time as of ${esc(d.as_of_session)} · measured, never traded — no path to capital</div>
+
+    <div class="band">
+      <div class="verdict">
+        <div class="lab">TECHNICAL MODEL</div>
+        <div class="val ${badgeClass(t.summary)}">${esc(t.summary||"—")}</div>
+        <div class="sub">${t.bullish_signals==null?"":t.bullish_signals+"/"+t.total_signals+" bullish"}</div>
+      </div>
+      <div class="checks">
+        <div class="check"><div class="lab">Source vs Atlas committee</div><div class="st">${checkMark(c.atlas_agrees)}</div></div>
+        <div class="check"><div class="lab">Momentum supports the call</div><div class="st">${c.momentum_supports===true?'<span class="g">✓ yes</span>':c.momentum_supports===false?'<span class="r">✗ no</span>':'<span class="neu">—</span>'}</div></div>
+        <div class="check"><div class="lab">Atlas signal engine flags it</div><div class="st">${(c.atlas_signal_flags||[]).length?'<span class="g">✓ '+esc(c.atlas_signal_flags.join(", "))+'</span>':'<span class="neu">— none</span>'}</div></div>
+        <div class="check"><div class="lab">Outcome so far (vs SPY @20s)</div><div class="st">${c.outcome_so_far==="outperforming"?'<span class="g">outperforming</span>':c.outcome_so_far==="underperforming"?'<span class="r">underperforming</span>':'<span class="neu">'+esc(c.outcome_so_far||"—")+'</span>'}</div></div>
+      </div>
+    </div>
+
+    <div class="card full"><div class="ctitle">Performance vs SPY</div><div class="perf">${perf}</div></div>
+
+    <div class="grid">
+      <div class="card"><div class="ctitle">Technical</div>${kv([
+        ["Price","<b>"+num(M.price)+"</b>"],
+        ["SMA 20 / 50",num(t.sma_20)+" / "+num(t.sma_50)],
+        ["SMA 100 / 200",num(t.sma_100)+" / "+num(t.sma_200)],
+        ["EMA 20 / 50",num(t.ema_20)+" / "+num(t.ema_50)],
+        ["RSI (14)",num(t.rsi_14,1)],
+        ["MACD histogram",num(t.macd_hist,3),sign(t.macd_hist)],
+        ["Stochastic %K",t.stochastic_k==null?"—":t.stochastic_k.toFixed(0)],
+        ["ATR %",pct(t.atr_pct)],
+        ["52-week high / low",num(t.high_52w)+" / "+num(t.low_52w)],
+        ["Position in 52-week range",t.pct_of_52w_range==null?"—":t.pct_of_52w_range.toFixed(0)+"%"],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Momentum · Relative Strength</div>${kv([
+        ["12-1 momentum",pct(mo.mom_12_1),sign(mo.mom_12_1)],
+        ["Return 20d",pct(mo.ret_20d),sign(mo.ret_20d)],
+        ["Return 63d",pct(mo.ret_63d),sign(mo.ret_63d)],
+        ["Return 6m",pct(mo.ret_126d),sign(mo.ret_126d)],
+        ["Return 1y",pct(mo.ret_252d),sign(mo.ret_252d)],
+        ["Relative strength vs SPY (1y)",pct(mo.rs_vs_spy_252d),sign(mo.rs_vs_spy_252d)],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Valuation</div>${kv([
+        ["Trailing P/E",num(v.trailing_pe)],["Forward P/E",num(v.forward_pe)],
+        ["P/S ttm",num(v.ps_ttm)],["EV / EBITDA",num(v.ev_ebitda)],
+        ["P/B",num(v.price_book)],["PEG",num(v.peg)],
+        ["Dividend yield",pct(v.dividend_yield)],
+        ["Analyst target",num(v.analyst_target)],
+        ["Implied upside",pct(v.upside_pct),sign(v.upside_pct)],
+        ["Market cap",v.market_cap==null?"—":(v.market_cap/1e9).toFixed(1)+"B"],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Quality</div>${kv([
+        ["ROE",pct(q.roe),sign(q.roe)],
+        ["Gross margin",pct(q.gross_margin)],
+        ["Operating margin",pct(q.operating_margin),sign(q.operating_margin)],
+        ["Profit margin",pct(q.profit_margin),sign(q.profit_margin)],
+        ["Revenue growth yoy",pct(q.revenue_growth_yoy),sign(q.revenue_growth_yoy)],
+        ["EPS ttm",num(q.eps_ttm)],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Risk</div>${kv([
+        ["Volatility (20d, annualized)",pct(rk.vol_20d_ann)],
+        ["Beta vs SPY",num(rk.beta_vs_spy)],
+        ["ATR %",pct(rk.atr_pct)],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Context</div>${kv([
+        ["Sector",esc(f.sector_gics||"—")],
+        ["Market regime (SPY)",esc(f.spy_regime||"—")],
+        ["Sessions to next earnings",f.sessions_to_next_earnings==null?"—":f.sessions_to_next_earnings],
+      ])}${sig.length?`<div style="margin-top:12px;font-size:12px;color:var(--dim)">Atlas signal engine: ${sig.map(s=>esc(s.family)+" (rank "+(s.rank==null?"—":s.rank)+")").join(" · ")}</div>`:""}</div>
+    </div>
+
+    <div class="card full memo" style="margin-top:16px">
+      <div class="ctitle">Atlas Committee View</div>
+      ${m?`<div><span class="rec ${esc(m.recommendation)}">${esc(m.recommendation)}</span> <span class="mono" style="color:var(--dim);font-size:12px;margin-left:8px">conviction ${esc(m.conviction)}</span></div>
+        <p>${esc(m.thesis)}</p>
+        <p class="diss"><b>Dissent — the case against:</b> ${esc(m.dissent)}</p>
+        ${(m.kill_criteria||[]).length?`<p style="color:var(--dim);font-size:12px">Kill criteria: ${m.kill_criteria.map(esc).join(" · ")}</p>`:""}`
+      :`<p class="imm">The committee hasn't analyzed this name yet. Press <b>ANALYZE WITH DESK</b> above to run the six-seat committee (~2 min, ~$0.23), then refresh this page.</p>`}
+    </div>
+    <div class="fnote">All statistics are computed deterministically and point-in-time from ${esc(d.ticker)}'s own split-adjusted bars and latest fundamentals — no forecasts are fabricated. Atlas AI Capital · paper mode · not investment advice.</div>`;
+
+  $("analyze").onclick = async ()=>{
+    const b = $("analyze"); b.disabled = true; b.textContent = "DESK RUNNING…";
+    try{
+      const rr = await fetch("/v1/research/analyze", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:d.ticker,source:d.source})});
+      const j = await rr.json();
+      b.textContent = (rr.ok && j.started) ? "DESK RUNNING… (~2 min, then refresh)" : "DESK BUSY — one at a time";
+    }catch(e){ b.disabled=false; b.textContent="ANALYZE — RETRY"; }
+  };
+}
+load();
+</script>
+</body>
+</html>
