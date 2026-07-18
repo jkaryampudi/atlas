@@ -213,8 +213,12 @@ def preflight(body: PreflightBody) -> Any:
       ADVISORY answer momentarily stale — exactly what the advisory label
       already warns, and the real proposal path re-checks fresh under the
       lock.
-    - Same evaluation order as build_proposal: limits -> instrument -> book ->
-      size -> validate. No limit set effective on the query date answers the
+    - Same evaluation order as build_proposal's core: limits -> instrument ->
+      book -> size -> validate. The live build path additionally runs the
+      STRESS/FACTOR/VOL policy overlay (risk-wiring bundle 2026-07-18); this
+      ADVISORY preflight reports L1-L11 + SIZING only — the real proposal
+      persists the full overlay verdict, and a preflight PASS was never a
+      pre-commitment. No limit set effective on the query date answers the
       honest 409 (the engine refuses to run — Doc 04 §10); an unknown or
       inactive symbol answers 404; malformed prices answer 400 before any DB
       read (structurally invalid, not a risk verdict).

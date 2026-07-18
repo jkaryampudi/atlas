@@ -214,6 +214,36 @@ def test_approve_core_proposal_passes_and_settles_is_core(clean_audit):
     assert pos.is_core is True and pos.current_stop is None and int(pos.qty) == 50
 
 
+def test_build_book_survives_a_pending_core_order_null_stop(clean_audit):
+    """REGRESSION (adversarial review 2026-07-18, pre-existing at HEAD): once a
+    core leg is APPROVED it becomes a pending_submit order carrying a NULL stop.
+    _build_book selects every pending buy with no origin filter, so it must
+    represent that order as is_core=True / risk None — mirroring the holdings
+    rule — never Decimal(NULL). Before the fix, the hardcoded is_core=False +
+    Decimal(o.stop_loss) raised the instant a core order sat unfilled, taking
+    down every subsequent build_proposal / approve / core-maintenance call."""
+    from atlas.dcp.trading.proposals import _build_book
+
+    s = clean_audit
+    _seed_v1_and_spy(s)
+    seed_limit_set_v2(s, FrozenClock(T0), approved_by=APPROVER, decision_ref=DECISION)
+    clock = FrozenClock(T0)
+
+    leg = build_core_proposals(s, clock, targets={"SPY": Decimal("0.55")})[0]
+    outcome = approve(s, clock, proposal_id=leg.proposal_id, acknowledged_risks=True)
+    assert outcome.status == "approved"           # order now in pending_submit
+    order = s.execute(text(
+        "SELECT state FROM trading.orders WHERE id = :o"),
+        {"o": outcome.order_id}).one()
+    assert order.state == "pending_submit"        # the exact crash precondition
+
+    # the call that used to raise Decimal(None): build the worst-case book.
+    book = _build_book(s, clock)
+    spy = next(h for h in book.state.holdings if h.symbol == "SPY")
+    assert spy.is_core is True                     # origin-derived, not hardcoded
+    assert spy.risk_to_stop_aud is None            # core carries no stop-out risk
+
+
 def test_approve_core_proposal_blocked_under_v1_l2(clean_audit):
     """Control: with ONLY v1 active (no core cap), the SAME 55% SPY leg is
     TERMINAL-rejected by L2 at build time — it never reaches approve(). This is

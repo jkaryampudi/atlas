@@ -132,6 +132,9 @@ from atlas.dcp.risk.engine import (
     size_position,
     validate,
 )
+from atlas.dcp.risk.factor_overlap import FactorLoadings, check_factor_overlap
+from atlas.dcp.risk.stress import StressHolding, stress_marginal_gate
+from atlas.dcp.risk.vol_target import gross_step_gate
 
 SEED_CASH_AUD = Decimal("100000")   # hypothetical A$100k paper bankroll (CLAUDE.md)
 PROPOSAL_TTL = timedelta(hours=24)  # Doc 05 §5: expires_at = created + 24h
@@ -392,8 +395,9 @@ def _build_book(session: Session, clock: Clock) -> _Book:
     # sell would double-count or, worse, pre-release risk it has not released.
     pending_cost = Decimal(0)
     pending = session.execute(text(
-        "SELECT o.qty, o.created_at, tp.entry_price, tp.stop_loss, i.id AS iid, "
-        "       i.symbol, i.sector_gics, i.market, i.economic_exposure, i.currency "
+        "SELECT o.qty, o.created_at, tp.entry_price, tp.stop_loss, tp.origin, "
+        "       i.id AS iid, i.symbol, i.sector_gics, i.market, "
+        "       i.economic_exposure, i.currency "
         "FROM trading.orders o "
         "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
         "JOIN market.instruments i ON i.id = tp.instrument_id "
@@ -403,16 +407,26 @@ def _build_book(session: Session, clock: Clock) -> _Book:
         fx = rates[o.currency]
         cost = Decimal(o.qty) * Decimal(o.entry_price) * fx
         pending_cost += cost
-        # A pending BUY reaching this block is an agent order: it carries a stop
-        # (the origin='agent' NOT-NULL invariant, migration 0022) and is not a
-        # core holding. is_core=False keeps it bound by L7's stop-based rule.
+        # Mirror the holdings rule above (a core_allocation order carries a NULL
+        # stop and ZERO stop-out risk per ADR-0014/migration 0022; an agent order
+        # carries a NOT-NULL stop): NULL stop -> risk None (the engine zeroes a
+        # core holding and FAILS CLOSED a stopless satellite), is_core from
+        # origin. A hardcoded is_core=False + Decimal(NULL stop) crashed the whole
+        # pro-forma book the moment a core order sat in pending_submit — the
+        # comment here once ASSERTED an agent-only invariant the SQL never
+        # enforced (adversarial review 2026-07-18; pre-existing at HEAD).
+        pending_risk: Decimal | None
+        if o.stop_loss is None:
+            pending_risk = None
+        else:
+            pending_risk = ((Decimal(o.entry_price) - Decimal(o.stop_loss))
+                            * Decimal(o.qty) * fx)
         holdings.append(HoldingRisk(
             symbol=o.symbol, value_aud=cost,
             sector_gics=o.sector_gics or "Unknown",
             india_exposed=_india_exposed(o.market, o.economic_exposure),
-            currency=o.currency,
-            risk_to_stop_aud=(Decimal(o.entry_price) - Decimal(o.stop_loss))
-            * Decimal(o.qty) * fx, is_core=False))
+            currency=o.currency, risk_to_stop_aud=pending_risk,
+            is_core=(o.origin == "core_allocation")))
 
     opened_today = session.execute(text(
         "SELECT count(*) FROM trading.positions "
@@ -511,15 +525,188 @@ def _fresh_proposal_inputs(session: Session, clock: Clock, inst: _Instrument, *,
             session, inst.symbol, list(book.existing_symbols), end=on))
 
 
+# ---------------------------------------- policy overlay (§7/§11/§12 wiring)
+#
+# Risk-wiring bundle (Principal, 2026-07-18): every protection the signed risk
+# policy claims has a LIVE call site. stress_marginal_gate (§7),
+# check_factor_overlap (§12) and gross_step_gate (§11 Tier 1) were built and
+# unit-tested with zero call sites outside their own tests; build_proposal now
+# runs all three against the same worst-case pro-forma book engine.validate
+# sees, and their RuleResults join the persisted risk-check rows — a FAIL
+# fails the check exactly like any L-rule (invariant 3: risk FAIL is
+# terminal). Documented scope decisions, stated honestly:
+#
+# - STRESS inputs: symbol/value/sector/india/currency come straight from the
+#   book (real data). rate_beta_per_100bp defaults to 0 for every holding —
+#   the §7 beta table is data that does not exist yet, and per-name betas are
+#   never invented. This default CANNOT soften the gated number: the policy
+#   gate prices only the broad-equity-crash scenario, which has no rate leg.
+#   The rates_shock scenario stays out of gating until a real beta table lands.
+# - STRESS reachability: for an unlevered long-only book, holdings/NAV <= 1,
+#   so the crash loss is bounded by 25% x india_weight + 20% x rest < 25% of
+#   NAV whenever the book is a legal lifecycle state — the FAIL branch binds
+#   only on a book already in breach of the pro-forma cash identity (defense
+#   in depth) or if the scenario library ever deepens. Wired regardless: the
+#   policy claims the gate, so the gate runs and records its numbers.
+# - FACTOR scope (v1, honest): sector loadings are real (GICS weights from the
+#   book — and unlike L3, which prices only the PROPOSAL's sector, FACTOR
+#   itemises EVERY sector, so a book already over-cap in an unrelated sector
+#   now fails a new buy). market_beta is the class-level equity beta of 1.0
+#   for every holding — market loading == gross exposure; no per-name
+#   regression betas are invented, so this arm cannot bind before a real beta
+#   feed exists (gross <= 1 <= cap). momentum is sleeve-membership: 1.0 iff
+#   the name is attributed to a MOMENTUM_FAMILIES strategy via the same
+#   signal-lineage join bands.py and the sleeve budget use (open lots + live
+#   proposals), else 0.0 — deliberately NOT a cross-sectional z-score, which
+#   would need a point-in-time universe ranking at proposal time (deferred).
+# - VOL semantics: gross_after = (holdings incl. pending buys + this
+#   proposal) / NAV vs MAX_GROSS. step_after charges the day's cumulative
+#   committed gross increase on the proposal's BUILD day: the AUD sum of
+#   today's live-or-executed BUY proposals (risk_review/pending_approval/
+#   approved/executed) plus this one, over NAV, vs MAX_STEP. Commitment-day
+#   accounting, exactly once: a fill of yesterday's approval charged
+#   yesterday; sells never credit the budget (conservative — the cap binds
+#   earlier, never later). Dead states (rejected/voided/expired) release
+#   their charge. Any DD breaker fails a gross increase (vol_target module
+#   docstring records the deliberate DD1 strictness).
+# - The overlay runs at PROPOSAL build (the §7 "pro-forma on every proposal"
+#   claim). The §2.2 approval-time re-check remains engine.validate L1-L11 —
+#   the overlay verdict that gated pending_approval is not re-evaluated on
+#   the fresh book at approval; widening §2.2 is a follow-up, recorded here
+#   so the gap is documented, never silent. A sizing rejection persists the
+#   single SIZING row as before: a proposal with no size has nothing to
+#   stress or load.
+
+MOMENTUM_FAMILIES: tuple[str, ...] = ("xsmom-pit-tr",)
+# §12 momentum-factor attribution: the signed strategy families whose signal
+# lineage marks a name as a momentum bet. PEAD is earnings drift, not price
+# momentum, and is deliberately absent. Editing this tuple is a reviewed
+# change, like the caps it feeds.
+
+_MOMENTUM_SIGNALS = ("ARRAY(SELECT s.id FROM quant.signals s "
+                     "JOIN quant.strategies st ON st.id = s.strategy_id "
+                     "WHERE st.family = ANY(:fams) "
+                     "  AND st.state IN ('MUTANT_no_such_state'))")
+
+
+def _momentum_symbols(session: Session) -> frozenset[str]:
+    """Symbols currently attributed to a momentum-family strategy: open tax
+    lots plus live (unfilled) proposals, through the proposal signal_ids ->
+    quant.signals lineage — the exact attribution join _sleeve_committed_aud
+    and bands.py use, so the factor view and the sleeve ledger cannot
+    disagree about what is a momentum bet."""
+    rows = session.execute(text(
+        "SELECT i.symbol FROM trading.tax_lots tl "
+        "JOIN trading.executions e ON e.id = tl.execution_id "
+        "JOIN trading.orders o ON o.id = e.order_id "
+        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        "JOIN market.instruments i ON i.id = tp.instrument_id "
+        "WHERE tl.disposed_at IS NULL AND tp.signal_ids && " + _MOMENTUM_SIGNALS +
+        " UNION "
+        "SELECT i.symbol FROM trading.trade_proposals tp "
+        "JOIN market.instruments i ON i.id = tp.instrument_id "
+        "WHERE tp.state IN ('risk_review','pending_approval','approved') "
+        "  AND tp.signal_ids && " + _MOMENTUM_SIGNALS),
+        {"fams": list(MOMENTUM_FAMILIES)}).all()
+    return frozenset(str(r.symbol) for r in rows)
+
+
+def _proposal_is_momentum(session: Session, signal_refs: Sequence[str]) -> bool:
+    """True iff any of the proposal's signal ids IS a momentum-family
+    quant.signals row. Interim uuid5 evidence ids simply never match."""
+    return session.execute(text(
+        "SELECT 1 FROM quant.signals s "
+        "JOIN quant.strategies st ON st.id = s.strategy_id "
+        "WHERE s.id = ANY(:ids) AND st.family = ANY(:fams) "
+        "  AND st.state IN ('MUTANT_no_such_state') LIMIT 1"),
+        {"ids": [UUID(r) for r in signal_refs],
+         "fams": list(MOMENTUM_FAMILIES)}).first() is not None
+
+
+def _committed_gross_today_aud(session: Session, on: date) -> Decimal:
+    """AUD gross committed on build day `on`: live-or-executed BUY proposals
+    created today, at their recorded position_value_aud (commitment-day
+    accounting — see the overlay block). The proposal being built is not yet
+    inserted, so it is never double-counted.
+
+    origin='core_allocation' legs are EXCLUDED, documented: the passive core
+    is rebalanced by target weight through its own ADR-0014 builder (which
+    never runs this gate), so charging a scheduled core top-up against the
+    day-step would let the core lane silently veto the satellite lane — and
+    the core bootstrap day (SPY at 55%) would block every satellite for the
+    day. The step cap governs the lane it gates: every build_proposal BUY
+    (origin 'agent') is charged in full. Core exposure still binds through
+    the gross_after arm (core positions are holdings) and L1-L5."""
+    total = session.execute(text(
+        "SELECT COALESCE(sum(position_value_aud), 0) "
+        "FROM trading.trade_proposals "
+        "WHERE action = 'buy' AND origin != 'core_allocation' "
+        "  AND state IN ('risk_review','pending_approval','approved','executed') "
+        "  AND (created_at AT TIME ZONE 'UTC')::date = :d"), {"d": on}).scalar_one()
+    return Decimal(total)
+
+
+def _policy_overlay(session: Session, *, proposal: TradeProposal, book: _Book,
+                    signal_refs: Sequence[str], on: date,
+                    gross_cap: Decimal) -> tuple[RuleResult, ...]:
+    """The three policy-overlay rows (STRESS §7, FACTOR §12, VOL §11) for one
+    sized proposal against the same worst-case pro-forma book engine.validate
+    evaluated. Pure reads; every scope decision is documented in the overlay
+    block above. `gross_cap` = 1 - active L5 cash floor (the VOL ceiling
+    tracks L5 — Principal 2026-07-18).
+
+    RESIDUALS accepted at v1 land (adversarial review 2026-07-18, documented
+    not hidden): (a) FACTOR's market and momentum arms cannot bind under the
+    current single-family config (market loading == gross <= cap; momentum ==
+    sleeve membership, never reaching the 0.5 cap) — the SECTOR arm is the
+    live gating protection; the others are informational until a real beta
+    feed / cross-sectional score lands. (b) This overlay gates at BUILD time;
+    engine.validate's own DD gate re-runs at approval (so a DD2/DD3 that
+    latches between build and approval still blocks a new position), but the
+    STRESS/FACTOR/VOL rows are not themselves re-evaluated at approval. (c)
+    The VOL day-step ledger is commitment-day accounting: two build-day
+    cohorts filling at one session's open can realise up to 2x MAX_STEP.
+    None of these permits a dangerous trade (all are over-refusal or
+    audit-honesty); each is a tracked follow-up for the next revision."""
+    nav = book.state.nav_aud
+    stress_book = tuple(
+        StressHolding(symbol=h.symbol, value_aud=h.value_aud,
+                      sector_gics=h.sector_gics, india_exposed=h.india_exposed,
+                      currency=h.currency)
+        for h in book.state.holdings)
+    stress_row = stress_marginal_gate(proposal, stress_book, nav_aud=nav)
+
+    momentum = _momentum_symbols(session)
+    factor_book = [
+        FactorLoadings(symbol=h.symbol, value_aud=h.value_aud,
+                       market_beta=Decimal(1), sector_gics=h.sector_gics,
+                       momentum=Decimal(1 if h.symbol in momentum else 0))
+        for h in book.state.holdings]
+    factor_proposal = FactorLoadings(
+        symbol=proposal.symbol, value_aud=proposal.cost_aud,
+        market_beta=Decimal(1), sector_gics=proposal.sector_gics,
+        momentum=Decimal(1 if _proposal_is_momentum(session, signal_refs) else 0))
+    factor_row = check_factor_overlap(factor_proposal, factor_book, nav_aud=nav)
+
+    gross_after = (sum((h.value_aud for h in book.state.holdings), Decimal(0))
+                   + proposal.cost_aud) / nav
+    step_after = (_committed_gross_today_aud(session, on)
+                  + proposal.cost_aud) / nav
+    vol_row = gross_step_gate(gross_after=gross_after, step_after=step_after,
+                              breaker=book.breaker, gross_cap=gross_cap)
+    return (stress_row, factor_row, vol_row)
+
+
 # ---------------------------------------------------------------- build (§5)
 
 def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
                    signal_refs: Sequence[str], entry_price: Decimal,
                    stop_price: Decimal, target_price: Decimal,
                    sleeve_max_qty: int | None = None) -> ProposalResult:
-    """Size (Doc 04 §4), validate (L1-L11 §3), persist. PASS lands the proposal
-    in 'pending_approval' with the check referenced (§2.1); FAIL is terminal:
-    'rejected', check recorded, no override path.
+    """Size (Doc 04 §4), validate (L1-L11 §3), overlay (STRESS §7 / FACTOR §12
+    / VOL §11 — the policy-overlay block above), persist. PASS lands the
+    proposal in 'pending_approval' with the check referenced (§2.1); FAIL is
+    terminal: 'rejected', check recorded, no override path.
 
     sleeve_max_qty (ADR-0014, set only by the bridge's sleeve budget): an OUTER
     whole-share cap the DCP applies to the §4 risk size so a strategy sleeve's
@@ -548,6 +735,15 @@ def build_proposal(session: Session, clock: Clock, *, memo_id: str, symbol: str,
                                           entry_price=entry_price,
                                           stop_price=stop_price, book=book)
         check = validate(proposal, book.state, limits, book.breaker)
+        # VOL gross ceiling TRACKS L5 (Principal 2026-07-18): 1 - active cash
+        # floor. Under limit_set v2 (L5=0.10) that is 0.90, matching ADR-0014.
+        gross_cap = Decimal(1) - limits.l5_min_cash_reserve
+        overlay = _policy_overlay(session, proposal=proposal, book=book,
+                                  signal_refs=signal_refs, on=on,
+                                  gross_cap=gross_cap)
+        check = RiskCheck(   # overlay FAILs fail the check like any L-rule
+            passed=check.passed and all(r.passed for r in overlay),
+            breaker=check.breaker, results=(*check.results, *overlay))
         value_aud = proposal.cost_aud.quantize(_CENT)
     else:  # §4 'reject if …' — sizing is risk policy, recorded as a FAIL check
         qty = size.qty

@@ -40,8 +40,31 @@ skip with its reason:
   ('risk_review','pending_approval','approved') — action-agnostic: an
   in-flight exit blocks new entries too — or a live order in
   ('pending_submit','submitted','partially_filled');
+- the instrument has a KNOWN future earnings report within
+  EARNINGS_GUARD_SESSIONS XNYS sessions of the decision date (skip
+  'earnings_print_imminent', report date in the reason) — the position would
+  enter at the next open and face the print almost immediately (risk-wiring
+  bundle 2026-07-18). Missing calendar data is NO block: the absence of a
+  known print is not evidence of one, and market.earnings_calendar only
+  claims the prints the vendor reported;
+- the symbol was stopped out within the last REENTRY_COOLING_SESSIONS XNYS
+  sessions AND the memo predates that exit (skip 'reentry_cooling') — Doc 03
+  prohibited activities: no re-entry into a stopped-out name within 10
+  trading days without a new committee memo. A memo created AFTER the
+  stop-out IS the new committee memo and passes: that is the signed policy's
+  own exception, not a loophole;
 - price derivation failed closed (no/stale vendor close, or an incomplete
   ATR window).
+
+No-averaging-down (Doc 03 prohibited activities): the open-position guard
+above IS the policy's call site. bridge_memos is the ONLY live caller of
+build_proposal (pinned by tests/unit/test_policy_conformance.py), and a memo
+for a symbol with an open position is ALWAYS a recorded skip — so the agent
+lane structurally cannot add to an existing position, at any price, past any
+budget. The add-on merge branch in proposals._record_fill is therefore
+unreachable through the agent lane; the core-allocation lane (ADR-0014) tops
+up passive index ETFs by signed target weight through its own builder, which
+is rebalancing under an ADR, not discretionary averaging down.
 
 Documented resolutions (ADR-0006 ambiguities, resolved conservatively):
 - The ATR window is EXACTLY the last 15 sessions on or before the clock's
@@ -93,7 +116,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any, Sequence
 
@@ -103,6 +126,7 @@ from sqlalchemy.orm import Session
 from atlas.core.clock import Clock
 from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
 from atlas.dcp.indicators.core import wilder_atr
+from atlas.dcp.market_data.calendars import next_trading_day, trading_days_between
 from atlas.dcp.trading.proposals import (
     ProposalResult,
     _audit,
@@ -114,6 +138,30 @@ from atlas.dcp.trading.proposals import (
 )
 
 MEMO_MAX_AGE = timedelta(hours=48)     # older BUY memos are stale theses
+
+# Risk-wiring bundle (Principal, 2026-07-18). Both constants are POLICY:
+# changing either is a reviewed diff, exactly like a stop multiplier.
+#
+# EARNINGS_GUARD_SESSIONS: a candidate whose instrument has a KNOWN future
+# report within this many XNYS sessions of the decision date is skipped
+# ('earnings_print_imminent') — entry fills at the next session's open, so a
+# print inside this window lands on a position hours-to-one-day old, with the
+# memo's evidence entirely pre-print. XNYS is the anchor calendar for the
+# decision cadence (the daily cycle keys off US sessions) and applies to every
+# candidate regardless of listing market. Only STRICTLY FUTURE report dates
+# block: a print dated the decision day itself has already happened (or
+# happens tonight, before the fill) — the entry never holds through it.
+EARNINGS_GUARD_SESSIONS = 2
+
+# REENTRY_COOLING_SESSIONS: Doc 03 prohibited activities — "no re-entry into a
+# stopped-out name within 10 trading days without a new committee memo". A
+# stop-exit disposal (order_type='stop' sell fill) starts the clock; fewer
+# than this many XNYS sessions elapsed (strictly after the exit's fill date,
+# through the decision date) blocks a memo created BEFORE the exit
+# ('reentry_cooling'). A memo created after the stop-out is the policy's own
+# "new committee memo" exception and passes.
+REENTRY_COOLING_SESSIONS = 10
+
 ATR_PERIOD = 14                        # ADR-0006: ATR(14)
 ATR_WINDOW = ATR_PERIOD + 1            # 15 sessions: 14 full TRs + seed bar
 STOP_ATR_MULT = Decimal(2)             # ADR-0006: entry - 2 x ATR(14)
@@ -366,6 +414,57 @@ def _guard_scope(session: Session, instrument_id: uuid.UUID, symbol: str) -> Non
         raise _SkipMemo(f"{symbol} has a live order in flight")
 
 
+def _guard_earnings_print(session: Session, instrument_id: uuid.UUID,
+                          symbol: str, on: date) -> None:
+    """Risk-wiring bundle: skip a candidate facing a known print within
+    EARNINGS_GUARD_SESSIONS XNYS sessions (constant's comment has the full
+    semantics). Missing calendar data = no block, by design: the query only
+    ever matches prints the vendor actually reported."""
+    horizon = on
+    for _ in range(EARNINGS_GUARD_SESSIONS):
+        horizon = next_trading_day("US", horizon)
+    row = session.execute(text(
+        "SELECT report_date FROM market.earnings_calendar "
+        "WHERE instrument_id = :iid AND report_date > :on "
+        "  AND report_date <= :h ORDER BY report_date LIMIT 1"),
+        {"iid": instrument_id, "on": on, "h": horizon}).first()
+    if row is not None:
+        raise _SkipMemo(
+            f"earnings_print_imminent: {symbol} has a known earnings report on "
+            f"{row.report_date.isoformat()} — within {EARNINGS_GUARD_SESSIONS} "
+            f"XNYS sessions of {on.isoformat()}; the position would enter at "
+            "the next open and face the print almost immediately")
+
+
+def _guard_reentry_cooling(session: Session, instrument_id: uuid.UUID,
+                           symbol: str, *, memo_created_at: datetime,
+                           on: date) -> None:
+    """Doc 03 re-entry cooling (constant's comment has the full semantics):
+    the LATEST stop-exit fill for the instrument starts the clock; a memo
+    created before that exit is blocked until REENTRY_COOLING_SESSIONS XNYS
+    sessions have elapsed. A memo created after the stop-out is the signed
+    policy's own 'new committee memo' exception and passes."""
+    exited_at = session.execute(text(
+        "SELECT max(e.executed_at) FROM trading.executions e "
+        "JOIN trading.orders o ON o.id = e.order_id "
+        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        "WHERE tp.instrument_id = :iid AND o.side = 'sell' "
+        "  AND o.order_type = 'stop'"), {"iid": instrument_id}).scalar()
+    if exited_at is None:
+        return                                   # never stopped out
+    exit_date = exited_at.astimezone(UTC).date()
+    elapsed = len(trading_days_between("US", exit_date + timedelta(days=1), on))
+    if elapsed >= REENTRY_COOLING_SESSIONS:
+        return                                   # cooling period served
+    if memo_created_at > exited_at:
+        return  # post-stop-out memo IS the policy's "new committee memo"
+    raise _SkipMemo(
+        f"reentry_cooling: {symbol} was stopped out on {exit_date.isoformat()} "
+        f"and only {elapsed} of {REENTRY_COOLING_SESSIONS} XNYS sessions have "
+        "elapsed; the memo predates that exit — re-entry inside the cooling "
+        "window requires a NEW committee memo (Doc 03 prohibited activities)")
+
+
 def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
     """Bridge every candidate BUY memo into a risk-checked trade proposal
     (module docstring; ADR-0006). Per-memo skips are recorded outcomes; an
@@ -376,7 +475,7 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
     _lifecycle_lock(session)   # re-entrant with build_proposal's (docstring)
     now = clock.now()
     candidates = session.execute(text(
-        "SELECT m.id, m.instrument_symbol, m.evidence_refs "
+        "SELECT m.id, m.instrument_symbol, m.evidence_refs, m.created_at "
         "FROM research.memos m "
         "LEFT JOIN research.agent_runs ar ON ar.id = m.agent_run_id "
         "WHERE m.memo_type = 'committee' AND m.recommendation = 'BUY' "
@@ -412,6 +511,10 @@ def bridge_memos(session: Session, clock: Clock) -> BridgeReport:
             except ValueError as e:   # not exactly one active instrument
                 raise _SkipMemo(str(e)) from e
             _guard_scope(session, inst.id, symbol)
+            _guard_earnings_print(session, inst.id, symbol, now.date())
+            _guard_reentry_cooling(session, inst.id, symbol,
+                                   memo_created_at=memo.created_at,
+                                   on=now.date())
             try:                      # fail-closed mark: missing/stale close
                 entry = _latest_close(session, inst.id, now.date())
             except RuntimeError as e:

@@ -137,18 +137,19 @@ def _proposals(s):
 # --------------------------------------------------------------------------
 
 def test_ten_name_sleeve_caps_aggregate_at_ten_percent_not_risk_sum(clean_audit):
+    # The non-sleeve control bridges the NEXT day: since the risk-wiring
+    # bundle (2026-07-18) the §11 day-step gate caps ONE day's committed gross
+    # at 10pp of NAV, so a full 10% sleeve deployment (legal, exactly at the
+    # inclusive cap) plus an 8% control in the SAME run would honestly FAIL
+    # the control on VOL — the contrast this test wants needs two days.
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
     for i in range(10):                       # 10 momentum names, entry 100
         _sleeve_name(s, FrozenClock(T0), mom, "xsmom-pit-tr", f"ZSLVM{i}", 100)
-    # a NON-sleeve control (no signal ref): risk sizes it to the L1 8% cap
-    ctrl = _instrument(s, "ZSLVCTRL")
-    _ohlc(s, ctrl, 100)
-    _memo(s, FrozenClock(T0), "ZSLVCTRL", [BARS_REF])
 
     report = bridge_memos(s, FrozenClock(T0))
-    assert len(report.built) == 11 and all(b.verdict == "PASS" for b in report.built)
+    assert len(report.built) == 10 and all(b.verdict == "PASS" for b in report.built)
     props = _proposals(s)
 
     # per name: floor((10000 - 0) / 10 / 100) = 10 shares (1% NAV each), so the
@@ -157,9 +158,19 @@ def test_ten_name_sleeve_caps_aggregate_at_ten_percent_not_risk_sum(clean_audit)
     assert all(int(p.position_size) == 10 for p in sleeve)
     aggregate = sum(Decimal(p.position_value_aud) for p in sleeve)
     assert aggregate == SLEEVE_AUD                        # exactly 10% of NAV
-    # the control proves the UNcapped size: L1 8% * 100000 / 100 = 80 shares —
-    # ten of THOSE would be ~80% of NAV, which the sleeve budget prevents
-    assert int(props["ZSLVCTRL"].position_size) == 80
+
+    # a NON-sleeve control (no signal ref) the next day: risk alone sizes it
+    # to the L1 8% cap — ten of THOSE would be ~80% of NAV, which the sleeve
+    # budget prevents
+    t1 = FrozenClock(T0 + timedelta(days=1))
+    ctrl = _instrument(s, "ZSLVCTRL")
+    _ohlc(s, ctrl, 100)
+    _memo(s, t1, "ZSLVCTRL", [BARS_REF])
+    day2 = bridge_memos(s, t1)
+    built2 = {b.symbol: b for b in day2.built}
+    assert set(built2) == {"ZSLVCTRL"} and built2["ZSLVCTRL"].verdict == "PASS"
+    assert all("already bridged" in sk.reason for sk in day2.skipped)
+    assert int(_proposals(s)["ZSLVCTRL"].position_size) == 80
 
 
 # --------------------------------------------------------------------------
@@ -271,14 +282,22 @@ def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit, mo
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
     pead = _strategy(s, "pead-sue-tr")
-    # two momentum names at entry 100, two PEAD names at entry 200
-    for i in range(2):
+    # Two momentum names bridge on day 1, two PEAD names on day 2: since the
+    # risk-wiring bundle (2026-07-18) the §11 day-step gate caps ONE day's
+    # committed gross at 10pp of NAV, so two FULL 10% sleeves cannot legally
+    # deploy on the same day — each family's envelope math is unchanged and
+    # is what this test pins.
+    for i in range(2):     # two momentum names at entry 100 (day 1)
         _sleeve_name(s, FrozenClock(T0), mom, "xsmom-pit-tr", f"ZSLVM{i}", 100)
-    for i in range(2):
-        _sleeve_name(s, FrozenClock(T0), pead, "pead-sue-tr", f"ZSLVP{i}", 200)
-
     report = bridge_memos(s, FrozenClock(T0))
-    assert len(report.built) == 4 and all(b.verdict == "PASS" for b in report.built)
+    assert len(report.built) == 2 and all(b.verdict == "PASS" for b in report.built)
+
+    t1 = FrozenClock(T0 + timedelta(days=1))
+    for i in range(2):     # two PEAD names at entry 200 (day 2)
+        _sleeve_name(s, t1, pead, "pead-sue-tr", f"ZSLVP{i}", 200)
+    day2 = bridge_memos(s, t1)
+    built2 = [b for b in day2.built]
+    assert len(built2) == 2 and all(b.verdict == "PASS" for b in built2)
     props = _proposals(s)
 
     # momentum budget 10000 / 2 names / 100 = 50 shares each -> aggregate 10000
@@ -299,12 +318,17 @@ def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audi
     carries both signal refs on ONE memo. It must occupy a budget slot in EACH
     sleeve and be sized under the TIGHTER slice — under the intersect
     attribution rule (signal_ids && sleeve ids, the rule committed/bands use)
-    NEITHER family's attributed exposure may exceed its 10% envelope. The old
+    NEITHER family's attributed exposure may exceed its envelope. The old
     LIMIT-1 attribution let the tie-break-losing family reach ~12%. (Two-funded
-    configuration injected; ADR-0015 zeroed PEAD's production budget.)"""
+    configuration injected; ADR-0015 zeroed PEAD's production budget. Injected
+    at 5% + 5%: since the risk-wiring bundle (2026-07-18) the §11 day-step
+    gate caps one day's committed gross at 10pp of NAV, and two 10% sleeves
+    deploying in one run would honestly fail the overflow on VOL — the slot
+    arithmetic this test pins is fraction-independent.)"""
+    half_sleeve = Decimal("5000")             # NAV x 0.05 per family
     monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
-                        {"xsmom-pit-tr": Decimal("0.10"),
-                         "pead-sue-tr": Decimal("0.10")})
+                        {"xsmom-pit-tr": Decimal("0.05"),
+                         "pead-sue-tr": Decimal("0.05")})
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
@@ -325,19 +349,19 @@ def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audi
     props = _proposals(s)
 
     # each family counts TWO slots (its pure name + the dual name): per-name
-    # slice = 10000/2 = A$5,000 -> 50 shares each at entry 100
-    assert int(props["ZSLVM0"].position_size) == 50
-    assert int(props["ZSLVP0"].position_size) == 50
-    assert int(props["ZSLVX"].position_size) == 50
-    # intersect-rule attributed exposure per family = pure + dual = A$10,000
-    # exactly the envelope; the dual name serves BOTH (aggregate deploy 15k,
-    # not 20k — conservative under-deploy, never a breach)
+    # slice = 5000/2 = A$2,500 -> 25 shares each at entry 100
+    assert int(props["ZSLVM0"].position_size) == 25
+    assert int(props["ZSLVP0"].position_size) == 25
+    assert int(props["ZSLVX"].position_size) == 25
+    # intersect-rule attributed exposure per family = pure + dual = A$5,000
+    # exactly the envelope; the dual name serves BOTH (aggregate deploy 7.5k,
+    # not 10k — conservative under-deploy, never a breach)
     mom_attrib = (Decimal(props["ZSLVM0"].position_value_aud)
                   + Decimal(props["ZSLVX"].position_value_aud))
     pead_attrib = (Decimal(props["ZSLVP0"].position_value_aud)
                    + Decimal(props["ZSLVX"].position_value_aud))
-    assert mom_attrib == SLEEVE_AUD
-    assert pead_attrib == SLEEVE_AUD
+    assert mom_attrib == half_sleeve
+    assert pead_attrib == half_sleeve
 
 
 def test_suspended_pead_sleeve_sizes_to_zero_and_dual_deploys_under_momentum(
