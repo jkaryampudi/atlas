@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -127,6 +128,121 @@ def analyze_status() -> dict[str, object]:
     from atlas.ops.analyze import analysis_status
 
     return analysis_status()
+
+
+# ---- SOURCE PICKS: monthly external-list ingest + edge (measurement only) ---
+
+PICK_MAX_TICKERS = 100
+
+
+class PickIngestBody(BaseModel):
+    source: str
+    date: str | None = None                       # YYYY-MM-DD; default today UTC
+    tickers: list[str] = Field(default_factory=list)
+    run_desk: bool = False
+
+
+@router.post("/source-picks/ingest")
+def source_picks_ingest(body: PickIngestBody) -> Any:
+    """Queue a monthly source-pick list (no command line). Each ticker gets a
+    point-in-time feature snapshot; nothing becomes a trade (invariant 2 —
+    picks are measured, never bridged). `run_desk` optionally adds a real
+    committee memo per pick under the analyze budget. Busy answers
+    {started:false} honestly — one ingest at a time."""
+    from atlas.ops.ingest_picks import start_ingest_job
+
+    source = body.source.strip()
+    if not source or len(source) > ANALYZE_SOURCE_MAX:
+        return _bad_request("INVALID_SOURCE",
+                            f"source is required, max {ANALYZE_SOURCE_MAX} chars")
+    try:
+        rec_date = (datetime.strptime(body.date, "%Y-%m-%d").date() if body.date
+                    else datetime.now(UTC).date())
+    except ValueError:
+        return _bad_request("INVALID_DATE", "date must be YYYY-MM-DD")
+    seen: set[str] = set()
+    tickers: list[str] = []
+    for raw in body.tickers:
+        t = raw.strip().upper()
+        if not t or t in seen:
+            continue
+        if not _ANALYZE_SYMBOL.fullmatch(t):
+            return _bad_request("INVALID_SYMBOL",
+                                f"'{t}' must match ^[A-Z0-9.\\-]{{1,10}}$")
+        seen.add(t)
+        tickers.append(t)
+    if not tickers:
+        return _bad_request("NO_TICKERS", "provide at least one ticker")
+    if len(tickers) > PICK_MAX_TICKERS:
+        return _bad_request("TOO_MANY", f"max {PICK_MAX_TICKERS} tickers per list")
+    started = start_ingest_job(source, rec_date, tickers, body.run_desk)
+    return {"started": started, "n_tickers": len(tickers),
+            "note": (f"ingesting {len(tickers)} pick(s) for {source} {rec_date} — "
+                     "poll /v1/research/source-picks/ingest/status" if started
+                     else "an ingest is already running — one at a time")}
+
+
+@router.get("/source-picks/ingest/status")
+def source_picks_ingest_status() -> dict[str, object]:
+    from atlas.ops.ingest_picks import ingest_status
+
+    return ingest_status()
+
+
+@router.post("/source-picks/grade")
+def source_picks_grade() -> dict[str, object]:
+    """Grade every matured pick (excess vs SPY at 20/60 sessions, write-once)
+    and return the per-source edge — outperform-rate against the dartboard.
+    Near-zero edge is the honest verdict that the source has no skill."""
+    from atlas.dcp.research.source_picks import grade_picks, source_edge_report
+
+    with session_scope() as s:
+        g = grade_picks(s, SystemClock())
+        edge = [{"source": e.source, "horizon": e.horizon,
+                 "n_matured": e.n_matured, "outperform_rate": e.outperform_rate,
+                 "dartboard": e.dartboard, "edge": e.edge}
+                for e in source_edge_report(s)]
+    return {"graded": g.graded, "still_immature": g.still_immature, "edge": edge}
+
+
+@router.get("/source-picks/edge")
+def source_picks_edge() -> list[dict[str, object]]:
+    """Read-only per-source edge (no grading side-effect) — for passive console
+    display. POST /source-picks/grade is what matures new outcomes first."""
+    from atlas.dcp.research.source_picks import source_edge_report
+
+    with session_scope() as s:
+        return [{"source": e.source, "horizon": e.horizon, "n_matured": e.n_matured,
+                 "outperform_rate": e.outperform_rate, "dartboard": e.dartboard,
+                 "edge": e.edge} for e in source_edge_report(s)]
+
+
+@router.get("/source-picks")
+def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[str, object]]:
+    """Recorded picks, newest first, with their forward-return outcome and a
+    few headline features for the console table. Read-only."""
+    q = ("SELECT id, source, ticker, recommendation_date, as_of_session, "
+         " source_recommendation, excess_20, excess_60, features, created_at "
+         "FROM research.source_picks")
+    params: dict[str, object] = {"n": max(1, min(limit, 1000))}
+    if source:
+        q += " WHERE source = :src"
+        params["src"] = source
+    q += " ORDER BY recommendation_date DESC, ticker LIMIT :n"
+    out: list[dict[str, object]] = []
+    with session_scope() as s:
+        for r in s.execute(text(q), params).mappings():
+            f = r["features"] or {}
+            out.append({
+                "id": str(r["id"]), "source": r["source"], "ticker": r["ticker"],
+                "recommendation_date": r["recommendation_date"].isoformat(),
+                "source_recommendation": r["source_recommendation"],
+                "excess_20": (float(r["excess_20"]) if r["excess_20"] is not None else None),
+                "excess_60": (float(r["excess_60"]) if r["excess_60"] is not None else None),
+                "sector": f.get("sector_gics"), "mom_12_1": f.get("mom_12_1"),
+                "ret_20d": f.get("ret_20d"), "trailing_pe": f.get("trailing_pe"),
+                "spy_regime": f.get("spy_regime")})
+    return out
 
 
 @router.get("/memos/{memo_id}/decision-flow")

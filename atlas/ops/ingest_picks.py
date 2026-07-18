@@ -25,8 +25,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sqlalchemy import text
@@ -95,6 +96,73 @@ def ingest_picks(session: Session, clock: Clock, *, source: str,
             detail += "; " + _run_desk_for(session, ticker, source)
         results.append(PickResult(ticker, "recorded", detail))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Console-facing background runner (mirrors atlas/ops/analyze.py exactly:
+# non-blocking lock — "busy" is an answer — a daemon worker, and a module
+# status dict the API polls. Lets the Principal run a monthly list from the
+# console with no command line.)
+# ---------------------------------------------------------------------------
+
+_ingest_lock = threading.Lock()
+_ingest_status: dict[str, object] = {
+    "phase": "idle", "source": None, "date": None, "n_tickers": 0,
+    "started_at": None, "finished_at": None, "detail": None, "result": None}
+
+
+def _run_ingest_job(source: str, recommendation_date: date,
+                    tickers: list[str], run_desk: bool) -> None:
+    with session_scope() as s:
+        results = ingest_picks(s, SystemClock(), source=source,
+                               recommendation_date=recommendation_date,
+                               tickers=tickers, run_desk=run_desk)
+    rec = sum(1 for r in results if r.outcome == "recorded")
+    dup = sum(1 for r in results if r.outcome == "duplicate")
+    nod = sum(1 for r in results if r.outcome == "no-data")
+    _ingest_status.update(
+        phase="done", finished_at=datetime.now(UTC).isoformat(),
+        detail=f"recorded {rec}, duplicate {dup}, no-data {nod}",
+        result={"recorded": rec, "duplicate": dup, "no_data": nod,
+                "rows": [{"ticker": r.ticker, "outcome": r.outcome,
+                          "detail": r.detail} for r in results]})
+
+
+def start_ingest_job(source: str, recommendation_date: date,
+                     tickers: list[str], run_desk: bool = False) -> bool:
+    """Console trigger. Returns False when an ingest is already running — one
+    at a time; the caller reports 'busy' honestly, nothing runs twice (same
+    contract as analyze/run-daily). Inputs are validated by the API layer."""
+    if not _ingest_lock.acquire(blocking=False):
+        return False
+    _ingest_status.update(
+        phase="ingesting", source=source, date=recommendation_date.isoformat(),
+        n_tickers=len(tickers), started_at=datetime.now(UTC).isoformat(),
+        finished_at=None, result=None,
+        detail=f"fetching data + snapshotting features for {len(tickers)} pick(s)"
+               + (" + running the committee" if run_desk else ""))
+
+    def _target() -> None:
+        try:
+            _run_ingest_job(source, recommendation_date, tickers, run_desk)
+        except Exception as e:  # noqa: BLE001 — the ops layer survives anything
+            _ingest_status.update(phase="failed",
+                                  finished_at=datetime.now(UTC).isoformat(),
+                                  detail=str(e)[:300])
+        finally:
+            _ingest_lock.release()
+
+    threading.Thread(target=_target, name="atlas-pick-ingest", daemon=True).start()
+    return True
+
+
+def ingest_status() -> dict[str, object]:
+    """Snapshot copy (same discipline as analyze.analysis_status)."""
+    out = dict(_ingest_status)
+    if isinstance(out.get("result"), dict):
+        out["result"] = dict(out["result"])  # type: ignore[arg-type]
+    out["running"] = _ingest_lock.locked()
+    return out
 
 
 def _run_desk_for(session: Session, ticker: str, source: str) -> str:

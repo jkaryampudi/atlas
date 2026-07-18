@@ -218,6 +218,27 @@
         <button id="an-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">ANALYZE</button>
         <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
+      <h2>Source Picks — Monthly Lists</h2>
+      <div class="note">Paste a monthly list of external recommendations (e.g. investing.com). Each pick is logged with a POINT-IN-TIME feature snapshot — the substrate for a future filter — and tracked against SPY at 20/60 sessions. Nothing here becomes a trade: picks are MEASURED, NEVER APPLIED, with no path to capital. GRADE &amp; EDGE answers the honest first question — does this source beat a direction-blind dartboard? Near-zero edge means there is no skill to filter. A filter that skews the book toward the outperformers would first have to clear the full validation gauntlet and a signature.</div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select id="sp-src">
+            <option value="investing.com">investing.com</option>
+            <option value="other">other</option>
+          </select>
+          <input id="sp-date" type="date" style="font-family:var(--mono);font-size:12px">
+          <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px"><input id="sp-desk" type="checkbox">also run the committee (costs model budget)</label>
+        </div>
+        <textarea id="sp-tickers" rows="3" placeholder="Tickers — comma or newline separated, e.g.  AAPL, MSFT, NVDA" style="width:100%;box-sizing:border-box;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:8px;text-transform:uppercase"></textarea>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <button id="sp-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">INGEST LIST</button>
+          <button id="sp-grade" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">GRADE &amp; EDGE</button>
+          <span id="sp-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
+        </div>
+      </div>
+      <div class="card" id="sp-edge"><div class="quiet">no matured picks yet — grade after a couple of monthly rounds mature (20+ sessions)</div></div>
+      <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
+
       <h2>Desk Scorecard — Graded Against SPY</h2>
       <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
       <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
@@ -797,6 +818,109 @@ document.getElementById("an-btn").onclick = async()=>{
     if(!anTimer) anTimer = setInterval(pollAnalysis, 2000);
     pollAnalysis();
   }
+})();
+
+/* ---------- source picks — monthly external lists (measured, never applied) ----------
+   Same background-job contract as analyze: POST starts, a 2s poller watches
+   /ingest/status. Picks never become trades — this is measurement only. */
+function spShow(html, color){
+  const el = document.getElementById("sp-status");
+  el.innerHTML = html; el.style.color = color || "var(--dim)";
+}
+function spPct(v){ return v===null||v===undefined ? "—" : (v*100).toFixed(1)+"%"; }
+function spSign(v){ return v===null||v===undefined ? "gray" : (v>0?"g":(v<0?"r":"gray")); }
+
+async function renderPickEdge(rows){
+  const el = document.getElementById("sp-edge");
+  if(rows===undefined){ const r = await get("/v1/research/source-picks/edge"); if(r.err) return; rows = r.data; }
+  const matured = rows.filter(e=>e.n_matured>0);
+  if(!matured.length){ el.innerHTML = `<div class="quiet">no matured picks yet — grade after a couple of monthly rounds mature (20+ sessions)</div>`; return; }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SOURCE</th><th>HORIZON</th><th>N</th><th>OUTPERFORM</th><th>DARTBOARD</th><th>EDGE — the verdict</th></tr>
+    ${matured.map(e=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px">${esc(e.source)}</td>
+      <td>${e.horizon}s</td>
+      <td>${e.n_matured}</td>
+      <td>${spPct(e.outperform_rate)}</td>
+      <td style="color:var(--dim)">${spPct(e.dartboard)}</td>
+      <td><span class="pill ${spSign(e.edge)}">${e.edge>0?"+":""}${spPct(e.edge)}</span></td>
+    </tr>`).join("")}
+  </table>
+  <div class="note" style="margin:10px 0 0">Edge = outperform-rate minus the dartboard's base rate. Near zero = the source has no skill a filter could exploit; a meaningfully positive edge is what would justify (later, through the gauntlet) filtering toward its outperformers.</div>`;
+}
+
+async function renderPickList(){
+  const el = document.getElementById("sp-list");
+  const r = await get("/v1/research/source-picks?limit=200");
+  if(r.err) return;
+  if(!r.data.length){ el.innerHTML = `<div class="quiet">no picks recorded yet — paste a list above and INGEST</div>`; return; }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">DATE</th><th>SOURCE</th><th>TICKER</th><th>SECTOR</th><th>REGIME</th><th>MOM 12-1</th><th>vs SPY @20s</th><th>vs SPY @60s</th></tr>
+    ${r.data.map(p=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px;color:var(--dim)">${esc(p.recommendation_date)}</td>
+      <td style="color:var(--gold)">${esc(p.source)}</td>
+      <td class="sym">${esc(p.ticker)}</td>
+      <td style="color:var(--dim)">${esc(p.sector||"—")}</td>
+      <td style="color:var(--dim)">${esc(p.spy_regime||"—")}</td>
+      <td>${p.mom_12_1===null||p.mom_12_1===undefined?"—":(p.mom_12_1*100).toFixed(0)+"%"}</td>
+      <td>${p.excess_20===null?'<span class="quiet">immature</span>':`<span class="pill ${spSign(p.excess_20)}">${p.excess_20>0?"+":""}${spPct(p.excess_20)}</span>`}</td>
+      <td>${p.excess_60===null?'<span class="quiet">immature</span>':`<span class="pill ${spSign(p.excess_60)}">${p.excess_60>0?"+":""}${spPct(p.excess_60)}</span>`}</td>
+    </tr>`).join("")}
+  </table>`;
+}
+
+let spTimer = null;
+async function pollPickIngest(){
+  const r = await get("/v1/research/source-picks/ingest/status");
+  if(r.err) return;
+  const s = r.data, res = s.result || {};
+  if(s.phase === "ingesting")
+    spShow(`◌ ingesting ${esc(String(s.n_tickers||""))} pick(s) for ${esc(s.source||"")} ${esc(s.date||"")} — ${esc(s.detail||"working")}…`, "var(--blue)");
+  else {
+    if(spTimer){ clearInterval(spTimer); spTimer = null; }
+    if(s.phase === "failed") spShow(`■ INGEST FAILED — ${esc(s.detail||"unknown")}`, "var(--red)");
+    else if(s.phase === "done"){
+      spShow(`✓ recorded ${esc(String(res.recorded||0))} · duplicate ${esc(String(res.duplicate||0))} · no-data ${esc(String(res.no_data||0))}`, "var(--green)");
+      renderPickList();
+    }
+  }
+}
+document.getElementById("sp-btn").onclick = async()=>{
+  const b = document.getElementById("sp-btn");
+  const src = document.getElementById("sp-src").value;
+  const date = document.getElementById("sp-date").value || null;
+  const raw = document.getElementById("sp-tickers").value;
+  const tickers = raw.split(/[\s,]+/).map(t=>t.trim().toUpperCase()).filter(Boolean);
+  if(!tickers.length) return spShow("■ paste at least one ticker", "var(--red)");
+  const run_desk = document.getElementById("sp-desk").checked;
+  b.disabled = true;
+  const r = await postFull("/v1/research/source-picks/ingest", {source: src, date, tickers, run_desk});
+  b.disabled = false;
+  if(r.err) return spShow(`■ ${esc(r.err)}`, "var(--red)");
+  if(r.status !== 200) return spShow(`■ ${esc((r.data && r.data.error && r.data.error.message) || ("status "+r.status))}`, "var(--red)");
+  if(r.data.started) spShow(`◌ ingest started for ${esc(String(r.data.n_tickers))} pick(s)…`, "var(--blue)");
+  else spShow("◌ an ingest is already running — one at a time; watching that one", "var(--gold)");
+  if(!spTimer) spTimer = setInterval(pollPickIngest, 2000);
+  pollPickIngest();
+};
+document.getElementById("sp-grade").onclick = async()=>{
+  const b = document.getElementById("sp-grade");
+  b.disabled = true; spShow("◌ grading matured picks…", "var(--blue)");
+  const r = await postFull("/v1/research/source-picks/grade", {});
+  b.disabled = false;
+  if(r.err || r.status !== 200) return spShow(`■ ${esc(r.err || "grade failed")}`, "var(--red)");
+  spShow(`✓ graded ${esc(String(r.data.graded))} outcome(s) · ${esc(String(r.data.still_immature))} still immature`, "var(--green)");
+  renderPickEdge(r.data.edge); renderPickList();
+};
+/* default the date to today; first render + resume a mid-ingest watch */
+(function(){
+  const d = document.getElementById("sp-date");
+  if(d && !d.value) d.value = new Date().toISOString().slice(0,10);
+})();
+renderPickList(); renderPickEdge();
+(async()=>{
+  const r = await get("/v1/research/source-picks/ingest/status");
+  if(r.data && r.data.phase === "ingesting"){ if(!spTimer) spTimer = setInterval(pollPickIngest, 2000); pollPickIngest(); }
 })();
 
 /* ---------- desk scorecard — the desk graded on its own record ---------- */
