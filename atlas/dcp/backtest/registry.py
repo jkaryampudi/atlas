@@ -26,19 +26,27 @@ from sqlalchemy.orm import Session
 def register_trial(session: Session, *, family: str, spec: dict[str, object],
                    metrics: dict[str, float], lineage: str,
                    hypothesis: str | None = None,
-                   dataset_version: str | None = None) -> str:
+                   dataset_version: str | None = None,
+                   spec_hash: str | None = None) -> str:
     """Register one backtest trial. `lineage` is REQUIRED (ADR-0016): the DB
     column stays nullable for legacy rows, but no new trial may be registered
-    without naming the research line whose penalty it inflates."""
+    without naming the research line whose penalty it inflates.
+
+    `spec_hash` (traceability): a caller with a CANONICAL spec identity (e.g.
+    RecipeSpec.spec_hash(), which its reports/audit events/console print) may
+    pass it so the registry row is queryable by the exact hash every other
+    surface quotes. When omitted, the registry digests the spec dict itself
+    (the legacy behavior, unchanged for existing runners)."""
     if not lineage or not lineage.strip():
         raise ValueError("lineage is required (ADR-0016): every new trial "
                          "names the research line it counts against")
-    spec_hash = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
+    h = (spec_hash if spec_hash is not None else hashlib.sha256(
+        json.dumps(spec, sort_keys=True).encode()).hexdigest())
     rid = session.execute(text(
         "INSERT INTO quant.trial_registry "
         "(strategy_family, spec_hash, metrics, lineage, hypothesis, dataset_version) "
         "VALUES (:f, :h, CAST(:m AS jsonb), :lin, :hyp, :dv) RETURNING id"),
-        {"f": family, "h": spec_hash, "m": json.dumps(metrics),
+        {"f": family, "h": h, "m": json.dumps(metrics),
          "lin": lineage, "hyp": hypothesis, "dv": dataset_version}).scalar_one()
     return str(rid)
 

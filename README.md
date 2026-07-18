@@ -20,6 +20,17 @@ signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
   1000-path null gate, purged walk-forward, point-in-time S&P 500 membership,
   total-return scoring. Graveyard on record: momentum v1, trend/meanrev/breakout,
   FX sandbox (ADR-0008) — all failed verbatim; gates never touched.
+- **Research Factory v1 (feature-store phase 2, 2026-07-18)**: spec-driven
+  recipe gauntlet on the point-in-time feature store (`atlas/dcp/factory/`) —
+  frozen bounded RecipeSpec grammar (canonical spec_hash; no rationale → no
+  run; lineage + kill-start pre-committed), bounded momentum feature family
+  (momentum_12_1/6_1/3_1/12_0, production math, hashed code), trials
+  registered and committed durably BEFORE the gauntlet runs (count honesty,
+  dataset_version + hypothesis provenance), full gauntlet reused by import;
+  golden-pinned byte-identical to the impl-variant xsmom path in the
+  ranking-coincident regime (on real data the recipe deliberately ranks on
+  the live generator's price basis — a different, honestly-counted trial).
+  `python -m atlas.dcp.factory.recipe_run --spec … [--dry-run]`.
 - **P4 risk**: L1–L11, sizing, DD1–DD3 latched breakers, stress, factor overlap,
   approval re-check; 100% branch coverage enforced (`make cov-risk`).
 - **P5 paper trading**: proposals→approval-with-recheck→next-open fills→FIFO

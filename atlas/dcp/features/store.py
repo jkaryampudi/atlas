@@ -63,6 +63,19 @@ natural key: re-materializing the same version is a no-op (never an UPDATE),
 and recomputation under new data lands under a new dataset_version beside the
 old facts — history is never rewritten.
 
+STALE-FACT GUARD (in-place revision honesty). dataset_version hashes the
+input EXTENT (per-symbol min/max/row-count), not bar CONTENT, so an ingest
+that revises a bar IN PLACE (the production upsert path) leaves the version
+unchanged while the true value moves. materialize() therefore RECOMPUTES AND
+COMPARES wherever the natural key already exists: identical — counted as
+existing (the honest no-op re-run); different — RuntimeError naming the row,
+because an append-only store must never silently re-serve a stale fact.
+RESIDUAL, stated honestly: the guard fires only at materialization — a
+reader pinning an old dataset_version (feature_at / feature_panel) without
+re-materializing gets no content check — and an in-place revision that
+changes no computed value passes silently, which is harmless because the
+stored value is then still correct.
+
 Two-plane wall: this module is pure DCP (core + dcp imports only) and never
 touches atlas/agents. Timestamps come from the injected Clock (invariant 6).
 """
@@ -182,7 +195,11 @@ def materialize(db: Session, feature: FeatureDefinition, *, clock: Clock,
     and append values. Fail-soft per symbol: a missing/ambiguous instrument
     row or a compute error is recorded and the run continues — honest counts
     are the deliverable. Re-materializing an identical extent is a no-op
-    (ON CONFLICT DO NOTHING on the natural key; never an UPDATE)."""
+    (ON CONFLICT DO NOTHING on the natural key; never an UPDATE) — but ONLY
+    after the recomputed value byte-matches the stored fact; a mismatch under
+    the same version is an in-place input revision and raises RuntimeError
+    (STALE-FACT GUARD, module docstring) — fail-LOUD, not fail-soft: a
+    silently re-served stale fact would corrupt every consumer."""
     if not sessions:
         raise ValueError("materialize needs at least one target session")
     feature_id = register_feature(db, feature, clock=clock)
@@ -210,7 +227,31 @@ def materialize(db: Session, feature: FeatureDefinition, *, clock: Clock,
             failures.append(f"{feature.name} {symbol}: compute failed: {exc}")
             continue
         computed[symbol] = len(values)
+        stored: dict[date, float] = {
+            r.session_date: float(r.value) for r in db.execute(text(
+                "SELECT session_date, value FROM quant.feature_values "
+                "WHERE feature_id = :f AND instrument_id = :i "
+                "  AND dataset_version = :dv"),
+                {"f": feature_id, "i": iids[0], "dv": version})}
         for session_date in sorted(values):
+            have = stored.get(session_date)
+            if have is not None:
+                # STALE-FACT GUARD (module docstring): the natural key
+                # already holds a fact for this exact vintage — the freshly
+                # recomputed value must byte-match it, or an input was
+                # revised IN PLACE without moving the extent hash.
+                if have != values[session_date]:
+                    raise RuntimeError(
+                        f"stale stored fact: {feature.name} {symbol} "
+                        f"{session_date} dataset_version {version} holds "
+                        f"{have!r} but the same extent now computes "
+                        f"{values[session_date]!r} — an input row was "
+                        "revised IN PLACE (extent unchanged), and an "
+                        "append-only store must never silently re-serve a "
+                        "stale fact; land the revision as new rows (a new "
+                        "dataset_version), never an in-place update")
+                existing += 1
+                continue
             got = db.execute(text(
                 "INSERT INTO quant.feature_values "
                 "(feature_id, instrument_id, session_date, value, "
@@ -231,6 +272,31 @@ def materialize(db: Session, feature: FeatureDefinition, *, clock: Clock,
                 inserted += 1
             else:
                 existing += 1
+        # STALE-FACT GUARD, orphan direction (adversarial re-attack
+        # 2026-07-18): the loop above compares only sessions the fresh
+        # compute PRODUCED. An in-place revision can instead flip a value
+        # to UNCOMPUTABLE (e.g. a close revised to 0 fails the compute's
+        # own c_form > 0 fail-closed check) while leaving the extent hash
+        # unmoved (extent counts close IS NOT NULL rows, and 0 is not
+        # NULL) — orphaning the stored fact, which feature_panel would
+        # then silently re-serve. A stored row under THIS version at a
+        # session THIS run targets, which the same extent can no longer
+        # compute, is the same in-place-revision divergence — fail LOUD.
+        # Restricted to the run's target sessions so denser historical
+        # materializations at non-target sessions never false-positive.
+        target_set = set(ordered)
+        orphaned = sorted(d for d in stored
+                          if d in target_set and d not in values)
+        if orphaned:
+            raise RuntimeError(
+                f"stale stored fact (orphaned): {feature.name} {symbol} "
+                f"{orphaned[0]} dataset_version {version} holds "
+                f"{stored[orphaned[0]]!r} but the same extent no longer "
+                f"computes a value there ({len(orphaned)} orphaned "
+                "row(s)) — an input row was revised IN PLACE to an "
+                "uncomputable state (extent unchanged); land revisions "
+                "as new rows (a new dataset_version), never an in-place "
+                "update")
     return MaterializeReport(
         feature=feature.name, dataset_version=version, sessions=len(ordered),
         inserted=inserted, existing=existing, computed=computed,
