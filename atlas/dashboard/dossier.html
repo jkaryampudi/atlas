@@ -237,7 +237,7 @@ function compsTable(comps){
     const impl=na?'<span style="color:var(--faint)" title="not applicable to a financial / REIT">n/a</span>':num(c.implied_value,2);
     return `<tr${na?' style="opacity:0.5"':''}><td>${lab}</td><td>${num(c.stock,1)}</td><td>${num(c.peer_median,1)}</td><td>${c.percentile==null?"—":(c.percentile*100).toFixed(0)+"%"}</td><td>${impl}</td></tr>`;}).join("");
   const note=comps.equity_only
-    ? `EV multiples are shown but <b style="color:var(--gold)">excluded</b> for a financial / REIT — enterprise value and net debt aren't capital structure for a bank/broker. Fair value uses P/E, P/B, P/S (P/B primary).`
+    ? `EV multiples are shown but <b style="color:var(--gold)">excluded</b> for a financial / REIT — enterprise value and net debt aren't capital structure for a bank/broker. Fair value uses P/E, P/B, P/S (blended equally).`
     : `Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.`;
   return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
     +`<div class="subnote">${note}</div>`;

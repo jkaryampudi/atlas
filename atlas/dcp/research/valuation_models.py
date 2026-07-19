@@ -28,8 +28,9 @@ SECTOR ADAPTATION. For a bank / broker / insurer / REIT (GICS Financials or Real
 Estate) the EV-based comparables, the FCF-DCF and EPV are meaningless — net debt,
 enterprise value and free cash flow are OPERATING items there, not capital
 structure. Those methods are still computed and shown (flagged not-applicable)
-but are EXCLUDED from the fair-value range, which is built from equity multiples
-(P/E, P/B, P/S), P/B the primary lens.
+but are EXCLUDED from the fair-value range, which is built from the equity
+multiples that DO apply (P/E, P/B, P/S), blended symmetrically (min / median /
+max — no single multiple is weighted).
 
 HONESTY (Constitution: no invented numbers).
   * Every input is a reported fact or a mechanical function of reported facts.
@@ -379,7 +380,7 @@ _MULTIPLE_LABELS = {
 # the net-debt bridge. For a bank / broker / insurer / REIT, debt, cash,
 # enterprise value and free cash flow are OPERATING items — not capital
 # structure — so the EV multiples, the FCF-DCF and EPV are meaningless there.
-# Those sectors are valued on equity multiples only (P/B the primary lens).
+# Those sectors are valued on equity multiples only (P/E, P/B, P/S).
 _EQUITY_MULTIPLES = ("pe", "ps", "pb")
 _EQUITY_ONLY_SECTORS = frozenset({"Financials", "Real Estate"})
 
@@ -597,7 +598,7 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
         note = ("Adapted for a financial / REIT: enterprise-value and free-cash-"
                 "flow methods (the EV multiples, DCF and EPV) don't apply to a "
                 "bank, broker, insurer or REIT — the range uses equity multiples "
-                "(P/E, P/B, P/S), with P/B the primary lens. Not a price target.")
+                "(P/E, P/B, P/S), blended equally. Not a price target.")
     else:
         if isinstance(epv["fair_value_per_share"], (int, float)):
             centrals.append(("EPV (no-growth floor)", float(epv["fair_value_per_share"])))

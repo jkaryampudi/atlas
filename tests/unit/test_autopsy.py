@@ -101,6 +101,28 @@ def test_depressed_fcf_base_fires_info_caveat():
     assert a["level"] == "clear"                       # an info caveat doesn't escalate
 
 
+def test_depressed_fcf_suppressed_for_financials():
+    # for a financial the DCF is excluded from the range (dcf.applicable False),
+    # so the "range leans on EPV" caveat must NOT fire even with a depressed FCF
+    models = {"price": 100.0, "technical": {"summary": "Bullish", "sma_50": 95.0},
+              "momentum": {"mom_12_1": 0.2, "ret_20d": 0.05},
+              "risk": {"vol_20d_ann": 0.25, "beta_vs_spy": 1.1},
+              "quality": {"roe": 0.2}}
+    val = {"price": 100.0, "summary": {"fair_value_central": 110.0},
+           "dcf": {"historical_revenue_cagr": 0.1, "levered_fcf": 3e9,
+                   "normalized_fcf": 30e9, "applicable": False},
+           "comparables": {"multiples": {"pe": {"percentile": 0.4},
+                                         "ps": {"percentile": 0.5},
+                                         "pb": {"percentile": 0.5}}},
+           "dupont": {"roe": 0.2}}
+    a = compute_autopsy(models, val)
+    assert not any(f["key"] == "depressed_fcf" for f in a["flags"])
+    # ... but an operating name (applicable True) with the same gap still fires
+    val["dcf"]["applicable"] = True
+    a2 = compute_autopsy(models, val)
+    assert any(f["key"] == "depressed_fcf" for f in a2["flags"])
+
+
 def test_fail_soft_on_missing_panels():
     assert compute_autopsy(None, None)["flags"] == []
     assert compute_autopsy(None, None)["level"] == "clear"

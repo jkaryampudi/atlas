@@ -164,7 +164,11 @@ def compute_autopsy(models: dict[str, Any] | None,
     # caveat, not a fragility flag: it explains a harsh DCF, it is not a red flag.
     lat_fcf = _num(_get(valuation, "dcf", "levered_fcf"))
     norm_fcf = _num(_get(valuation, "dcf", "normalized_fcf"))
-    if (lat_fcf is not None and norm_fcf is not None and norm_fcf > 0
+    # skip for a financial / REIT, where the DCF is excluded from the range —
+    # the "range leans on EPV/comparables" caveat would be false there. `is not
+    # False` keeps firing for operating names and for flag-less legacy payloads.
+    if (_get(valuation, "dcf", "applicable") is not False
+            and lat_fcf is not None and norm_fcf is not None and norm_fcf > 0
             and lat_fcf < _DEPRESSED_FCF * norm_fcf):
         fire("depressed_fcf", "info", "Depressed cash-flow base",
              "latest free cash flow is well below its multi-year norm — a capex "
