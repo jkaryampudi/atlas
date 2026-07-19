@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from atlas.dcp.research.opportunity_screen import screen_opportunities
+from atlas.dcp.research.opportunity_screen import (
+    SCREEN_SOURCE,
+    screen_opportunities,
+    snapshot_board_picks,
+)
 from tests.conftest import requires_pg
 from tests.integration.test_health_score_pg import (
     _AS_OF,
@@ -107,3 +111,22 @@ def test_ties_rank_deterministically_by_instrument_id(pg_session):
     # they carry the identical composite (the tie is real, not a rounding artifact)
     comps = {r["symbol"]: r["health_composite"] for r in out1["board"]}
     assert comps["PONE"] == comps["PTWIN"]
+
+
+def test_snapshot_records_board_picks_and_is_idempotent(pg_session):
+    # the board's top-K are recorded as MEASURED source-picks so the existing
+    # grade/edge machinery can score the screen vs SPY. Records the right names,
+    # tagged with SCREEN_SOURCE, and a re-run is a no-op (idempotent per date).
+    s = pg_session
+    _seed(s)
+    res = snapshot_board_picks(s, _AS_OF, top_k=3)
+    assert [o for _sym, o in res] == ["recorded", "recorded", "recorded"]
+    assert {sym for sym, _o in res} == {"PONE", "SUBJ", "PTWO"}   # top 3 by composite
+    n = s.execute(text("SELECT count(*) FROM research.source_picks WHERE source = :s"),
+                  {"s": SCREEN_SOURCE}).scalar()
+    assert n == 3
+    # a second run for the same date records nothing new (safe monthly re-run)
+    res2 = snapshot_board_picks(s, _AS_OF, top_k=3)
+    assert [o for _sym, o in res2] == ["duplicate", "duplicate", "duplicate"]
+    assert s.execute(text("SELECT count(*) FROM research.source_picks "
+                          "WHERE source = :s"), {"s": SCREEN_SOURCE}).scalar() == 3

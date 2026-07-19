@@ -225,6 +225,7 @@
       <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">show top <input id="op-n" type="number" value="25" min="1" max="100" style="width:56px;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:5px 6px"></label>
         <button id="op-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">RUN SCREEN</button>
+        <button id="op-track" title="Record the top-K into the source-pick tracker (measured vs SPY + dartboard). Measured, never applied." style="background:none;border:1px solid rgba(226,185,91,0.5);color:var(--gold);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">TRACK TOP-20 vs SPY</button>
         <span id="op-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
       <div class="card" id="op-board" style="overflow-x:auto"><div class="quiet">no screen run yet — press RUN SCREEN (ranks ~500 names in ~15s, no model cost)</div></div>
@@ -934,6 +935,33 @@ document.getElementById("op-btn").onclick = async()=>{
     opShow(`✓ ${esc(r.data.detail||"")}`, "var(--green)"); renderOpBoard(r.data.board);
   }
 })();
+/* TRACK TOP-K vs SPY: record the board's top-K into the source-pick tracker so
+   the existing GRADE & EDGE machinery measures the screen's edge. Measured only. */
+let opTrackTimer = null;
+async function pollTrack(){
+  const r = await get("/v1/research/opportunities/track/status");
+  if(r.err) return;
+  const s = r.data;
+  if(s.phase === "running"){ opShow("◌ recording board picks for edge tracking…", "var(--gold)"); return; }
+  clearInterval(opTrackTimer); opTrackTimer = null;
+  const btn = document.getElementById("op-track"); if(btn) btn.disabled = false;
+  if(s.phase === "failed"){ opShow(`■ ${esc(s.detail||"snapshot failed")}`, "var(--red)"); return; }
+  if(s.phase === "done"){
+    opShow(`✓ ${esc(s.detail||"recorded")}`, "var(--green)");
+    if(typeof renderPickEdge === "function") renderPickEdge();   // refresh the edge card
+  }
+}
+document.getElementById("op-track").onclick = async()=>{
+  const btn = document.getElementById("op-track");
+  const n = Math.max(1, Math.min(100, parseInt(document.getElementById("op-n").value)||20));
+  btn.disabled = true;
+  const r = await postFull("/v1/research/opportunities/track", {top_k: n});
+  if(r.err){ btn.disabled = false; return opShow(`■ ${esc(r.err)}`, "var(--red)"); }
+  if(r.data.started) opShow("◌ recording board picks…", "var(--gold)");
+  else opShow("◌ a snapshot is already running — watching that one", "var(--gold)");
+  if(!opTrackTimer) opTrackTimer = setInterval(pollTrack, 2000);
+  pollTrack();
+};
 
 /* ---------- source picks — monthly external lists (measured, never applied) ----------
    Same background-job contract as analyze: POST starts, a 2s poller watches

@@ -170,6 +170,36 @@ def opportunities_status() -> dict[str, object]:
     return screen_status()
 
 
+class TrackBody(BaseModel):
+    top_k: int = 20
+
+
+@router.post("/opportunities/track")
+def opportunities_track(body: TrackBody) -> Any:
+    """Record the board's top-K into research.source_picks (source
+    'atlas-opportunity-screen') so the existing grade/edge machinery measures the
+    screen vs SPY and a dartboard. MEASURED, NEVER APPLIED — a pick is scored,
+    never bridged to capital. Idempotent per (source, ticker, date); a busy job
+    answers {started:false}. Deterministic, no model spend."""
+    from atlas.ops.screen import start_snapshot
+
+    top_k = max(1, min(OPPORTUNITY_TOP_N_MAX, body.top_k))
+    started = start_snapshot(top_k)
+    return {"started": started,
+            "note": ("recording board picks for edge tracking — poll "
+                     "/v1/research/opportunities/track/status" if started
+                     else "a snapshot is already running — one at a time")}
+
+
+@router.get("/opportunities/track/status")
+def opportunities_track_status() -> dict[str, object]:
+    """The current/last board-snapshot job: running -> done|failed, with the
+    recorded/duplicate/no-data tally when done."""
+    from atlas.ops.screen import snapshot_status
+
+    return snapshot_status()
+
+
 # ---- SOURCE PICKS: monthly external-list ingest + edge (measurement only) ---
 
 PICK_MAX_TICKERS = 100

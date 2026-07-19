@@ -31,10 +31,16 @@ from atlas.dcp.research.health_score import (
     _universe_fundamentals,
     _universe_momentum,
 )
+from atlas.dcp.research.source_picks import record_pick
 from atlas.dcp.research.stock_models import compute_models
 from atlas.dcp.research.valuation_models import compute_valuation
 
 _TOP_N = 25
+
+# the board's picks are tracked under this source so the existing source-pick
+# grading (grade_picks / source_edge_report) measures the screen's edge vs SPY
+# and a dartboard — the ONE honest question before any rule could be proposed.
+SCREEN_SOURCE = "atlas-opportunity-screen"
 
 
 def _score_name(factors: dict[str, float | None],
@@ -145,3 +151,44 @@ def screen_opportunities(session: Session, as_of: date, *,
                  "A research candidate board — measured, NEVER a path to capital; "
                  "any rule built on it must clear the gauntlet first."),
     }
+
+
+def snapshot_board_picks(session: Session, recommendation_date: date, *,
+                         top_k: int = 20) -> list[tuple[str, str]]:
+    """Record the board's top-K as MEASURED source-picks (source=SCREEN_SOURCE),
+    each with the point-in-time feature snapshot record_pick captures, so the
+    existing grade_picks / source_edge_report machinery answers, after a few
+    months, whether the screen's leaders beat SPY (and a dartboard) at 5/10/20/60
+    sessions. This is the ONLY honest way to earn the right to ever propose a rule
+    on the screen — and it stays MEASURED, NEVER APPLIED: a research.source_picks
+    row is tracked and scored, never bridged to a proposal or an order (invariant
+    2; same plane as every other source-pick). Idempotent per (source, ticker,
+    recommendation_date), so a monthly re-run is safe. Uses only stored data — no
+    vendor fetch, no model spend. Returns [(symbol, outcome)] with outcome in
+    {recorded, duplicate, no-data}."""
+    board = screen_opportunities(session, recommendation_date, top_n=top_k)
+    rows = board["board"]
+    rows = rows if isinstance(rows, list) else []
+    out: list[tuple[str, str]] = []
+    for r in rows:
+        symbol = r["symbol"] if isinstance(r, dict) else None
+        if symbol is None:
+            continue
+        iid = session.execute(text(
+            "SELECT id FROM market.instruments WHERE symbol = :s AND is_active "
+            "AND market = 'US' ORDER BY id LIMIT 1"), {"s": symbol}).scalar()
+        if iid is None:
+            out.append((str(symbol), "no-data"))
+            continue
+        as_of = session.execute(text(
+            "SELECT max(bar_date) FROM market.price_bars_daily "
+            "WHERE instrument_id = :iid AND bar_date <= :on"),
+            {"iid": str(iid), "on": recommendation_date}).scalar()
+        if as_of is None:
+            out.append((str(symbol), "no-data"))
+            continue
+        pid = record_pick(session, source=SCREEN_SOURCE, ticker=str(symbol),
+                          instrument_id=str(iid), recommendation_date=recommendation_date,
+                          as_of_session=as_of)
+        out.append((str(symbol), "recorded" if pid is not None else "duplicate"))
+    return out
