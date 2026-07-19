@@ -1,6 +1,7 @@
 """Agent run orchestration: prompt hash-pinning, call, schema validation, persistence,
-audit event. One retry on schema failure — with the violation text appended via a
-reviewed template — then the run fails closed (Constitution 5.2). Transient
+audit event. Up to two retries on schema/grounding failure — each re-prompting
+with the violation text via a reviewed template — then the run fails closed
+(Constitution 5.2), so a flaky role gets more chances to self-correct. Transient
 transport failures (429/5xx/timeout) back off and retry in place, then surface as
 TransientLlmFailure; budget checks bind the global breaker first, then the
 calling surface's sub-cap (desk-review 2026-07 item 6)."""
@@ -93,6 +94,12 @@ def price_model(model: str) -> tuple[float, float, bool]:
 TRANSIENT_MAX_ATTEMPTS = 3         # 1 call + up to 2 retries per completion
 TRANSIENT_BACKOFF_BASE_S = 1.0     # sleeps ~1s then ~2s (exponential, base 2)
 TRANSIENT_BACKOFF_JITTER_S = 0.25  # + uniform [0, 0.25) s de-synchronization
+# Schema/grounding self-correction: 1 call + up to 2 retries, each re-prompting
+# with the recorded violation text. A single flaky role (e.g. a debater citing an
+# ungrounded number) would otherwise fail the WHOLE run — wasting every other
+# role's successful call — so an extra cheap retry to salvage the run is
+# cost-efficient, not spendy.
+SCHEMA_MAX_ATTEMPTS = 3
 _sleep = time.sleep                # module hooks: tests replace to observe
 _jitter = random.random
 
@@ -227,9 +234,9 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
     template, t_hash = load_template(template_rel_path)
     prompt = template + "\n\n" + context
     last_err = ""
-    for attempt in (1, 2):
+    for attempt in range(1, SCHEMA_MAX_ATTEMPTS + 1):
         attempt_prompt, retry_hash = prompt, None
-        if attempt == 2:
+        if attempt >= 2:
             # Cage retry (item 6): the recorded violation text rides the
             # reviewed addendum template. It quotes model output, so it is
             # DATA — fence impersonation neutralized exactly like untrusted
@@ -335,4 +342,5 @@ def run_agent(*, session: Session, audit: PostgresAuditLog, client: LlmClient,
                      payload=run_payload)
         if validated is not None:
             return validated, str(run_id)
-    raise AgentRunFailed(f"{agent_role}: two consecutive schema failures — {last_err[:300]}")
+    raise AgentRunFailed(
+        f"{agent_role}: schema failure after {SCHEMA_MAX_ATTEMPTS} attempts — {last_err[:300]}")

@@ -461,12 +461,31 @@ function render(d){
     <div class="fnote">Technical, momentum and risk statistics are computed deterministically and point-in-time from ${esc(d.ticker)}'s own split-adjusted bars as of the pick's as-of session. Statements, earnings surprises and forward consensus are reported verbatim from Atlas's stored vendor archive as of the latest snapshot shown — a present-tense reference, distinct from the frozen pick fingerprint above. No forecasts are fabricated. Atlas AI Capital · paper mode · not investment advice.</div>`;
 
   $("analyze").onclick = async ()=>{
-    const b = $("analyze"); b.disabled = true; b.textContent = "DESK RUNNING…";
-    try{
-      const rr = await fetch("/v1/research/analyze", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:d.ticker,source:d.source})});
-      const j = await rr.json();
-      b.textContent = (rr.ok && j.started) ? "DESK RUNNING… (~2 min, then refresh)" : "DESK BUSY — one at a time";
-    }catch(e){ b.disabled=false; b.textContent="ANALYZE — RETRY"; }
+    const b = $("analyze");
+    let st = document.getElementById("an-out");
+    if(!st){ st = document.createElement("div"); st.id = "an-out";
+      st.style.cssText = "font-family:var(--mono);font-size:11px;margin-top:10px;line-height:1.6"; b.parentNode.appendChild(st); }
+    const say = (t,c)=>{ st.innerHTML = t; st.style.color = c||"var(--dim)"; };
+    b.disabled = true; b.textContent = "DESK RUNNING…"; say("");
+    let rr, j;
+    try{ rr = await fetch("/v1/research/analyze", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({symbol:d.ticker,source:d.source})}); j = await rr.json(); }
+    catch(e){ b.disabled=false; b.textContent="ANALYZE — RETRY"; return say("■ could not reach the API","var(--red)"); }
+    if(!(rr.ok && j.started)){ b.disabled=false; b.textContent="ANALYZE WITH DESK"; return say("■ desk busy — one analysis at a time; try again shortly","var(--gold)"); }
+    // poll to a terminal state and show the real outcome (no more guessing)
+    const poll = setInterval(async ()=>{
+      let s; try{ s = await (await fetch("/v1/research/analyze/status")).json(); }catch(e){ return; }
+      if(s.phase==="fetching") say("◌ fetching data…");
+      else if(s.phase==="analyzing") say("◌ desk debating… ~2 min (4 debate calls + CIO memo)","var(--blue)");
+      else if(s.phase==="done" || s.phase==="failed"){
+        clearInterval(poll); b.disabled=false; b.textContent="ANALYZE WITH DESK";
+        const res = s.result||{};
+        if(s.phase==="failed") say("■ ANALYSIS FAILED — "+esc(s.detail||"unknown failure"),"var(--red)");
+        else if(res.outcome==="memo") say("✓ MEMO LANDED — "+esc(res.recommendation||"")+" · conviction "+esc(res.conviction||"")+" — reload this page to see it","var(--green)");
+        else if(res.outcome==="cage_held") say("■ CAGE HELD — the run failed closed, no memo landed (the safety cage working, not a bug). "+esc(res.reason||""),"var(--gold)");
+        else if(res.outcome==="skipped") say("■ SKIPPED — "+esc(res.reason||""),"var(--gold)");
+        else say(esc(s.detail||"finished"));
+      }
+    }, 3000);
   };
 }
 load();

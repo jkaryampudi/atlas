@@ -109,18 +109,18 @@ def test_exhausted_transient_raises_and_persists_no_run(clean_audit):
 
 
 def test_cage_kill_is_never_retried_as_transient(clean_audit):
-    """A schema kill takes the cage path (2 attempts, fail closed) — the
-    transient backoff must not multiply cage retries."""
+    """A schema kill takes the cage path (SCHEMA_MAX_ATTEMPTS=3, then fail
+    closed) — the transient backoff must not multiply cage retries beyond that."""
     s = clean_audit
-    client = _FlakyStub([], ["not json at all", "still not json"])
+    client = _FlakyStub([], ["not json at all", "still not json", "still bad"])
     with pytest.raises(AgentRunFailed):
         run_agent(session=s, audit=_audit(s), client=client,
                   agent_role="probe", template_rel_path="debate/bull.md",
                   context="probe", output_model=_Note, input_refs=[])
-    assert client.calls == 2                    # exactly today's behavior
+    assert client.calls == 3                    # exactly SCHEMA_MAX_ATTEMPTS, no more
     statuses = s.execute(text(
         "SELECT status FROM research.agent_runs")).scalars().all()
-    assert statuses == ["schema_fail", "schema_fail"]
+    assert statuses == ["schema_fail", "schema_fail", "schema_fail"]
 
 
 def test_cage_retry_appends_violation_text_via_reviewed_template(clean_audit):

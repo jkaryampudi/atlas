@@ -35,7 +35,7 @@ def _memo(thesis: str) -> str:
 
 def _run(s, response: str, evidence_body: str):
     return run_agent(
-        session=s, audit=_audit(s), client=StubClient([response, response]),
+        session=s, audit=_audit(s), client=StubClient([response, response, response]),
         agent_role="cio", template_rel_path="cio/committee_memo.md",
         context=f"DCP evidence [ev-1]: {evidence_body}",
         output_model=CommitteeMemo,
@@ -54,7 +54,7 @@ def test_fabricated_number_fails_closed_with_audit_event(clean_audit):
     assert statuses == ["schema_fail"]  # grounding takes the schema_fail path
     n = s.execute(text("SELECT count(*) FROM audit.decision_events "
                        "WHERE event_type='agent.grounding.failed'")).scalar()
-    assert n == 2  # one per attempt, then fail closed
+    assert n == 3  # one grounding failure per attempt (3), then fail closed
 
 
 def test_same_number_present_in_cited_evidence_passes(clean_audit):
@@ -77,7 +77,7 @@ def test_number_in_uncited_evidence_is_still_ungrounded(clean_audit):
         "evidence_refs": ["ev-1"], "dissent": "Growth may be priced in."})
     with pytest.raises(AgentRunFailed):
         run_agent(session=s, audit=_audit(s),
-                  client=StubClient([response, response]),
+                  client=StubClient([response, response, response]),
                   agent_role="cio", template_rel_path="cio/committee_memo.md",
                   context="DCP evidence [ev-1]: growth was robust.\n"
                           "DCP evidence [ev-2]: revenue grew 47 percent.",
@@ -115,7 +115,7 @@ def test_redteam_bare_20_grounded_only_by_sma20_now_kills(clean_audit):
              evidence_body="SMA20 543.21 and rising.")
     n = s.execute(text("SELECT count(*) FROM audit.decision_events "
                        "WHERE event_type='agent.grounding.failed'")).scalar()
-    assert n == 2  # one per attempt, then fail closed — the cage held
+    assert n == 3  # one grounding failure per attempt (3), then fail closed — cage held
 
 
 def test_legitimate_20_sessions_in_corpus_still_grounds(clean_audit):
