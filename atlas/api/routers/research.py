@@ -25,6 +25,7 @@ from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.research.financials_panel import compute_financials
 from atlas.dcp.research.stock_models import compute_models
+from atlas.dcp.research.valuation_models import compute_valuation
 from atlas.dcp.scorecard import dartboard_baseline, dissent_right, vindicated
 
 router = APIRouter()
@@ -281,6 +282,11 @@ def source_pick_dossier(pick_id: str) -> Any:
         today = SystemClock().now().date()
         financials = (compute_financials(s, pick["instrument_id"], ticker, today)
                       if pick["instrument_id"] is not None else None)
+        # Atlas's own mechanical valuation models (present-tense reference, same
+        # as the financials panel) — our answer to the report's proprietary
+        # "fair value", built from our data and clearly labelled as ours.
+        valuation = (compute_valuation(s, pick["instrument_id"], ticker, today)
+                     if pick["instrument_id"] is not None else None)
 
         memo = s.execute(text(
             "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
@@ -336,6 +342,7 @@ def source_pick_dossier(pick_id: str) -> Any:
                                                     else None)} for sig in signals],
             "models": models,
             "financials": financials,
+            "valuation": valuation,
             "cross_check": cross,
         }
 

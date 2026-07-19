@@ -86,6 +86,17 @@
   .statements[data-gran="quarterly"] .a{display:none}
   .subnote{color:var(--faint);font-size:11.5px;font-style:italic;margin:6px 0}
 
+  /* valuation fair-value band */
+  .fvband{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:18px;align-items:end;margin-bottom:6px}
+  .fvstat .l{font-size:9.5px;color:var(--faint);font-family:var(--mono);letter-spacing:0.12em}
+  .fvstat .v{font-family:var(--mono);font-size:21px;margin-top:5px}
+  .fvstat .v.small{font-size:15px}
+  .fvverdict{font-family:var(--disp);font-weight:700;font-size:13px;padding:4px 12px;border:1.5px solid;border-radius:6px;display:inline-block;white-space:nowrap}
+  .fvverdict.g{color:var(--green);border-color:var(--green)}
+  .fvverdict.r{color:var(--red);border-color:var(--red)}
+  .fvverdict.gd{color:var(--gold);border-color:rgba(226,185,91,0.5)}
+  .gd{color:var(--gold)}
+
   @media print{
     .tbl th:first-child,.tbl td:first-child{background:#fff}
     .statements[data-gran="quarterly"] .q{display:none} .statements .a{display:block!important}
@@ -164,6 +175,85 @@ function buildFinancials(F){
     <div class="card full"><div class="ctitle">Earnings History · EPS Surprises</div>${earningsTable(en.history)}</div>
     <div class="card full"><div class="ctitle">Forward Consensus · Analyst Estimates</div>${estimatesTable(en.estimates)}</div>`;
 }
+function upClass(v){ return v==null?"neu":v>0?"g":v<0?"r":"neu"; }
+function upTxt(v){ return v==null?"—":(v>0?"+":"")+(v*100).toFixed(1)+"%"; }
+function dcfGrid(dcf){
+  const g=dcf.sensitivity||[];
+  if(!g.length) return '<div class="subnote">insufficient data for a DCF (needs positive free cash flow, share count, and WACC above terminal growth)</div>';
+  const waccs=[...new Set(g.map(x=>x.wacc))].sort((a,b)=>a-b);
+  const grs=[...new Set(g.map(x=>x.growth))].sort((a,b)=>a-b);
+  const head='<th>growth ↓ / WACC →</th>'+waccs.map(w=>`<th>${(w*100).toFixed(1)}%</th>`).join("");
+  const body=grs.map(gr=>`<tr><td>${(gr*100).toFixed(0)}%</td>`+waccs.map(w=>{
+    const cell=g.find(x=>x.growth===gr&&x.wacc===w);
+    return `<td>${cell&&cell.fair_value_per_share!=null?num(cell.fair_value_per_share,2):"—"}</td>`;}).join("")+'</tr>').join("");
+  return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function compsTable(comps){
+  if(!comps.n_peers) return '<div class="subnote">no sector peers with comparable multiples available</div>';
+  const m=comps.multiples||{}, rows=[["P/E","pe"],["EV/EBITDA","ev_ebitda"],["P/S","ps"],["P/B","pb"]];
+  const head='<th>Multiple</th><th>Stock</th><th>Sector median</th><th>Percentile</th><th>Implied value</th>';
+  const body=rows.map(([lab,k])=>{const c=m[k]||{};
+    return `<tr><td>${lab}</td><td>${num(c.stock,1)}</td><td>${num(c.peer_median,1)}</td><td>${c.percentile==null?"—":(c.percentile*100).toFixed(0)+"%"}</td><td>${num(c.implied_value,2)}</td></tr>`;}).join("");
+  return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    +`<div class="subnote">Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.</div>`;
+}
+function buildValuation(V){
+  const sm=V.summary||{}, coc=V.cost_of_capital||{}, a=coc.assumptions||{}, epv=V.epv||{}, dcf=V.dcf||{}, comps=V.comparables||{}, dp=V.dupont||{};
+  const vc = sm.verdict==="below our model range"?"g":sm.verdict==="above our model range"?"r":"gd";
+  const band = `<div class="fvband">
+      <div class="fvstat"><div class="l">MODEL LOW</div><div class="v">${num(sm.fair_value_low,2)}</div></div>
+      <div class="fvstat"><div class="l">CENTRAL</div><div class="v gd">${num(sm.fair_value_central,2)}</div></div>
+      <div class="fvstat"><div class="l">MODEL HIGH</div><div class="v">${num(sm.fair_value_high,2)}</div></div>
+      <div class="fvstat"><div class="l">CURRENT PRICE</div><div class="v">${num(sm.price,2)}</div></div>
+      <div class="fvstat"><div class="l">UPSIDE TO CENTRAL</div><div class="v small ${upClass(sm.upside_to_central_pct)}">${upTxt(sm.upside_to_central_pct)}</div></div>
+      <div class="fvstat"><div class="l">ATLAS VERDICT</div><div style="margin-top:5px"><span class="fvverdict ${vc}">${esc(sm.verdict||"insufficient data")}</span></div></div>
+    </div>`;
+  return `
+    <div class="card full"><div class="ctitle">Atlas Valuation Models <span style="text-transform:none;letter-spacing:0;color:var(--faint)">our own mechanical fair value${V.snapshot_as_of?" · snapshot "+esc(V.snapshot_as_of):""}</span></div>
+      ${band}
+      <div class="subnote">${esc(sm.note||"")} Methods contributing: ${(sm.methods||[]).map(esc).join(" · ")||"—"}.</div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="ctitle">EPV — no-growth floor</div>${kv([
+        ["Fair value / share","<b>"+num(epv.fair_value_per_share,2)+"</b>"],
+        ["Upside vs price",upTxt(epv.upside_pct),upClass(epv.upside_pct)],
+        ["Normalized op. margin",pct(epv.normalized_operating_margin)],
+        ["Normalized EBIT",fmtMoney(epv.normalized_ebit)],
+        ["NOPAT",fmtMoney(epv.nopat)],
+      ])}<div class="subnote">${esc(epv.note||"")}</div></div>
+
+      <div class="card"><div class="ctitle">DCF — central estimate</div>${kv([
+        ["Fair value / share","<b>"+num(dcf.fair_value_per_share,2)+"</b>"],
+        ["Upside vs price",upTxt(dcf.upside_pct),upClass(dcf.upside_pct)],
+        ["Base FCFF (unlevered)",fmtMoney(dcf.base_fcf)],
+        ["Vendor FCF (levered)",fmtMoney(dcf.levered_fcf)],
+        ["Hist. revenue CAGR",pct(dcf.historical_revenue_cagr)],
+        ["Central growth (capped)",pct(dcf.central_growth)],
+        ["Forecast horizon",dcf.forecast_years==null?"—":dcf.forecast_years+"y + terminal"],
+        ["Terminal growth",pct(dcf.terminal_growth)],
+        ["WACC",pct(dcf.wacc)],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">Cost of Capital (WACC)</div>${kv([
+        ["Beta",num(coc.beta)],
+        ["Cost of equity (CAPM)",pct(coc.cost_of_equity)],
+        ["Cost of debt (after tax)",pct(coc.cost_of_debt_aftertax)],
+        ["WACC","<b>"+pct(coc.wacc)+"</b>"],
+        ["— risk-free (assumed)",pct(a.risk_free_rate)],
+        ["— equity risk prem. (assumed)",pct(a.equity_risk_premium)],
+        ["— tax rate (normalized)",pct(a.tax_rate)],
+      ])}</div>
+
+      <div class="card"><div class="ctitle">DuPont ROE</div>${kv([
+        ["Net margin",pct(dp.net_margin)],
+        ["× Asset turnover",num(dp.asset_turnover,2)],
+        ["× Equity multiplier",num(dp.equity_multiplier,2)],
+        ["= Return on equity",pct(dp.roe),upClass(dp.roe)],
+      ])}</div>
+    </div>
+    <div class="card full"><div class="ctitle">DCF sensitivity — fair value / share across growth × WACC</div>${dcfGrid(dcf)}</div>
+    <div class="card full"><div class="ctitle">Comparables — sector-peer multiples</div>${compsTable(comps)}</div>`;
+}
 
 async function load(){
   if(!id){ $("body").innerHTML = '<div class="loading">no pick id in the URL</div>'; return; }
@@ -179,6 +269,7 @@ function render(d){
   const f=d.features||{}, x=d.excess||{}, c=d.cross_check||{}, m=d.memo, sig=d.atlas_signals||[];
   const M=d.models||{}, t=M.technical||{}, mo=M.momentum||{}, v=M.valuation||{}, q=M.quality||{}, rk=M.risk||{};
   const F=d.financials||null, ks=(F&&F.key_stats)||{}, finHTML=F?buildFinancials(F):"";
+  const V=d.valuation||null, valHTML=V?buildValuation(V):"";
   document.title = `${d.ticker} — Atlas dossier`;
   const perf = [5,10,20,60].map(h=>`<div class="h"><div class="hl">vs SPY @${h}s</div><div class="hv ${sign(x[h])}">${x[h]==null?'<span class="imm">immature</span>':(x[h]>0?"+":"")+pct(x[h])}</div></div>`).join("");
 
@@ -273,6 +364,8 @@ function render(d){
     </div>
 
     ${finHTML}
+
+    ${valHTML}
 
     <div class="card full memo" style="margin-top:16px">
       <div class="ctitle">Atlas Committee View</div>
