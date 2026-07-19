@@ -113,6 +113,56 @@ def test_ties_rank_deterministically_by_instrument_id(pg_session):
     assert comps["PONE"] == comps["PTWIN"]
 
 
+def test_monthly_snapshot_one_cohort_per_month_self_healing(pg_session):
+    # the cycle's rule (ops/screen.monthly_snapshot_if_due): the first cycle of
+    # a month with no cohort records one; every later cycle that month idles
+    # (checkpoint replays included); a new month records a fresh cohort. The
+    # cohort is dated the day it was knowable — a run on the 3rd records the
+    # 3rd, never a backdated 1st.
+    from datetime import UTC, datetime
+
+    from atlas.core.clock import FrozenClock
+    from atlas.ops.screen import monthly_snapshot_if_due
+
+    s = pg_session
+    _seed(s)
+    jan3 = FrozenClock(datetime(2026, 1, 3, 12, 0, tzinfo=UTC))
+    line = monthly_snapshot_if_due(s, jan3, top_k=3)
+    assert "recorded for 2026-01: 3 picks" in line
+    assert s.execute(text(
+        "SELECT count(*) FROM research.source_picks WHERE source = :s "
+        "AND recommendation_date = '2026-01-03'"), {"s": SCREEN_SOURCE}).scalar() == 3
+
+    # same month, later day -> idle (one cohort per month; replay-safe); the
+    # line carries the cohort's date so a hand-timed cohort is never hidden
+    jan20 = FrozenClock(datetime(2026, 1, 20, 12, 0, tzinfo=UTC))
+    assert "cohort exists for 2026-01 (3 picks, dated 2026-01-03)" in \
+        monthly_snapshot_if_due(s, jan20, top_k=3)
+
+    # next month -> a fresh cohort, dated the day it ran
+    feb2 = FrozenClock(datetime(2026, 2, 2, 12, 0, tzinfo=UTC))
+    assert "recorded for 2026-02: 3 picks" in monthly_snapshot_if_due(
+        s, feb2, top_k=3)
+    assert s.execute(text(
+        "SELECT count(*) FROM research.source_picks WHERE source = :s"),
+        {"s": SCREEN_SOURCE}).scalar() == 6
+
+    # a PARTIAL cohort (e.g. a manual top-2 TRACK) latches its month but is
+    # labelled partial every night — never a silent substitution
+    mar1 = FrozenClock(datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
+    monthly_snapshot_if_due(s, mar1, top_k=2)                # cohort of 2
+    line = monthly_snapshot_if_due(s, mar1, top_k=3)         # nightly view at K=3
+    assert "cohort exists for 2026-03 (2 picks, dated 2026-03-01 — PARTIAL, < top-3)" in line
+
+    # a stray FUTURE-dated pick must not suppress the current month's cohort
+    s.execute(text(
+        "UPDATE research.source_picks SET recommendation_date = '2026-06-15' "
+        "WHERE source = :s AND recommendation_date = '2026-03-01'"),
+        {"s": SCREEN_SOURCE})
+    apr1 = FrozenClock(datetime(2026, 4, 1, 12, 0, tzinfo=UTC))
+    assert "recorded for 2026-04" in monthly_snapshot_if_due(s, apr1, top_k=3)
+
+
 def test_snapshot_records_board_picks_and_is_idempotent(pg_session):
     # the board's top-K are recorded as MEASURED source-picks so the existing
     # grade/edge machinery can score the screen vs SPY. Records the right names,

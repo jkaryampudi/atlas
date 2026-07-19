@@ -16,8 +16,13 @@ from __future__ import annotations
 import threading
 from datetime import UTC, datetime
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from atlas.core.clock import Clock
 from atlas.core.db import session_scope
 from atlas.dcp.research.opportunity_screen import (
+    SCREEN_SOURCE,
     screen_opportunities,
     snapshot_board_picks,
 )
@@ -135,3 +140,58 @@ def snapshot_status() -> dict[str, object]:
         out["result"] = dict(out["result"])  # type: ignore[arg-type]
     out["running"] = _snapshot_lock.locked()
     return out
+
+
+# ---- monthly cohort, recorded by the daily cycle (T9) -----------------------
+
+MONTHLY_TOP_K = 20
+
+
+def monthly_snapshot_if_due(session: Session, clock: Clock, *,
+                            top_k: int = MONTHLY_TOP_K) -> str:
+    """ONE board cohort per calendar month, recorded automatically by the daily
+    cycle so the screen's edge measurement sustains itself with no console
+    click. SELF-HEALING, not calendar-pinned: the first cycle of a month that
+    finds no cohort yet records one (a machine asleep on the 1st records on the
+    2nd — the cohort is dated the day it was actually knowable, never
+    backdated). Idempotent on top of record_pick's (source, ticker, date)
+    conflict rule, so a checkpoint replay of the same day is a no-op.
+
+    A MANUAL console TRACK earlier in the month counts as that month's cohort —
+    deliberate: one recording event per month keeps cohorts non-overlapping, and
+    topping a partial cohort up on a later date would either backdate picks or
+    double-count tickers across dates. A partial cohort (< top_k) is therefore
+    LATCHED for the month, but never silently: the nightly line labels it
+    partial, every cycle, so the Principal sees the thin month all month. An
+    empty board records nothing and reports that honestly — the guard stays
+    open and the next cycle retries.
+
+    Runs on the cycle's INJECTABLE clock (invariant 6 — this is pipeline code,
+    unlike the console-triggered jobs above whose wall clock is ops-layer
+    WHEN-deciding), normalized to UTC like every session-date decision in the
+    cycle. Deterministic, no model spend, MEASURED-NEVER-APPLIED: cohort rows
+    are scored vs SPY + dartboard by grade_picks, never bridged."""
+    today = clock.now().astimezone(UTC).date()
+    # bounded to <= today: a stray future-dated row (manual API misuse) must
+    # never suppress months of cohorts ahead of itself
+    row = session.execute(text(
+        "SELECT count(*) AS n, min(recommendation_date) AS d "
+        "FROM research.source_picks "
+        "WHERE source = :s AND recommendation_date >= :m "
+        "  AND recommendation_date <= :t"),
+        {"s": SCREEN_SOURCE, "m": today.replace(day=1), "t": today}).one()
+    if row.n:
+        # the cohort's date is printed so a hand-timed (console TRACK) cohort is
+        # visible as such in every nightly line — the date choice is the one
+        # bias the substitution rule admits, so it is never hidden
+        partial = (" — PARTIAL, < top-" + str(top_k)) if row.n < top_k else ""
+        return (f"screen cohort exists for {today:%Y-%m} "
+                f"({row.n} picks, dated {row.d}{partial})")
+    rows = snapshot_board_picks(session, today, top_k=top_k)
+    rec = sum(1 for _sym, o in rows if o == "recorded")
+    nod = sum(1 for _sym, o in rows if o == "no-data")
+    if rec == 0:
+        return (f"screen cohort EMPTY for {today:%Y-%m} — nothing recordable "
+                f"({len(rows)} board rows, {nod} no-data); retrying next cycle")
+    line = f"screen cohort recorded for {today:%Y-%m}: {rec} picks"
+    return line + (f", {nod} no-data" if nod else "")

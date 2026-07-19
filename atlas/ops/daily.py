@@ -65,7 +65,11 @@ fired by launchd at 09:30 AEST (after the US close and EODHD publish).
                   are never duplicated, expired/rejected ones stay history
                   (atlas/dcp/trading/core_allocation.maintain_core_proposals).
                   Fail-soft exactly like t5b
-  T9 report       summary incl. desk + bridge + attribution + core results ->
+  T9 report       scorecard + learning + source-pick grading + the monthly
+                  opportunity-screen cohort (self-healing: first cycle of a
+                  month with no cohort records the board's top-K as measured
+                  picks — atlas/ops/screen.monthly_snapshot_if_due), then the
+                  summary incl. desk + bridge + attribution + core results ->
                   audit + operator alert
   T9b brief       the Principal's morning brief: ASSEMBLE (never compute) the
                   session's cycle results, approval queue with expiry
@@ -527,6 +531,17 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             state["picks_failed"] = True
             picks_line = f"source-picks FAILED: {e}"[:200]
+        # monthly opportunity-screen cohort (self-healing: the first cycle of a
+        # month with no cohort records the board's top-K as measured picks, so
+        # the screen's edge trial sustains itself with no console click).
+        # Fail-soft, surfacing-only — deterministic, no model spend, and like
+        # every source-pick it is measured, never bridged. Same SQL caveat.
+        try:
+            from atlas.ops.screen import monthly_snapshot_if_due
+            screen_line = monthly_snapshot_if_due(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["screen_snapshot_failed"] = True
+            screen_line = f"screen-cohort FAILED: {e}"[:200]
         ingest = state.get("ingest")
         stops = state.get("stops", ())
         fills = state.get("fills", ())
@@ -550,7 +565,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                   or bool(state.get("cusum_failed", False))
                   or bool(state.get("attribution_failed", False))
                   or bool(state.get("core_failed", False))
-                  or bool(state.get("picks_failed", False)))
+                  or bool(state.get("picks_failed", False))
+                  or bool(state.get("screen_snapshot_failed", False)))
         lines = [f"NAV A${nav}",
                  f"fills {len(fills)}, stops fired {len(stops)}",  # type: ignore[arg-type]
                  desk_report.summary() if desk_report is not None else "desk idle",
@@ -567,6 +583,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                  scorecard_line,
                  learning_line,
                  picks_line,
+                 screen_line,
                  "ingest FAILED — see log" if bool(state.get("ingest_failed", False))
                  else "ingest clean"]
         if state.get("desk_failed"):
@@ -589,6 +606,8 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
             lines.append("core FAILED — see log")
         if state.get("picks_failed"):
             lines.append("source-picks FAILED — see log")
+        if state.get("screen_snapshot_failed"):
+            lines.append("screen-cohort FAILED — see log")
         if state.get("billing_outage"):
             lines.append("BILLING OUTAGE — API credits exhausted, desk skipped")
         summary = " · ".join(lines)
@@ -701,7 +720,12 @@ def main() -> None:
               or "cusum FAILED" in (results.get("t5c_cusum") or "")
               or "attribution FAILED" in (results.get("t8b_attribution") or "")
               or "core FAILED" in (results.get("t8c_core") or "")
-              or "brief FAILED" in (results.get("t9b_brief") or ""))
+              or "brief FAILED" in (results.get("t9b_brief") or "")
+              # t9's internal fail-soft lines (scorecard / learning / source-
+              # picks / screen-cohort): they already page via the high-priority
+              # notify, but the exit code must agree so a webhook-less install
+              # still sees the failure in the scheduler status (review 2026-07)
+              or "FAILED" in (results.get("t9_report") or ""))
     print(json.dumps(results, indent=2))
     raise SystemExit(2 if failed else 0)
 
