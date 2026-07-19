@@ -1,0 +1,12 @@
+{
+  "name": "mom-3-1-top5",
+  "rank_feature": "momentum_3_1",
+  "direction": "desc",
+  "top_n": 5,
+  "rebalance": "monthly",
+  "universe": "pit-sp500",
+  "cost_bps_per_side": 10,
+  "lineage": "momentum",
+  "rationale": "Short-horizon continuation: a 3-month formation captures the freshest underreaction (earnings-drift adjacent, Chan-Jegadeesh-Lakonishok 1996) at the cost of a noisier, faster-decaying signal. Hypothesis: the short-horizon momentum premium on the point-in-time S&P 500 panel is strong enough to survive real costs at a monthly rebalance cadence; the literature suggests it is weaker than 12-1, so a FAIL here is informative about horizon, not a surprise. Registered before the result exists.",
+  "kill_start": "2016-01-01"
+}

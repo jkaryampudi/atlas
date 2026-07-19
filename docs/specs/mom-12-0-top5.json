@@ -1,0 +1,12 @@
+{
+  "name": "mom-12-0-top5",
+  "rank_feature": "momentum_12_0",
+  "direction": "desc",
+  "top_n": 5,
+  "rebalance": "monthly",
+  "universe": "pit-sp500",
+  "cost_bps_per_side": 10,
+  "lineage": "momentum",
+  "rationale": "Skip-month ablation, pre-registered: the canonical 12-1 skips the most recent month to dodge short-term reversal (Jegadeesh 1990). This spec includes that month (12-0) to test whether the skip is load-bearing on the modern point-in-time S&P 500 panel. Expectation from the literature is DEGRADATION versus 12-1; the experiment is registered because the expectation deserves a counted test, not an assumption -- a PASS would challenge the reversal premise on this panel. Registered before the result exists.",
+  "kill_start": "2016-01-01"
+}

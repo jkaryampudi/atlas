@@ -1,0 +1,12 @@
+{
+  "name": "mom-6-1-top5",
+  "rank_feature": "momentum_6_1",
+  "direction": "desc",
+  "top_n": 5,
+  "rebalance": "monthly",
+  "universe": "pit-sp500",
+  "cost_bps_per_side": 10,
+  "lineage": "momentum",
+  "rationale": "Intermediate-horizon continuation (Jegadeesh-Titman 1993): 6-month formation portfolios earn a momentum premium driven by investor underreaction, with a fresher signal than the canonical 12-month formation and less exposure to stale year-old information. Hypothesis: on the point-in-time S&P 500 panel, ranking on 6-1 momentum at top-5/monthly retains a premium that survives costs, the null model, lineage-deflated Sharpe and walk-forward. Registered before the result exists.",
+  "kill_start": "2016-01-01"
+}
