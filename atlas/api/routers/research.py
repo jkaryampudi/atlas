@@ -23,6 +23,7 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.research.financials_panel import compute_financials
 from atlas.dcp.research.stock_models import compute_models
 from atlas.dcp.scorecard import dartboard_baseline, dissent_right, vindicated
 
@@ -271,6 +272,15 @@ def source_pick_dossier(pick_id: str) -> Any:
         feats = pick["features"] or {}
         models = (compute_models(s, pick["instrument_id"], ticker, pick["as_of_session"])
                   if pick["instrument_id"] is not None else None)
+        # Financials panel is a PRESENT-TENSE reference (reported statements,
+        # earnings history, current consensus) a human reads NOW — historical
+        # facts that feed no signal/sizing/learning label, so it is bounded to
+        # TODAY (labelled with the vendor snapshot date), not frozen to the
+        # pick's as-of. The pick's point-in-time fingerprint stays in `features`
+        # and the pit-dated model panel above.
+        today = SystemClock().now().date()
+        financials = (compute_financials(s, pick["instrument_id"], ticker, today)
+                      if pick["instrument_id"] is not None else None)
 
         memo = s.execute(text(
             "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
@@ -325,6 +335,7 @@ def source_pick_dossier(pick_id: str) -> Any:
                                                     if sig["formation_return"] is not None
                                                     else None)} for sig in signals],
             "models": models,
+            "financials": financials,
             "cross_check": cross,
         }
 
