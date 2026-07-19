@@ -172,7 +172,7 @@
         <button id="run-cycle-btn" style="background:none;border:1px solid rgba(53,217,138,0.5);color:var(--green);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer;letter-spacing:0.1em">RUN CYCLE NOW</button>
         <span id="sched-status" class="note" style="margin:0"></span>
       </h2>
-      <div class="note">One row per pipeline run (T0 ingest → T9 report). Green = the machine ran itself; red names the step that stopped it. The cycle also fires itself daily at 09:30 — the button is for whenever you don't want to wait.</div>
+      <div class="note">One row per run (T0 ingest → T9 report). Green ran clean; red names the step that stopped it. Fires itself daily at 09:30 — the button is for when you don't want to wait.</div>
       <style>
         @keyframes liveSpin{0%{opacity:1}50%{opacity:0.25}100%{opacity:1}}
         @keyframes liveFlow{0%{background-position:0 0}100%{background-position:24px 0}}
@@ -207,7 +207,7 @@
       <h1>Research</h1>
       <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
       <h2 style="margin-top:0">Analyze Any Ticker</h2>
-      <div class="note">Type a ticker — the full desk analyzes it on demand through the complete cage (debate, grounding verifier, budget breaker, audit chain). Tag the source when the idea came from outside. US symbols only (v1); one analysis at a time.</div>
+      <div class="note">Type a ticker; the full desk analyzes it on demand through the complete cage. Tag the source if it came from outside. US only, one at a time.</div>
       <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <input id="an-sym" placeholder="TICKER e.g. NVDA" size="16" maxlength="10" style="text-transform:uppercase">
         <select id="an-src">
@@ -241,10 +241,10 @@
       <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
 
       <h2>Desk Scorecard — Graded Against SPY</h2>
-      <div class="note">Every committee memo tracked against what the stock actually did next, SPY-relative (ADR-0009: the market is the fund's honest alternative). BUY vindicated when it beat SPY at the horizon; REJECT vindicated when the desk dodged an underperformer — even one that rose, but rose less. HOLD and shadow memos are tracked, never rated. Every rate is shown against the DART — what a direction-blind throw at the same tracked outcomes would score — because the base rate is free: an always-REJECT desk in a falling market matches the dart exactly, and its edge reads zero. The DISSENT is graded too, as the exact complement of the call for directional memos.</div>
+      <div class="note">Every memo graded against what the stock did next, SPY-relative (ADR-0009). BUY wins by beating SPY; REJECT wins by dodging an underperformer. Rates show against the DART — a direction-blind throw at the same outcomes — so an always-REJECT desk in a down market reads zero edge. HOLD and shadow tracked, never rated; the dissent is graded as the call's complement.</div>
       <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
       <h2>Learning Loop — Measured, Never Applied</h2>
-      <div class="note">Every matured scorecard outcome is labeled into the learning plane the night it matures: the call graded by the one scorecard rule, each specialist seat graded against the realized excess sign, red flags validated when the flagged risk materialized. Brier-scored conviction weights (shrinkage-bounded, clipped 0.5–1.5) are computed and stored nightly — and NOT applied anywhere. Constitution Article 10 puts conviction-weight updates in Tier 1, but activation is the Principal's decision; until then this card is a measurement, not a behavior.</div>
+      <div class="note">Each matured outcome is labeled nightly — the call, each specialist seat, and whether the red flags materialized. Brier-scored conviction weights (clipped 0.5–1.5) are computed and stored but NOT applied anywhere: activation is a Principal decision (Article 10, Tier 1). A measurement, not yet a behavior.</div>
       <div class="card" id="learning"><div class="quiet">awaiting data</div></div>
       <h2>Committee Memos</h2>
       <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
@@ -285,7 +285,7 @@
         reject if value &lt; A$2,000 · size is an output of risk, never conviction · DD1 halves the risk budget
       </div>
       <h2>What-If Pre-Flight</h2>
-      <div class="note">ADVISORY — a read-only dry run of §4 sizing + L1–L11 against the live book. Nothing is written, nothing is reserved, nothing is proposed: a real proposal re-checks fresh at approval — a pre-flight PASS is never a pre-commitment.</div>
+      <div class="note">ADVISORY — a read-only dry run of §4 sizing + L1–L11 against the live book. Nothing is written or reserved; a real proposal re-checks fresh at approval, so a PASS here is never a pre-commitment.</div>
       <div class="card" id="preflight-card">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <input id="pf-symbol" placeholder="SYMBOL" size="9" style="font-size:11px;padding:5px 9px;text-transform:uppercase">
@@ -312,7 +312,7 @@
       </div>
       <div id="trade-action-banner"></div>
       <h2>Strategy — Paper Book (ADR-0010)</h2>
-      <div class="note">The approved recipe behind the sleeve. Bands are machine-enforced daily: a breach demotes to SUSPENDED and latches — re-promotion is a Principal signature, never code.</div>
+      <div class="note">The approved recipe behind the sleeve. Bands are enforced daily: a breach latches to SUSPENDED — re-promotion is a signature, never code.</div>
       <div class="card" id="strategy-card"><div class="quiet">awaiting data</div></div>
       <h2>Awaiting Your Approval</h2>
       <div id="approval-queue"><div class="quiet">awaiting data</div></div>
@@ -321,12 +321,12 @@
       <h2 style="display:flex;align-items:center;gap:14px">Orders
         <button id="settle-btn" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:10px;padding:4px 12px;cursor:pointer;letter-spacing:0.1em">RUN SETTLEMENT</button>
       </h2>
-      <div class="note">Paper fills happen at the NEXT session's open, priced from real vendor bars — never before the session opens, never without the fill date's own FX rate.</div>
+      <div class="note">Paper fills at the NEXT session's open, priced from real vendor bars, on the fill date's own FX rate.</div>
       <div class="card" style="overflow-x:auto" id="orders-table"><div class="quiet">awaiting data</div></div>
       <h2>Decided</h2>
       <div class="card" style="overflow-x:auto" id="decided-list"><div class="quiet">awaiting data</div></div>
       <h2>Attribution — Core (Beta) vs Satellite (Alpha)</h2>
-      <div class="note">ADR-0012 consequence 4 — the book decomposed per session so the scorecard measures what the active strategies add over simply holding the index. Core graded vs the signed 55:15 SPY/INDA total-return blend; satellite sleeves and total vs SPY TR; cash vs 0. Returns are flow-adjusted (a fill is capital moving, never performance).</div>
+      <div class="note">ADR-0012 §4 — the book split per session to measure what the active sleeves add over holding the index. Core vs the 55:15 SPY/INDA blend; satellite and total vs SPY TR; cash vs 0. Flow-adjusted (a fill is capital moving, not performance).</div>
       <div class="card" style="overflow-x:auto" id="sleeve-attribution"><div class="quiet">awaiting data</div></div>
     </section>
 
