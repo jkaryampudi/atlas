@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
@@ -16,6 +17,11 @@ router = APIRouter()
 
 _REPORT = Path(__file__).resolve().parents[2].parent / "docs" / "reports" / \
     "decision-grade-momentum-v1.md"
+# the gauntlet's standing thresholds (Doc 08 / dcp.backtest.approval)
+_NULL_P_MAX = 0.05
+_DSR_MIN = 0.90
+_WF_TOTAL = 4
+_LIVE_STATES = ("paper", "live", "suspended")
 
 
 def _f(pattern: str, text_: str) -> float | None:
@@ -23,12 +29,12 @@ def _f(pattern: str, text_: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-@router.get("/gate-report")
-def gate_report() -> dict[str, object]:
-    """The written real-data gate verdicts (checkpoint 3), parsed per symbol.
-    This is the honest quant record: momentum v1 FAILED — reported verbatim."""
+def _momentum_v1_graveyard() -> dict[str, object] | None:
+    """Momentum v1's real-data FAILURE, parsed verbatim from the checkpoint-3
+    report — kept as an honest GRAVEYARD entry (not the live record). None if
+    the report file is absent."""
     if not _REPORT.exists():
-        return {"available": False, "symbols": []}
+        return None
     raw = _REPORT.read_text()
     out = []
     for m in re.finditer(r"## (\w+) — (.*?)(?=\n## |\Z)", raw, re.S):
@@ -42,10 +48,7 @@ def gate_report() -> dict[str, object]:
             "strategy_return_pct": _f(r"strategy return: ([+-]?\d+\.\d+)%", body),
             "bh_return_pct": _f(r"buy-and-hold return: ([+-]?\d+\.\d+)%", body),
             "null_p": _f(r"null-model p-value: (\d+\.\d+)", body),
-            "null_p_max": 0.05,
             "dsr": _f(r"deflated Sharpe: (\d+\.\d+)", body),
-            "dsr_min": 0.90,
-            "n_trials": _f(r"n_trials=(\d+)", body),
             "wf_positive": _f(r"Walk-forward: (\d+)/", body),
             "wf_total": _f(r"Walk-forward: \d+/(\d+)", body),
             "fold_returns": folds.group(1).strip() if folds else None,
@@ -53,9 +56,50 @@ def gate_report() -> dict[str, object]:
             "max_drawdown_pct": _f(r"max drawdown ([+-]?\d+\.\d+)%", body),
             "trial_id": (re.search(r"`([0-9a-f-]{36})`", body) or [None, None])[1],
         })
-    return {"available": True, "strategy": "momentum v1",
+    return {"strategy": "momentum v1",
             "warning": "ADR-0004: one-year window — indicative only, NOT decision-grade",
             "symbols": out}
+
+
+def _live_gate_verdicts(s: Session) -> list[dict[str, object]]:
+    """The gate record for the CURRENTLY LIVE strategies (paper/live/suspended):
+    each strategy's latest validation checklist — the real, Principal-signed
+    PASSes on regenerated real-data artifacts."""
+    rows = s.execute(text(
+        "SELECT DISTINCT ON (st.id) st.name, st.family, st.state, st.approved_by, "
+        "       st.approved_at, vr.verdict, vr.checklist "
+        "FROM quant.strategies st "
+        "JOIN quant.validation_reports vr ON vr.strategy_id = st.id "
+        "WHERE st.state IN ('paper','live','suspended') "
+        "ORDER BY st.id, vr.created_at DESC")).mappings().all()
+    out: list[dict[str, object]] = []
+    for r in rows:
+        ck = r["checklist"] if isinstance(r["checklist"], dict) else {}
+        passed = bool(ck.get("gate_passed")) or r["verdict"] == "approve"
+        out.append({
+            "strategy": r["family"], "name": r["name"], "state": r["state"],
+            "approved_by": r["approved_by"],
+            "approved_at": r["approved_at"].isoformat() if r["approved_at"] else None,
+            "verdict": "PASS" if passed else "FAIL",
+            "null_p": ck.get("null_p"), "null_p_max": _NULL_P_MAX,
+            "dsr": ck.get("dsr"), "dsr_min": _DSR_MIN,
+            "wf_positive": ck.get("wf_positive_folds"), "wf_total": _WF_TOTAL,
+            "n_trials": ck.get("n_trials_family"),
+            "decision_ref": ck.get("decision_ref"),
+            "trial_id": ck.get("trial_id"), "report": ck.get("report"),
+        })
+    out.sort(key=lambda x: str(x["approved_at"] or ""), reverse=True)
+    return out
+
+
+@router.get("/gate-report")
+def gate_report() -> dict[str, object]:
+    """The real-data gate record: the LIVE approved strategies' validation
+    checklists (the signed PASSes) as the primary record, plus momentum v1's
+    failure kept as a graveyard entry (honest failures are deliverables)."""
+    with session_scope() as s:
+        live = _live_gate_verdicts(s)
+    return {"available": True, "live": live, "graveyard": _momentum_v1_graveyard()}
 
 
 @router.get("/strategies")
@@ -122,15 +166,32 @@ def trials(family: str | None = None, limit: int = 50) -> list[dict[str, object]
 @router.get("/verdicts")
 def verdicts(limit: int = 50) -> list[dict[str, object]]:
     """Approval decisions (change control). Joined to the strategy row so the
-    console can show provenance — a synthetic-fixture-era approval must never
-    render as a real-data pass."""
+    console can show PROVENANCE per row: a live/paper strategy signed by the
+    Principal is a real-data approval; anything else is synthetic-fixture-era —
+    a synthetic pass must never render as a real one. `real_signed` is the honest
+    flag (state is live AND a signer is recorded); `decision_ref` comes from the
+    validation checklist."""
     with session_scope() as s:
         rows = s.execute(text(
             "SELECT vr.id, vr.strategy_id, vr.verdict, vr.reasons, vr.created_at, "
-            "       s.name AS strategy_name, s.state AS strategy_state "
+            "       vr.checklist, s.name AS strategy_name, s.state AS strategy_state, "
+            "       s.approved_by "
             "FROM quant.validation_reports vr "
             "LEFT JOIN quant.strategies s ON s.id = vr.strategy_id "
             "ORDER BY vr.created_at DESC LIMIT :n"),
             {"n": limit}).mappings()
-        return [{**dict(r), "id": str(r["id"]), "strategy_id": str(r["strategy_id"]),
-                 "created_at": r["created_at"].isoformat()} for r in rows]
+        out: list[dict[str, object]] = []
+        for r in rows:
+            ck = r["checklist"] if isinstance(r["checklist"], dict) else {}
+            out.append({
+                "id": str(r["id"]), "strategy_id": str(r["strategy_id"]),
+                "verdict": r["verdict"], "reasons": r["reasons"],
+                "created_at": r["created_at"].isoformat(),
+                "strategy_name": r["strategy_name"],
+                "strategy_state": r["strategy_state"],
+                "approved_by": r["approved_by"],
+                "decision_ref": ck.get("decision_ref"),
+                "real_signed": (r["strategy_state"] in _LIVE_STATES
+                                and bool(r["approved_by"])),
+            })
+        return out

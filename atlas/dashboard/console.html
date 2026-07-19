@@ -1363,34 +1363,43 @@ async function renderQuant(){
   const gr = await get("/v1/quant/gate-report");
   const gel = document.getElementById("gate-report");
   if(gr.err) deg(gel, gr.err);
-  else if(!gr.data.available || !gr.data.symbols.length)
-    gel.innerHTML = `<div class="quiet">no real-data gate report yet</div>`;
   else {
-    gel.innerHTML = `<div class="note" style="color:var(--gold)">⚠ ${esc(gr.data.warning)}</div>` +
-      gr.data.symbols.map(s=>`
+    const live = gr.data.live||[], gy = gr.data.graveyard;
+    let html = live.length ? live.map(s=>`
       <div class="${s.verdict==="PASS"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:12px;align-items:flex-start">
         <span class="stamp">${esc(s.verdict)}</span>
         <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.9">
-          <b style="color:var(--txt)">${symLink(s.symbol)}</b> · ${esc(gr.data.strategy)} · ${esc(s.window)}<br>
+          <b style="color:var(--txt)">${esc(s.strategy)}</b> · state ${esc(s.state)}${s.decision_ref?` · ${esc(s.decision_ref)}`:""}${s.approved_by?` · signed ${esc(s.approved_by)}`:""}<br>
           null-model p <span class="${(s.null_p??1)>s.null_p_max?"num-neg":"num-pos"}">${s.null_p??"—"}</span> vs ≤ ${s.null_p_max}
-          · deflated Sharpe <span class="${(s.dsr??0)<s.dsr_min?"num-neg":"num-pos"}">${s.dsr??"—"}</span> vs ≥ ${s.dsr_min} (n_trials ${s.n_trials??"—"})<br>
-          strategy ${s.strategy_return_pct??"—"}% vs buy-and-hold ${s.bh_return_pct??"—"}%
-          · walk-forward ${s.wf_positive??"—"}/${s.wf_total??"—"} folds positive${s.fold_returns?` (${esc(s.fold_returns)})`:""}<br>
-          Sharpe ${s.sharpe??"—"} · max DD ${s.max_drawdown_pct??"—"}%${s.trial_id?` · trial <span style="color:var(--faint)">${esc(s.trial_id.slice(0,8))}</span>`:""}
+          · deflated Sharpe <span class="${(s.dsr??0)<s.dsr_min?"num-neg":"num-pos"}">${s.dsr!=null?(+s.dsr).toFixed(3):"—"}</span> vs ≥ ${s.dsr_min} (n_trials ${s.n_trials??"—"})<br>
+          walk-forward ${s.wf_positive??"—"}/${s.wf_total} folds positive${s.trial_id?` · trial <span style="color:var(--faint)">${esc(String(s.trial_id).slice(0,8))}</span>`:""}
         </div>
-      </div>`).join("");
+      </div>`).join("") : `<div class="quiet">no approved strategies yet</div>`;
+    if(gy && (gy.symbols||[]).length)
+      html += `<div class="note" style="margin-top:18px;color:var(--gold)">⚰ GRAVEYARD — ${esc(gy.strategy)} · ${esc(gy.warning)}</div>` +
+        gy.symbols.map(s=>`
+        <div class="fail-seal" style="margin-bottom:8px;align-items:flex-start;opacity:0.8">
+          <span class="stamp">${esc(s.verdict)}</span>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--faint);line-height:1.8">
+            <b>${symLink(s.symbol)}</b> · ${esc(s.window)}<br>
+            strategy ${s.strategy_return_pct??"—"}% vs buy-and-hold ${s.bh_return_pct??"—"}% · DSR ${s.dsr??"—"} · walk-forward ${s.wf_positive??"—"}/${s.wf_total??"—"}
+          </div>
+        </div>`).join("");
+    gel.innerHTML = html;
     good(gel);
   }
 
   const v = await get("/v1/quant/verdicts?limit=50");
   const vel = document.getElementById("verdicts");
   if(v.err) deg(vel, v.err);
-  else if(!v.data.length) vel.innerHTML = `<div class="quiet">no approval decisions recorded — none sought on real data (ADR-0004: the one-year window is not decision-grade)</div>`;
-  else vel.innerHTML = `<div class="note">Change-control decisions only. Provenance matters: entries below predate real-data validation.</div>` + v.data.map(x=>`
+  else if(!v.data.length) vel.innerHTML = `<div class="quiet">no approval decisions recorded</div>`;
+  else vel.innerHTML = `<div class="note">Change-control decisions. Provenance is shown per row: a real-data signed approval vs a synthetic-fixture-era one.</div>` + v.data.map(x=>`
     <div class="${x.verdict==="approve"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:10px">
       <span class="stamp">${x.verdict==="approve"?"PASS":"FAIL"}</span>
-      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${esc(ts(x.created_at))} — ${esc(x.strategy_name||"unknown strategy")} (state: ${esc(x.strategy_state||"—")}) — ${esc(x.reasons||"no reasons recorded")}<br>
-      <span class="pill am">SYNTHETIC-FIXTURE ERA</span> <span style="color:var(--faint)">predates real-data validation — see the gate report above for the honest record</span></div>
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${esc(ts(x.created_at))} — ${esc(x.strategy_name||"unknown strategy")} (state: ${esc(x.strategy_state||"—")})${x.decision_ref?` · ${esc(x.decision_ref)}`:""}<br>
+      ${x.real_signed
+        ? `<span class="pill g">SIGNED</span> <span style="color:var(--faint)">${esc(x.approved_by||"Principal")} · real-data validation on regenerated artifacts</span>`
+        : `<span class="pill am">SYNTHETIC-FIXTURE ERA</span> <span style="color:var(--faint)">predates real-data validation</span>`}</div>
     </div>`).join("");
 
   const t = await get("/v1/quant/trials?limit=50");

@@ -2,6 +2,8 @@
 served against the isolated test DB via TestClient."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -111,15 +113,60 @@ def test_risk_breakers_ladder(client):
     assert [x["level"] for x in d["ladder"]] == ["DD1", "DD2", "DD3"]
 
 
-def test_quant_gate_report_surfaces_the_real_fail(client):
-    c, _ = client
-    d = c.get("/v1/quant/gate-report").json()
-    assert d["available"] is True
-    avgo = next(x for x in d["symbols"] if x["symbol"] == "AVGO")
-    assert avgo["verdict"] == "FAIL"
-    # decision-grade report (16y window) — the verbatim recorded numbers
-    assert avgo["null_p"] == 0.126 and avgo["dsr"] == 0.443
-    assert "ADR-0004" in d["warning"]
+def test_quant_gate_report_live_pass_and_graveyard(client):
+    """Gate Verdicts show the LIVE approved strategies (real signed PASSes) as
+    the primary record, with momentum v1's failure kept as a graveyard entry."""
+    c, s = client
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, state, approved_by) "
+        "VALUES ('gate-test','gatetest','1.0.0','paper','Principal') RETURNING id")).scalar()
+    ck = json.dumps({"gate_passed": True, "null_p": 0.0, "dsr": 0.95,
+                     "wf_positive_folds": 4, "decision_ref": "ADR-XXXX",
+                     "n_trials_family": 2, "trial_id": "abc12345-0000-0000-0000-000000000000"})
+    s.execute(text("INSERT INTO quant.validation_reports (strategy_id, verdict, checklist) "
+                   "VALUES (:sid, 'approve', CAST(:ck AS jsonb))"), {"sid": sid, "ck": ck})
+    s.commit()
+    try:
+        d = c.get("/v1/quant/gate-report").json()
+        assert d["available"] is True
+        gt = next(x for x in d["live"] if x["strategy"] == "gate-test")
+        assert gt["verdict"] == "PASS" and gt["state"] == "paper"
+        assert gt["dsr"] == 0.95 and gt["null_p"] == 0.0 and gt["wf_positive"] == 4
+        assert gt["decision_ref"] == "ADR-XXXX" and gt["approved_by"] == "Principal"
+        # momentum v1's real failure preserved as graveyard (honest record)
+        gy = d["graveyard"]
+        assert gy is not None and "ADR-0004" in gy["warning"]
+        avgo = next(x for x in gy["symbols"] if x["symbol"] == "AVGO")
+        assert avgo["verdict"] == "FAIL" and avgo["null_p"] == 0.126 and avgo["dsr"] == 0.443
+    finally:
+        s.execute(text("DELETE FROM quant.validation_reports WHERE strategy_id=:sid"), {"sid": sid})
+        s.execute(text("DELETE FROM quant.strategies WHERE id=:sid"), {"sid": sid})
+        s.commit()
+
+
+def test_quant_verdict_provenance_distinguishes_real_from_synthetic(client):
+    c, s = client
+    real = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, state, approved_by) "
+        "VALUES ('prov-real','provreal','1.0.0','paper','Principal') RETURNING id")).scalar()
+    syn = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, state, approved_by) "
+        "VALUES ('prov-syn','provsyn','1.0.0','validated',NULL) RETURNING id")).scalar()
+    s.execute(text("INSERT INTO quant.validation_reports (strategy_id, verdict, checklist) "
+                   "VALUES (:r,'approve',CAST(:ck AS jsonb)), (:y,'approve','{}')"),
+              {"r": real, "y": syn, "ck": json.dumps({"decision_ref": "ADR-YYYY"})})
+    s.commit()
+    try:
+        rows = c.get("/v1/quant/verdicts").json()
+        pr = next(x for x in rows if x["strategy_name"] == "provreal")
+        py = next(x for x in rows if x["strategy_name"] == "provsyn")
+        assert pr["real_signed"] is True and pr["decision_ref"] == "ADR-YYYY"
+        assert py["real_signed"] is False               # validated + unsigned = synthetic-era
+    finally:
+        for sid in (real, syn):
+            s.execute(text("DELETE FROM quant.validation_reports WHERE strategy_id=:sid"), {"sid": sid})
+            s.execute(text("DELETE FROM quant.strategies WHERE id=:sid"), {"sid": sid})
+        s.commit()
 
 
 def test_chain_break_is_structured_state_not_500(client):
