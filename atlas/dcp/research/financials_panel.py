@@ -38,7 +38,7 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from atlas.dcp.market_data.fundamentals import _get, _number
+from atlas.dcp.market_data.fundamentals import _currency, _get, _number
 
 # Curated line items per statement (label -> vendor key), in render order. A
 # pro-research report shows the headline lines, not the vendor's full ~40-field
@@ -250,12 +250,15 @@ def compute_financials(session: Session, instrument_id: str, symbol: str,
         {"i": instrument_id, "on": as_of}).first()
     payload = row.payload if (row is not None and isinstance(row.payload, dict)) else {}
     snapshot_as_of = row.as_of.isoformat() if row is not None else None
-    currency = _get(payload, ("General", "CurrencyCode"))
+    # currency through the same ISO-4217 shape guard as agent evidence — honours
+    # the module's "only numbers and ISO dates leave here" contract (a hostile
+    # General.CurrencyCode free-text string is dropped, not displayed).
+    currency = _currency(payload)
 
     return {
         "as_of": as_of.isoformat(),
         "snapshot_as_of": snapshot_as_of,
-        "currency": currency if isinstance(currency, str) else None,
+        "currency": currency,
         "statements": _statements(payload, as_of),
         "earnings": {
             "history": _earnings_history(session, instrument_id, as_of),
