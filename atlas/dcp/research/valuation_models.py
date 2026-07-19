@@ -292,12 +292,21 @@ def _dcf(payload: dict[str, object], as_of: date, *, net_debt: float | None,
     base_fcf = levered_fcf
     if levered_fcf is not None and interest is not None:
         base_fcf = levered_fcf + abs(interest) * (1.0 - tax)
+    # normalized FCF: median of the last 5 annual free cash flows — surfaced so a
+    # DEPRESSED latest FCF (e.g. a capex super-cycle) is visible beside the base
+    # the DCF actually uses. The DCF base stays the latest (consistent/conservative);
+    # the normalized figure is disclosure, and the autopsy flags a wide gap.
+    fcf_hist = [v for v in (_num(r.get("freeCashFlow"))
+                            for r in _years(payload, "Cash_Flow", as_of, 5))
+                if v is not None]
+    normalized_fcf = statistics.median(fcf_hist) if fcf_hist else None
     hist_cagr = _revenue_cagr(payload, as_of)
     # central near-term growth: the company's own trailing revenue CAGR, floored
     # at 0 and capped so runaway extrapolation cannot masquerade as a fact.
     central_g = None if hist_cagr is None else max(0.0, min(hist_cagr, GROWTH_CAP))
     out: dict[str, object] = {
         "base_fcf": base_fcf, "levered_fcf": levered_fcf,
+        "normalized_fcf": normalized_fcf,
         "historical_revenue_cagr": hist_cagr, "central_growth": central_g,
         "terminal_growth": TERMINAL_GROWTH, "forecast_years": DCF_YEARS,
         "wacc": wacc, "exit_ev_ebitda": exit_ev_ebitda,

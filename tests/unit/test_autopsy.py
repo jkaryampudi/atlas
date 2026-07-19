@@ -11,7 +11,7 @@ from atlas.dcp.research.autopsy import compute_autopsy
 # expensive on earnings but cheap on book; huge vol.
 _HIMX_MODELS = {
     "price": 12.8,
-    "technical": {"summary": "Strong Sell", "sma_50": 17.6,
+    "technical": {"summary": "Strongly Bearish", "sma_50": 17.6,
                   "bullish_signals": 1, "total_signals": 9},
     "momentum": {"mom_12_1": 0.77, "ret_20d": -0.245},
     "risk": {"vol_20d_ann": 0.857, "beta_vs_spy": 4.13},
@@ -46,7 +46,7 @@ def test_fragile_profile_fires_the_cluster():
 def test_healthy_profile_fires_nothing():
     models = {
         "price": 100.0,
-        "technical": {"summary": "Buy", "sma_50": 95.0,
+        "technical": {"summary": "Bullish", "sma_50": 95.0,
                       "bullish_signals": 7, "total_signals": 9},
         "momentum": {"mom_12_1": 0.20, "ret_20d": 0.05},
         "risk": {"vol_20d_ann": 0.25, "beta_vs_spy": 1.1},
@@ -80,6 +80,25 @@ def test_single_overvaluation_is_caution():
     a = compute_autopsy(models, val)
     assert {f["key"] for f in a["flags"]} == {"overvalued"}
     assert a["level"] == "caution"
+
+
+def test_depressed_fcf_base_fires_info_caveat():
+    # latest FCF far below its multi-year norm (a capex cycle) -> INFO caveat that
+    # the DCF likely understates; it does not raise the fragility level by itself
+    models = {"price": 100.0, "technical": {"summary": "Bullish", "sma_50": 95.0},
+              "momentum": {"mom_12_1": 0.2, "ret_20d": 0.05},
+              "risk": {"vol_20d_ann": 0.25, "beta_vs_spy": 1.1},
+              "quality": {"roe": 0.2}}
+    val = {"price": 100.0, "summary": {"fair_value_central": 110.0},
+           "dcf": {"historical_revenue_cagr": 0.1, "levered_fcf": 3e9, "normalized_fcf": 30e9},
+           "comparables": {"multiples": {"pe": {"percentile": 0.4},
+                                         "ps": {"percentile": 0.5},
+                                         "pb": {"percentile": 0.5}}},
+           "dupont": {"roe": 0.2}}
+    a = compute_autopsy(models, val)
+    dep = next((f for f in a["flags"] if f["key"] == "depressed_fcf"), None)
+    assert dep is not None and dep["severity"] == "info"
+    assert a["level"] == "clear"                       # an info caveat doesn't escalate
 
 
 def test_fail_soft_on_missing_panels():

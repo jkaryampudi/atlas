@@ -160,9 +160,12 @@ def compute_models(session: Session, instrument_id: str, symbol: str,
     bull = sum(1 for v in votes if v)
     total = len(votes)
     frac = (bull / total) if total else None
+    # trend language, NOT recommendation language: this is a rules-based read of
+    # the price TREND (like a charting site's technical summary), never an Atlas
+    # buy/sell call, so "Bullish/Bearish" — not "Buy/Sell" — is deliberate.
     summary = (None if frac is None else
-               "Strong Buy" if frac >= 0.8 else "Buy" if frac >= 0.6 else
-               "Neutral" if frac >= 0.4 else "Sell" if frac >= 0.2 else "Strong Sell")
+               "Strongly Bullish" if frac >= 0.8 else "Bullish" if frac >= 0.6 else
+               "Neutral" if frac >= 0.4 else "Bearish" if frac >= 0.2 else "Strongly Bearish")
 
     # ---- momentum / relative strength (vs SPY) ----
     spy_iid = session.execute(text(

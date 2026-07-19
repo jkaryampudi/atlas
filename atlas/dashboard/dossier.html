@@ -153,7 +153,7 @@ function pct(v){ return v==null?"—":(v*100).toFixed(1)+"%"; }
 function num(v,d){ return v==null?"—":(typeof v==="number"?v.toFixed(d==null?2:d):esc(v)); }
 function sign(v){ return v==null?"neu":(v>0?"g":v<0?"r":"neu"); }
 function kv(pairs){ return `<div class="kv">${pairs.map(p=>`<div class="k">${p[0]}</div><div class="v ${p[2]||''}">${p[1]}</div>`).join("")}</div>`; }
-function badgeClass(s){ if(!s) return "neu"; return s.indexOf("Buy")>=0?"g":s.indexOf("Sell")>=0?"r":"neu"; }
+function badgeClass(s){ if(!s) return "neu"; return s.indexOf("Bull")>=0?"g":s.indexOf("Bear")>=0?"r":"neu"; }
 function checkMark(v){ return v===true?'<span class="g">✓ agree</span>':v===false?'<span class="r">✗ diverge</span>':'<span class="neu">— n/a</span>'; }
 function fmtMoney(v){ if(v==null) return "—"; const a=Math.abs(v);
   if(a>=1e9) return (v/1e9).toFixed(2)+"B"; if(a>=1e6) return (v/1e6).toFixed(0)+"M";
@@ -293,6 +293,7 @@ function buildValuation(V){
         ["Upside vs price",upTxt(dcf.upside_pct),upClass(dcf.upside_pct)],
         ["Base FCFF (unlevered)",fmtMoney(dcf.base_fcf)],
         ["Vendor FCF (levered)",fmtMoney(dcf.levered_fcf)],
+        ["Normalized FCF (5y median)",fmtMoney(dcf.normalized_fcf)],
         ["Hist. revenue CAGR",pct(dcf.historical_revenue_cagr)],
         ["Central growth (capped)",pct(dcf.central_growth)],
         ["Forecast horizon",dcf.forecast_years==null?"—":dcf.forecast_years+"y + terminal"],
@@ -358,7 +359,7 @@ function render(d){
 
     <div class="band">
       <div class="verdict">
-        <div class="lab">TECHNICAL MODEL</div>
+        <div class="lab">TECHNICAL TREND</div>
         <div class="val ${badgeClass(t.summary)}">${esc(t.summary||"—")}</div>
         <div class="sub">${t.bullish_signals==null?"":t.bullish_signals+"/"+t.total_signals+" bullish"}</div>
       </div>

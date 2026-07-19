@@ -36,6 +36,7 @@ _RICH_PCTILE = 0.60             # earnings-multiple percentile that reads "expen
 _CHEAP_PCTILE = 0.35            # sales/book percentile that reads "cheap"
 _VOL_HIGH = 0.60                 # 20-day annualised vol
 _BETA_HIGH = 2.5
+_DEPRESSED_FCF = 0.60            # latest FCF this far below its norm = depressed
 
 _SEV_WEIGHT = {"alert": 3, "warn": 2, "info": 1}
 
@@ -110,13 +111,13 @@ def compute_autopsy(models: dict[str, Any] | None,
 
     # 4) Atlas's own technical read is bearish
     summary = _get(tech, "summary")
-    if isinstance(summary, str) and summary in ("Sell", "Strong Sell"):
-        sev = "alert" if summary == "Strong Sell" else "warn"
+    if isinstance(summary, str) and summary in ("Bearish", "Strongly Bearish"):
+        sev = "alert" if summary == "Strongly Bearish" else "warn"
         bull, total = _get(tech, "bullish_signals"), _get(tech, "total_signals")
         extra = (f" ({bull}/{total} signals bullish)"
                  if isinstance(bull, int) and isinstance(total, int) else "")
-        fire("technical", sev, f"Technical read: {summary}",
-             f"Atlas's rules-based technical summary is {summary}{extra}")
+        fire("technical", sev, "Bearish technical trend",
+             f"Atlas's rules-based technical trend is {summary}{extra}")
 
     # 5) low profitability
     roe = _num(_get(quality, "roe"))
@@ -157,6 +158,18 @@ def compute_autopsy(models: dict[str, Any] | None,
             bits.append(f"beta {beta:.1f}")
         fire("high_volatility", "warn", "Very high volatility",
              " · ".join(bits) + " — large moves in both directions")
+
+    # depressed cash-flow base — the DCF's latest FCF is far below its multi-year
+    # norm (a capex super-cycle), so the DCF likely UNDERSTATES this name. An INFO
+    # caveat, not a fragility flag: it explains a harsh DCF, it is not a red flag.
+    lat_fcf = _num(_get(valuation, "dcf", "levered_fcf"))
+    norm_fcf = _num(_get(valuation, "dcf", "normalized_fcf"))
+    if (lat_fcf is not None and norm_fcf is not None and norm_fcf > 0
+            and lat_fcf < _DEPRESSED_FCF * norm_fcf):
+        fire("depressed_fcf", "info", "Depressed cash-flow base",
+             "latest free cash flow is well below its multi-year norm — a capex "
+             "cycle can make the DCF understate this name (the range leans on EPV "
+             "and comparables here)")
 
     flags.sort(key=lambda f: -_SEV_WEIGHT.get(f["severity"], 0))
     n_alert = sum(1 for f in flags if f["severity"] == "alert")

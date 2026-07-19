@@ -45,7 +45,7 @@ def test_rising_stock_reads_bullish(pg_session):
 
     m = compute_models(s, stk, "UPCO", date(2026, 1, 1))
     t = m["technical"]
-    assert t["summary"] in ("Buy", "Strong Buy")
+    assert t["summary"] in ("Bullish", "Strongly Bullish")
     assert t["bullish_signals"] >= t["total_signals"] - 1        # nearly all bullish
     assert m["price"] > t["sma_200"] > 0                         # price above the trend
     assert t["rsi_14"] > 50
@@ -65,7 +65,7 @@ def test_falling_stock_reads_bearish(pg_session):
 
     m = compute_models(s, stk, "DNCO", date(2026, 1, 1))
     t = m["technical"]
-    assert t["summary"] in ("Sell", "Strong Sell")
+    assert t["summary"] in ("Bearish", "Strongly Bearish")
     assert m["price"] < t["sma_200"]                            # below the trend
     assert t["rsi_14"] < 50
     assert m["momentum"]["mom_12_1"] < 0

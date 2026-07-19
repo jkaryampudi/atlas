@@ -123,6 +123,7 @@ def test_valuation_math_golden(pg_session):
     # base is UNLEVERED FCFF = vendor FCF + after-tax interest add-back
     assert dcf["levered_fcf"] == 2e9                           # vendor CFO - Capex
     assert abs(dcf["base_fcf"] - (2e9 + 0.1e9 * (1 - 0.20))) < 1.0   # 2.08e9 FCFF
+    assert dcf["normalized_fcf"] == 2e9                        # 5y median FCF surfaced
     assert dcf["forecast_years"] == 5                          # horizon surfaced
     assert abs(dcf["historical_revenue_cagr"] - 0.20) < 1e-9   # (12/10)^1 - 1
     assert dcf["central_growth"] == 0.15                       # capped at GROWTH_CAP
