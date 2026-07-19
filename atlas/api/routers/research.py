@@ -135,6 +135,41 @@ def analyze_status() -> dict[str, object]:
     return analysis_status()
 
 
+# ---- OPPORTUNITY SCREEN: whole-universe deterministic candidate board --------
+
+OPPORTUNITY_TOP_N_MAX = 100
+
+
+class ScreenBody(BaseModel):
+    top_n: int = 25
+
+
+@router.post("/opportunities/run")
+def opportunities_run(body: ScreenBody) -> Any:
+    """Queue the whole-universe opportunity screen (no command line). Pure DCP
+    research — health composite + valuation + fragility, ZERO model spend; the
+    board is MEASURED, never a path to capital (invariant 2). A busy screen
+    answers {started:false} honestly — one at a time, nothing runs twice."""
+    from atlas.ops.screen import start_screen
+
+    top_n = max(1, min(OPPORTUNITY_TOP_N_MAX, body.top_n))
+    started = start_screen(top_n)
+    return {"started": started,
+            "note": ("screen running — poll /v1/research/opportunities/status"
+                     if started else
+                     "a screen is already running — one at a time; "
+                     "nothing started twice")}
+
+
+@router.get("/opportunities/status")
+def opportunities_status() -> dict[str, object]:
+    """The current/last screen: phase running -> done|failed, carrying the ranked
+    board when done (persists until the next run replaces it)."""
+    from atlas.ops.screen import screen_status
+
+    return screen_status()
+
+
 # ---- SOURCE PICKS: monthly external-list ingest + edge (measurement only) ---
 
 PICK_MAX_TICKERS = 100

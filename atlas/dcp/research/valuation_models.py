@@ -600,12 +600,20 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
                 "bank, broker, insurer or REIT — the range uses equity multiples "
                 "(P/E, P/B, P/S), blended equally. Not a price target.")
     else:
-        if isinstance(epv["fair_value_per_share"], (int, float)):
-            centrals.append(("EPV (no-growth floor)", float(epv["fair_value_per_share"])))
-        if isinstance(dcf["fair_value_per_share"], (int, float)):
-            centrals.append(("DCF (central)", float(dcf["fair_value_per_share"])))
-        if isinstance(comps["blended_fair_value"], (int, float)):
-            centrals.append(("Comparables (blended)", float(comps["blended_fair_value"])))
+        # a negative fair-value-per-share is not a valuation, it's a broken input
+        # (loss-making -> negative NOPAT/EPV, or net debt > PV -> negative DCF).
+        # Exclude it from the range exactly as the comparables (_comparables filters
+        # imp > 0) and the financial branch (v > 0) already do — never let a
+        # meaningless negative central drag the headline upside/verdict.
+        epv_fv = epv["fair_value_per_share"]
+        if isinstance(epv_fv, (int, float)) and epv_fv > 0:
+            centrals.append(("EPV (no-growth floor)", float(epv_fv)))
+        dcf_fv = dcf["fair_value_per_share"]
+        if isinstance(dcf_fv, (int, float)) and dcf_fv > 0:
+            centrals.append(("DCF (central)", float(dcf_fv)))
+        blended = comps["blended_fair_value"]
+        if isinstance(blended, (int, float)) and blended > 0:
+            centrals.append(("Comparables (blended)", float(blended)))
         note = ("Atlas mechanical models — educational, assumption-sensitive, "
                 "NOT a price target. These methods do not credit hyper-growth; "
                 "a rich verdict on a high-growth name reflects that by design.")

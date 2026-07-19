@@ -220,6 +220,15 @@
         <button id="an-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">ANALYZE</button>
         <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
+      <h2>Opportunity Board — The Whole Universe, Ranked</h2>
+      <div class="note">Atlas ranks every active US name by its own <b>health composite</b> — value · profitability · growth · cash-flow · momentum percentiles vs the S&amp;P 500 — then hangs Atlas's valuation verdict and fragility markers on the leaders. Deterministic, <b>zero model spend</b>. A research candidate board: <b>measured, never a path to capital</b> — any rule built on it must clear the gauntlet first. Click a ticker for its full dossier.</div>
+      <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">show top <input id="op-n" type="number" value="25" min="1" max="100" style="width:56px;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:5px 6px"></label>
+        <button id="op-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">RUN SCREEN</button>
+        <span id="op-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
+      </div>
+      <div class="card" id="op-board" style="overflow-x:auto"><div class="quiet">no screen run yet — press RUN SCREEN (ranks ~500 names in ~15s, no model cost)</div></div>
+
       <h2>Source Picks — Monthly Lists</h2>
       <div class="note">Paste a monthly list (e.g. investing.com). Each pick is logged with a point-in-time snapshot and tracked vs SPY. Measured, never traded. GRADE &amp; EDGE shows whether the source beats a dartboard.</div>
       <div class="card" style="margin-bottom:10px">
@@ -830,6 +839,99 @@ document.getElementById("an-btn").onclick = async()=>{
   if(r.data && (r.data.phase === "fetching" || r.data.phase === "analyzing")){
     if(!anTimer) anTimer = setInterval(pollAnalysis, 2000);
     pollAnalysis();
+  }
+})();
+
+/* ---------- opportunity board — the whole universe, ranked (measured only) ----------
+   Same background-job contract as analyze: POST /opportunities/run starts it, a
+   2s poller watches /opportunities/status and renders the board when done. Pure
+   DCP research — no model spend; the board reaches no capital. */
+let opTimer = null;
+function opShow(html, color){
+  const el = document.getElementById("op-status");
+  el.innerHTML = html; el.style.color = color || "var(--dim)";
+}
+function opCell(v){                                   // a pillar percentile 0..100
+  if(v===null||v===undefined) return `<td style="text-align:right;color:var(--faint)">·</td>`;
+  const c = v>=66 ? "var(--green)" : v>=34 ? "var(--dim)" : "rgba(255,92,92,0.85)";
+  return `<td style="text-align:right;color:${c}">${v.toFixed(0)}</td>`;
+}
+function opValuation(r){
+  const v = r.valuation_verdict, up = r.upside_to_central_pct;
+  if(!v) return `<span class="quiet">—</span>`;
+  const cheap = v.indexOf("below")>=0, rich = v.indexOf("above")>=0;
+  const col = cheap ? "var(--green)" : rich ? "rgba(255,92,92,0.85)" : "var(--dim)";
+  const ups = (up===null||up===undefined) ? "" :
+    ` <span style="color:${up>0?"var(--green)":up<0?"rgba(255,92,92,0.85)":"var(--dim)"}">(${up>0?"+":""}${(up*100).toFixed(0)}%)</span>`;
+  return `<span style="color:${col}">${esc(v.replace("our model ",""))}</span>${ups}`;
+}
+function opTrend(t){
+  if(!t) return `<span class="quiet">—</span>`;
+  const bull = t.indexOf("Bull")>=0, bear = t.indexOf("Bear")>=0;
+  const col = bull ? "var(--green)" : bear ? "rgba(255,92,92,0.85)" : "var(--dim)";
+  return `<span style="color:${col}">${esc(t)}</span>`;
+}
+function opFrag(r){
+  const f = r.fragility, n = r.fragility_alerts;
+  if(!f) return `<span class="quiet">—</span>`;
+  const cls = f==="clear" ? "g" : f==="caution" ? "am" : "r";
+  return `<span class="pill ${cls}">${esc(f)}${n>0?` ${n}`:""}</span>`;
+}
+function renderOpBoard(out){
+  const el = document.getElementById("op-board");
+  const b = (out && out.board) || [];
+  if(!b.length){ el.innerHTML = `<div class="quiet">no names ranked — universe may be empty</div>`; return; }
+  el.innerHTML = `<div class="note" style="margin:0 0 8px">Ranked ${out.ranked_n} of ${out.universe_n} active US names as of ${esc(out.as_of)} · health composite descending. Pillars: RV value · P profitability · G growth · CF cash-flow · M momentum (percentile vs universe).</div>
+  <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left">
+      <th style="padding:4px 8px">#</th><th>SYMBOL</th><th>SECTOR</th>
+      <th style="text-align:right">HEALTH</th>
+      <th style="text-align:right">RV</th><th style="text-align:right">P</th><th style="text-align:right">G</th><th style="text-align:right">CF</th><th style="text-align:right">M</th>
+      <th>ATLAS VALUATION</th><th>TREND</th><th>FRAGILITY</th></tr>
+    ${b.map(r=>{
+      const p = r.pillars||{};
+      const hc = r.health_composite;
+      const hcol = hc>=70?"var(--green)":hc>=55?"var(--blue)":"var(--dim)";
+      return `<tr style="border-top:1px solid var(--line)">
+        <td style="padding:4px 8px;color:var(--faint)">${r.rank}</td>
+        <td>${symLink(r.symbol)}</td>
+        <td style="color:var(--dim)">${esc(r.sector||"—")}</td>
+        <td style="text-align:right;color:${hcol};font-weight:600">${hc===null?"·":hc.toFixed(0)}</td>
+        ${opCell(p.relative_value)}${opCell(p.profitability)}${opCell(p.growth)}${opCell(p.cash_flow)}${opCell(p.momentum)}
+        <td>${opValuation(r)}</td><td>${opTrend(r.technical_trend)}</td><td>${opFrag(r)}</td></tr>`;
+    }).join("")}
+  </table>
+  <div class="note" style="margin:10px 0 0">A high composite means healthy on our factors — it is NOT a buy. Read it beside the valuation (cheap/fair/rich) and fragility: a cheap, healthy, non-fragile, up-trending name is the sweet spot; a healthy-but-fragile, bearish name is a value-trap shape. Measured, never applied.</div>`;
+  good(el);
+}
+async function pollScreen(){
+  const r = await get("/v1/research/opportunities/status");
+  if(r.err) return;
+  const s = r.data;
+  if(s.phase === "running"){ opShow("◌ ranking the universe…"); return; }
+  clearInterval(opTimer); opTimer = null;
+  const btn = document.getElementById("op-btn"); if(btn) btn.disabled = false;
+  if(s.phase === "failed"){ opShow(`■ ${esc(s.detail||"screen failed")}`, "var(--red)"); return; }
+  if(s.phase === "done"){ opShow(`✓ ${esc(s.detail||"done")}`, "var(--green)"); renderOpBoard(s.board); }
+}
+document.getElementById("op-btn").onclick = async()=>{
+  const btn = document.getElementById("op-btn");
+  const n = Math.max(1, Math.min(100, parseInt(document.getElementById("op-n").value)||25));
+  btn.disabled = true;
+  const r = await postFull("/v1/research/opportunities/run", {top_n: n});
+  if(r.err){ btn.disabled = false; return opShow(`■ ${esc(r.err)}`, "var(--red)"); }
+  if(r.data.started) opShow("◌ screen started — ranking ~500 names…");
+  else { opShow("◌ a screen is already running — watching that one", "var(--gold)"); }
+  if(!opTimer) opTimer = setInterval(pollScreen, 2000);
+  pollScreen();
+};
+/* on load: show the last board if one exists, or resume the watch if running */
+(async()=>{
+  const r = await get("/v1/research/opportunities/status");
+  if(!r.data) return;
+  if(r.data.phase === "running"){ if(!opTimer) opTimer = setInterval(pollScreen, 2000); pollScreen(); }
+  else if(r.data.phase === "done" && r.data.board){
+    opShow(`✓ ${esc(r.data.detail||"")}`, "var(--green)"); renderOpBoard(r.data.board);
   }
 })();
 
