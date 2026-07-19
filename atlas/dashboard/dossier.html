@@ -214,9 +214,21 @@ function dcfGrid(dcf){
     return `<td>${cell&&cell.fair_value_per_share!=null?num(cell.fair_value_per_share,2):"—"}</td>`;}).join("")+'</tr>').join("");
   return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
+function dcfVariants(dcf){
+  const V=dcf.variants||{};
+  if(!Object.keys(V).length) return '<div class="subnote">insufficient data for the DCF variant matrix</div>';
+  const terms=[["Perpetuity growth","growth"],["EV/EBITDA exit","ebitda"],["EV/Revenue exit","revenue"]];
+  const head='<th>Terminal method</th><th>5-year</th><th>10-year</th>';
+  const body=terms.map(([lab,t])=>{
+    const c5=V['5y_'+t]||{}, c10=V['10y_'+t]||{};
+    return `<tr><td>${lab}</td><td>${num(c5.fair_value_per_share,2)}</td><td>${num(c10.fair_value_per_share,2)}</td></tr>`;}).join("");
+  const em=dcf.exit_ev_ebitda!=null?" ("+num(dcf.exit_ev_ebitda,1)+")":"", er=dcf.exit_ev_revenue!=null?" ("+num(dcf.exit_ev_revenue,1)+")":"";
+  return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    +`<div class="subnote">Six DCF variants, fair value / share. The exit-multiple terminals hold today's EV/EBITDA${em} and EV/Revenue${er} constant — so a name trading at rich multiples looks richly valued by them too (circular). For that reason the fair-value range above uses the perpetuity-growth terminal (the 5-year cell), not these.</div>`;
+}
 function compsTable(comps){
   if(!comps.n_peers) return '<div class="subnote">no sector peers with comparable multiples available</div>';
-  const m=comps.multiples||{}, rows=[["P/E","pe"],["EV/EBITDA","ev_ebitda"],["P/S","ps"],["P/B","pb"]];
+  const m=comps.multiples||{}, rows=[["P/E","pe"],["EV/EBITDA","ev_ebitda"],["EV/EBIT","ev_ebit"],["EV/Revenue","ev_revenue"],["P/S","ps"],["P/B","pb"]];
   const head='<th>Multiple</th><th>Stock</th><th>Sector median</th><th>Percentile</th><th>Implied value</th>';
   const body=rows.map(([lab,k])=>{const c=m[k]||{};
     return `<tr><td>${lab}</td><td>${num(c.stock,1)}</td><td>${num(c.peer_median,1)}</td><td>${c.percentile==null?"—":(c.percentile*100).toFixed(0)+"%"}</td><td>${num(c.implied_value,2)}</td></tr>`;}).join("");
@@ -305,8 +317,9 @@ function buildValuation(V){
         ["= Return on equity",pct(dp.roe),upClass(dp.roe)],
       ])}</div>
     </div>
+    <div class="card full"><div class="ctitle">DCF — 6 variants (horizon × terminal method)</div>${dcfVariants(dcf)}</div>
     <div class="card full"><div class="ctitle">DCF sensitivity — fair value / share across growth × WACC</div>${dcfGrid(dcf)}</div>
-    <div class="card full"><div class="ctitle">Comparables — sector-peer multiples</div>${compsTable(comps)}</div>`;
+    <div class="card full"><div class="ctitle">Comparables — 6 sector-peer multiples</div>${compsTable(comps)}</div>`;
 }
 
 async function load(){

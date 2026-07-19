@@ -37,11 +37,16 @@ def _bar(s, iid, d, close):
         {"i": iid, "d": d, "c": close})
 
 
-def _peer(s, sym, pe, ev_ebitda, ps, pb, sector="TestTech"):
+def _peer(s, sym, pe, ev_ebitda, ev_ebit, ev_revenue, ps, pb, sector="TestTech"):
     iid = _instrument(s, sym, sector)
-    _fund(s, iid, date(2025, 12, 31), {"Valuation": {
-        "TrailingPE": str(pe), "EnterpriseValueEbitda": str(ev_ebitda),
-        "PriceSalesTTM": str(ps), "PriceBookMRQ": str(pb)}})
+    _fund(s, iid, date(2025, 12, 31), {
+        "Valuation": {"TrailingPE": str(pe), "EnterpriseValueEbitda": str(ev_ebitda),
+                      "EnterpriseValueRevenue": str(ev_revenue),
+                      "PriceSalesTTM": str(ps), "PriceBookMRQ": str(pb),
+                      # EV/EBIT = EnterpriseValue / operatingIncome(1e9) = ev_ebit
+                      "EnterpriseValue": str(ev_ebit * 1_000_000_000)},
+        "Financials": {"Income_Statement": {"yearly": {
+            "2025-12-31": {"date": "2025-12-31", "operatingIncome": "1000000000"}}}}})
     return iid
 
 
@@ -53,7 +58,8 @@ _VALU = {
     "Highlights": {"RevenueTTM": "12000000000", "EBITDA": "3000000000",
                    "EarningsShare": "1.8", "BookValue": "10.0"},
     "Valuation": {"TrailingPE": "25", "EnterpriseValueEbitda": "15",
-                  "PriceSalesTTM": "4", "PriceBookMRQ": "5"},
+                  "EnterpriseValueRevenue": "4", "PriceSalesTTM": "4",
+                  "PriceBookMRQ": "5", "EnterpriseValue": "48000000000"},
     "Financials": {
         "Income_Statement": {"yearly": {
             "2024-12-31": {"date": "2024-12-31", "totalRevenue": "10000000000",
@@ -83,10 +89,11 @@ def test_valuation_math_golden(pg_session):
     iid = _instrument(s, "VALU")
     _fund(s, iid, date(2025, 12, 31), _VALU)
     _bar(s, iid, date(2025, 12, 31), 50.0)                       # price 50, mktcap 5e10
-    # sector peers: pe [10,20,30]->med 20; ev/ebitda [8,10,12]->10; ps [1,2,3]->2; pb [1,2,3]->2
-    _peer(s, "PRA", 10, 8, 1, 1)
-    _peer(s, "PRB", 20, 10, 2, 2)
-    _peer(s, "PRC", 30, 12, 3, 3)
+    # sector peers (pe, ev_ebitda, ev_ebit, ev_revenue, ps, pb): medians land at
+    # pe 20, ev_ebitda 10, ev_ebit 16, ev_revenue 2, ps 2, pb 2
+    _peer(s, "PRA", 10, 8, 10, 1, 1, 1)
+    _peer(s, "PRB", 20, 10, 16, 2, 2, 2)
+    _peer(s, "PRC", 30, 12, 20, 3, 3, 3)
 
     v = compute_valuation(s, iid, "VALU", date(2026, 1, 1))
 
@@ -132,16 +139,29 @@ def test_valuation_math_golden(pg_session):
         [g["fair_value_per_share"] for g in g15], reverse=True)
     assert dcf["fair_value_per_share"] > 0
 
-    # ---- comparables (hand) ----
+    # ---- DCF: 6 variants ({5y,10y} horizon x {growth,ebitda,revenue} terminal) ----
+    assert set(dcf["variants"]) == {"5y_growth", "5y_ebitda", "5y_revenue",
+                                    "10y_growth", "10y_ebitda", "10y_revenue"}
+    assert dcf["exit_ev_ebitda"] == 15 and dcf["exit_ev_revenue"] == 4
+    # the primary (feeds summary/verdict/autopsy) is the 5y perpetuity-growth variant
+    assert dcf["fair_value_per_share"] == dcf["variants"]["5y_growth"]["fair_value_per_share"]
+    assert all(vv["fair_value_per_share"] > 0 for vv in dcf["variants"].values())
+
+    # ---- comparables (hand) — 6 multiples ----
     comps = v["comparables"]
     assert comps["n_peers"] == 3
     m = comps["multiples"]
     assert m["pe"]["peer_median"] == 20 and m["pe"]["implied_value"] == 20 * 1.8   # 36
     assert m["ev_ebitda"]["implied_value"] == (10 * 3e9 - 1e9) / 1e9               # 29
+    assert m["ev_ebit"]["peer_median"] == 16                                        # [10,16,20]
+    assert m["ev_ebit"]["implied_value"] == (16 * 2.4e9 - 1e9) / 1e9               # 37.4 (EBIT 2.4e9)
+    assert m["ev_revenue"]["peer_median"] == 2                                      # [1,2,3]
+    assert m["ev_revenue"]["implied_value"] == (2 * 12e9 - 1e9) / 1e9             # 23
     assert m["ps"]["implied_value"] == 2 * 12e9 / 1e9                              # 24
     assert m["pb"]["implied_value"] == 2 * 10.0                                    # 20
     assert abs(m["pe"]["percentile"] - 2 / 3) < 1e-9                               # 25 > 10,20
-    assert comps["blended_fair_value"] == 26.5                                     # median[36,29,24,20]
+    # blended = median[36, 29, 37.4, 23, 24, 20] = (24+29)/2
+    assert comps["blended_fair_value"] == 26.5
 
     # ---- DuPont (hand, latest year) ----
     dp = v["dupont"]
@@ -185,18 +205,44 @@ def test_negative_metrics_excluded_from_comps(pg_session):
     payload["Highlights"]["BookValue"] = "-5.0"         # negative book (deficit/buybacks)
     _fund(s, iid, date(2025, 12, 31), payload)
     _bar(s, iid, date(2025, 12, 31), 50.0)
-    _peer(s, "QA", 10, 8, 1, 1)
-    _peer(s, "QB", 20, 10, 2, 2)
-    _peer(s, "QC", 30, 12, 3, 3)
+    _peer(s, "QA", 10, 8, 10, 1, 1, 1)
+    _peer(s, "QB", 20, 10, 16, 2, 2, 2)
+    _peer(s, "QC", 30, 12, 20, 3, 3, 3)
 
     v = compute_valuation(s, iid, "LOSS", date(2026, 1, 1))
     m = v["comparables"]["multiples"]
     # negative implied values are still SHOWN for transparency ...
     assert m["pe"]["implied_value"] == 20 * -2.0        # -40
     assert m["pb"]["implied_value"] == 2 * -5.0         # -10
-    # ... but excluded from the blend, which uses only the positive EV/EBITDA & P/S
-    assert v["comparables"]["blended_fair_value"] == 26.5   # median[29, 24]
+    # ... but excluded from the blend, which uses only the positive multiples
+    assert v["comparables"]["blended_fair_value"] == 26.5   # median[29, 37.4, 23, 24]
     assert v["comparables"]["blended_fair_value"] > 0
+
+
+def test_ev_multiples_require_positive_metric_even_with_net_cash(pg_session):
+    s = pg_session
+    iid = _instrument(s, "LOSSC")
+    payload = json.loads(json.dumps(_VALU))
+    # loss-making operating metrics: negative EBIT and negative EBITDA ...
+    payload["Financials"]["Income_Statement"]["yearly"]["2025-12-31"]["operatingIncome"] = "-500000000"
+    payload["Highlights"]["EBITDA"] = "-1000000000"
+    # ... but NET CASH (negative net debt): without a positivity guard the bridge
+    # (median * negative_metric - negative_net_debt)/shares launders a spurious
+    # positive comp (e.g. EV/EBIT -> +12) into the blend.
+    payload["Financials"]["Balance_Sheet"]["yearly"]["2025-12-31"]["netDebt"] = "-20000000000"
+    _fund(s, iid, date(2025, 12, 31), payload)
+    _bar(s, iid, date(2025, 12, 31), 50.0)
+    _peer(s, "RA", 10, 8, 16, 2, 2, 2)
+    _peer(s, "RB", 20, 10, 16, 2, 2, 2)
+    _peer(s, "RC", 30, 12, 16, 2, 2, 2)
+
+    v = compute_valuation(s, iid, "LOSSC", date(2026, 1, 1))
+    m = v["comparables"]["multiples"]
+    # negative EBIT / EBITDA -> the EV multiples are excluded, NOT laundered
+    # positive by the net-cash bridge
+    assert m["ev_ebit"]["implied_value"] is None
+    assert m["ev_ebitda"]["implied_value"] is None
+    assert v["net_debt"] == -20000000000.0
 
 
 def test_net_debt_fail_soft_when_leg_missing(pg_session):

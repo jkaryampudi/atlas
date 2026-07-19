@@ -11,13 +11,15 @@ sector peers in our universe, and its price:
   * EPV (Earnings Power)  — Greenwald's NO-GROWTH earnings floor: what current
                             earnings power is worth if it never grows. A floor,
                             not a target — deliberately conservative.
-  * DCF (2-stage)         — a discounted-cash-flow fair value, presented as a
-                            TRANSPARENT SENSITIVITY GRID over growth × WACC (not
-                            a single number), with the central growth derived
-                            MECHANICALLY from the company's own revenue history.
-  * Comparables           — sector-peer median multiples (P/E, EV/EBITDA, P/S,
-                            P/B) applied to the stock's own metrics, plus the
-                            stock's PERCENTILE within its sector.
+  * DCF                   — SIX variants: {5y, 10y} explicit horizon × three
+                            terminal methods (perpetuity growth, EV/EBITDA exit,
+                            EV/Revenue exit); central growth derived MECHANICALLY
+                            from the company's own revenue history; the primary
+                            5y-growth variant is shown as a growth × WACC grid.
+                            Exit multiples are the CURRENT multiple held constant.
+  * Comparables           — SIX sector-peer median multiples (P/E, EV/EBITDA,
+                            EV/EBIT, EV/Revenue, P/S, P/B) applied to the stock's
+                            own metrics, plus the stock's PERCENTILE in its sector.
 
 Then a fair-value RANGE across the methods and Atlas's own verdict (price is
 below / within / above our model range).
@@ -61,7 +63,9 @@ EQUITY_RISK_PREMIUM = 0.05       # market equity risk premium
 TERMINAL_GROWTH = 0.025          # perpetuity growth (~long-run nominal GDP)
 STATUTORY_TAX = 0.21             # US federal corporate rate — the tax fallback
 _SANE_TAX = (0.0, 0.35)          # effective-tax band; outside it we normalise
-DCF_YEARS = 5                    # explicit-forecast horizon
+DCF_YEARS = 5                    # primary explicit-forecast horizon
+DCF_HORIZONS = (5, 10)           # the two horizons in the variant matrix
+_DCF_TERMINALS = ("growth", "ebitda", "revenue")   # terminal-value methods
 GROWTH_CAP = 0.15                # cap on extrapolated near-term growth
 _MIN_WACC_SPREAD = 0.01          # WACC must exceed terminal growth by this much
 _DEFAULT_BETA = 1.0              # only if no beta is available at all
@@ -223,22 +227,35 @@ def _epv(payload: dict[str, object], as_of: date, *, revenue_ttm: float | None,
 # DCF — 2-stage, presented as a sensitivity grid
 # ---------------------------------------------------------------------------
 
-def _dcf_value(base_fcf: float, g1: float, wacc: float, g_term: float,
-               net_debt: float, shares: float) -> float | None:
-    """One 2-stage DCF: FCF grown at g1 for DCF_YEARS, Gordon terminal at
-    g_term, all discounted at wacc; less net debt; per share. Undefined (None)
-    unless wacc exceeds g_term by the minimum spread."""
-    if wacc - g_term < _MIN_WACC_SPREAD:
+def _dcf_variant(base_fcf: float, g: float, wacc: float, years: int, terminal: str,
+                 *, exit_mult: float | None, terminal_base: float | None,
+                 net_debt: float, shares: float) -> float | None:
+    """One 2-stage DCF fair value per share. FCF is grown at `g` for `years` and
+    discounted at `wacc`; the terminal value is one of:
+      'growth'  — Gordon perpetuity at TERMINAL_GROWTH (needs wacc > g_term);
+      'ebitda'  — exit EV/EBITDA multiple × terminal-year EBITDA;
+      'revenue' — exit EV/Revenue multiple × terminal-year revenue.
+    The exit-multiple terminals grow `terminal_base` at `g` for `years` and apply
+    the (current) `exit_mult` held constant. Enterprise value is bridged to equity
+    by net debt, per share. None when the variant's inputs are insufficient."""
+    if shares <= 0:
         return None
     pv = 0.0
     fcf = base_fcf
-    for yr in range(1, DCF_YEARS + 1):
-        fcf = fcf * (1.0 + g1)
+    for yr in range(1, years + 1):
+        fcf = fcf * (1.0 + g)
         pv += fcf / ((1.0 + wacc) ** yr)
-    terminal = fcf * (1.0 + g_term) / (wacc - g_term)
-    pv += terminal / ((1.0 + wacc) ** DCF_YEARS)
-    equity = pv - net_debt
-    return equity / shares
+    if terminal == "growth":
+        if wacc - TERMINAL_GROWTH < _MIN_WACC_SPREAD:
+            return None
+        tv = fcf * (1.0 + TERMINAL_GROWTH) / (wacc - TERMINAL_GROWTH)
+    else:  # 'ebitda' or 'revenue' exit-multiple terminal
+        if (exit_mult is None or exit_mult <= 0
+                or terminal_base is None or terminal_base <= 0):
+            return None
+        tv = exit_mult * terminal_base * ((1.0 + g) ** years)
+    pv += tv / ((1.0 + wacc) ** years)
+    return (pv - net_debt) / shares
 
 
 def _revenue_cagr(payload: dict[str, object], as_of: date) -> float | None:
@@ -262,6 +279,8 @@ def _revenue_cagr(payload: dict[str, object], as_of: date) -> float | None:
 
 def _dcf(payload: dict[str, object], as_of: date, *, net_debt: float | None,
          shares: float | None, wacc: float | None, tax: float,
+         revenue_ttm: float | None, ebitda_ttm: float | None,
+         exit_ev_ebitda: float | None, exit_ev_revenue: float | None,
          price: float | None) -> dict[str, object]:
     # EODHD freeCashFlow is CFO - Capex — a POST-interest (levered) figure. To
     # discount at WACC and bridge to equity with net debt (the FCFF/enterprise
@@ -281,24 +300,50 @@ def _dcf(payload: dict[str, object], as_of: date, *, net_debt: float | None,
         "base_fcf": base_fcf, "levered_fcf": levered_fcf,
         "historical_revenue_cagr": hist_cagr, "central_growth": central_g,
         "terminal_growth": TERMINAL_GROWTH, "forecast_years": DCF_YEARS,
-        "wacc": wacc, "fair_value_per_share": None, "upside_pct": None,
-        "sensitivity": [],
-        "note": ("unlevered FCFF discounted at WACC; assumption-sensitive — the "
-                 "grid shows fair value across growth × WACC"),
+        "wacc": wacc, "exit_ev_ebitda": exit_ev_ebitda,
+        "exit_ev_revenue": exit_ev_revenue,
+        "fair_value_per_share": None, "upside_pct": None,
+        "variants": {}, "sensitivity": [],
+        "note": ("unlevered FCFF discounted at WACC across 6 variants — {5y,10y} "
+                 "horizon × {perpetuity-growth, EV/EBITDA-exit, EV/Revenue-exit} "
+                 "terminal, exit multiples the CURRENT multiple held constant. "
+                 "Assumption-sensitive; the grid shows the primary 5y-growth "
+                 "variant across growth × WACC."),
     }
     if base_fcf is None or base_fcf <= 0 or net_debt is None or shares is None \
-            or wacc is None or wacc <= 0:
+            or wacc is None or wacc <= 0 or central_g is None:
         return out
+
+    # the 6 variants at the central growth + base WACC
+    variants: dict[str, object] = {}
+    for years in DCF_HORIZONS:
+        for term in _DCF_TERMINALS:
+            exit_mult = (exit_ev_ebitda if term == "ebitda"
+                         else exit_ev_revenue if term == "revenue" else None)
+            tbase = (ebitda_ttm if term == "ebitda"
+                     else revenue_ttm if term == "revenue" else None)
+            fv = _dcf_variant(base_fcf, central_g, wacc, years, term,
+                              exit_mult=exit_mult, terminal_base=tbase,
+                              net_debt=net_debt, shares=shares)
+            variants[f"{years}y_{term}"] = {
+                "fair_value_per_share": fv, "horizon_years": years, "terminal": term,
+                "upside_pct": (fv / price - 1.0) if (fv and price) else None}
+    out["variants"] = variants
+
+    # primary = 5y perpetuity-growth (feeds the summary range, verdict, autopsy)
+    pv5 = variants["5y_growth"]["fair_value_per_share"]  # type: ignore[index]
+    primary = pv5 if isinstance(pv5, (int, float)) else None
+    out["fair_value_per_share"] = primary
+    out["upside_pct"] = (primary / price - 1.0) if (primary is not None and price) else None
+
     grid: list[dict[str, object]] = []
     for g1 in (0.0, 0.05, 0.10, GROWTH_CAP):
         for w in (wacc - 0.01, wacc, wacc + 0.01):
-            fv = _dcf_value(base_fcf, g1, w, TERMINAL_GROWTH, net_debt, shares)
+            fv = _dcf_variant(base_fcf, g1, w, DCF_YEARS, "growth",
+                              exit_mult=None, terminal_base=None,
+                              net_debt=net_debt, shares=shares)
             grid.append({"growth": g1, "wacc": w, "fair_value_per_share": fv})
     out["sensitivity"] = grid
-    if central_g is not None:
-        central = _dcf_value(base_fcf, central_g, wacc, TERMINAL_GROWTH, net_debt, shares)
-        out["fair_value_per_share"] = central
-        out["upside_pct"] = (central / price - 1.0) if (central and price) else None
     return out
 
 
@@ -306,22 +351,49 @@ def _dcf(payload: dict[str, object], as_of: date, *, net_debt: float | None,
 # Comparables — sector-peer median multiples + percentile
 # ---------------------------------------------------------------------------
 
-_MULTIPLES = (
-    ("pe", ("Valuation", "TrailingPE")),
-    ("ev_ebitda", ("Valuation", "EnterpriseValueEbitda")),
-    ("ps", ("Valuation", "PriceSalesTTM")),
-    ("pb", ("Valuation", "PriceBookMRQ")),
-)
+# The six comparable multiples (matching a pro-research model gallery). Five are
+# vendor-direct; EV/EBIT is computed (EnterpriseValue / operating income) since
+# the vendor ships no EV/EBIT field.
+_MULTIPLE_KEYS = ("pe", "ev_ebitda", "ev_ebit", "ev_revenue", "ps", "pb")
+_MULTIPLE_LABELS = {
+    "pe": "P/E", "ev_ebitda": "EV/EBITDA", "ev_ebit": "EV/EBIT",
+    "ev_revenue": "EV/Revenue", "ps": "P/S", "pb": "P/B",
+}
+
+
+def _ev_ebit(payload: dict[str, object], as_of: date) -> float | None:
+    """EV/EBIT = current enterprise value / latest-annual operating income (the
+    vendor ships no EV/EBIT field). Positive-EBIT only — a loss-making EBIT gives
+    no meaningful multiple."""
+    ev = _num(_get(payload, ("Valuation", "EnterpriseValue")))
+    ebit = _latest(payload, "Income_Statement", "operatingIncome", as_of)
+    return (ev / ebit) if (ev is not None and ev > 0 and ebit is not None and ebit > 0) else None
+
+
+def _multiple(payload: dict[str, object], as_of: date, key: str) -> float | None:
+    """One comparable multiple for a name — vendor-direct where available, else
+    computed (EV/EBIT)."""
+    paths = {
+        "pe": ("Valuation", "TrailingPE"),
+        "ev_ebitda": ("Valuation", "EnterpriseValueEbitda"),
+        "ev_revenue": ("Valuation", "EnterpriseValueRevenue"),
+        "ps": ("Valuation", "PriceSalesTTM"),
+        "pb": ("Valuation", "PriceBookMRQ"),
+    }
+    if key == "ev_ebit":
+        return _ev_ebit(payload, as_of)
+    path = paths.get(key)
+    return _num(_get(payload, path)) if path else None
 
 
 def _peer_multiples(session: Session, instrument_id: str, sector: str | None,
                     as_of: date) -> tuple[dict[str, list[float]], int]:
-    """Latest-<=-as_of vendor valuation multiples of every OTHER active US
-    single name in the same GICS sector. Only positive, finite values are kept
-    (a negative P/E or P/B is not a meaningful comparable). Also returns the
-    count of peers that carried at least one usable multiple — the honest
-    denominator, since each multiple has its own valid-value count."""
-    out: dict[str, list[float]] = {k: [] for k, _ in _MULTIPLES}
+    """Latest-<=-as_of valuation multiples of every OTHER active US single name in
+    the same GICS sector. Only positive, finite values are kept (a negative P/E,
+    P/B, or EV/EBIT is not a meaningful comparable). Also returns the count of
+    peers that carried at least one usable multiple — the honest denominator,
+    since each multiple has its own valid-value count."""
+    out: dict[str, list[float]] = {k: [] for k in _MULTIPLE_KEYS}
     if not sector:
         return out, 0
     rows = session.execute(text(
@@ -338,8 +410,8 @@ def _peer_multiples(session: Session, instrument_id: str, sector: str | None,
         if not isinstance(payload, dict):
             continue
         used = False
-        for key, path in _MULTIPLES:
-            v = _num(_get(payload, path))
+        for key in _MULTIPLE_KEYS:
+            v = _multiple(payload, as_of, key)
             if v is not None and math.isfinite(v) and v > 0:
                 out[key].append(v)
                 used = True
@@ -359,35 +431,45 @@ def _percentile(value: float, population: list[float]) -> float | None:
 def _comparables(session: Session, instrument_id: str, sector: str | None,
                  payload: dict[str, object], as_of: date, *,
                  eps_ttm: float | None, ebitda_ttm: float | None,
-                 revenue_ttm: float | None, book_ps: float | None,
-                 net_debt: float | None, shares: float | None,
-                 price: float | None) -> dict[str, object]:
+                 ebit_ttm: float | None, revenue_ttm: float | None,
+                 book_ps: float | None, net_debt: float | None,
+                 shares: float | None, price: float | None) -> dict[str, object]:
     peers, n_peers = _peer_multiples(session, instrument_id, sector, as_of)
     # stock's own metric per multiple, and the per-share value the peer median
-    # implies for it.
+    # implies for it. EV-based multiples imply an ENTERPRISE value and bridge to
+    # equity via net debt; equity multiples imply equity directly.
     implied: list[float] = []
     detail: dict[str, object] = {}
-    for key, path in _MULTIPLES:
+    for key in _MULTIPLE_KEYS:
         pop = peers[key]
         med = statistics.median(pop) if pop else None
-        own = _num(_get(payload, path))
+        own = _multiple(payload, as_of, key)
         pctile = _percentile(own, pop) if own is not None else None
         imp: float | None = None
+        nd = net_debt
         if med is not None and shares and shares > 0:
             if key == "pe" and eps_ttm is not None:
                 imp = med * eps_ttm
-            elif key == "ev_ebitda" and ebitda_ttm is not None and net_debt is not None:
-                imp = (med * ebitda_ttm - net_debt) / shares
-            elif key == "ps" and revenue_ttm is not None:
-                imp = med * revenue_ttm / shares
             elif key == "pb" and book_ps is not None:
                 imp = med * book_ps
-        # only a POSITIVE implied value is a meaningful comparable — a negative
-        # EPS / book / EBITDA would otherwise yield a sub-zero fair value and
-        # pollute the blend (the same rule the peer filter applies).
+            elif key == "ps" and revenue_ttm is not None:
+                imp = med * revenue_ttm / shares
+            elif key == "ev_ebitda" and ebitda_ttm is not None and ebitda_ttm > 0 and nd is not None:
+                imp = (med * ebitda_ttm - nd) / shares
+            elif key == "ev_revenue" and revenue_ttm is not None and revenue_ttm > 0 and nd is not None:
+                imp = (med * revenue_ttm - nd) / shares
+            elif key == "ev_ebit" and ebit_ttm is not None and ebit_ttm > 0 and nd is not None:
+                imp = (med * ebit_ttm - nd) / shares
+        # only a POSITIVE implied value is a meaningful comparable. Equity
+        # multiples inherit the metric's sign, so a negative EPS/book is dropped
+        # by the imp>0 filter below. EV multiples need the metric guarded
+        # EXPLICITLY (> 0 above): applying a positive multiple to a negative
+        # EBIT/EBITDA gives a negative implied EV that a net-CASH bridge would
+        # otherwise launder into a spurious positive per-share value.
         if imp is not None and math.isfinite(imp) and imp > 0:
             implied.append(imp)
-        detail[key] = {"stock": own, "peer_median": med, "n_peers": len(pop),
+        detail[key] = {"label": _MULTIPLE_LABELS[key], "stock": own,
+                       "peer_median": med, "n_peers": len(pop),
                        "percentile": pctile, "implied_value": imp}
     blended = statistics.median(implied) if implied else None
     return {
@@ -438,8 +520,12 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     tax = _effective_tax(payload, as_of)
     revenue_ttm = _num(_get(payload, ("Highlights", "RevenueTTM")))
     ebitda_ttm = _num(_get(payload, ("Highlights", "EBITDA")))
+    ebit_ttm = _latest(payload, "Income_Statement", "operatingIncome", as_of)
     eps_ttm = _num(_get(payload, ("Highlights", "EarningsShare")))
     book_ps = _num(_get(payload, ("Highlights", "BookValue")))
+    # current EV multiples used (held constant) as the DCF exit-multiple terminals
+    exit_ev_ebitda = _num(_get(payload, ("Valuation", "EnterpriseValueEbitda")))
+    exit_ev_revenue = _num(_get(payload, ("Valuation", "EnterpriseValueRevenue")))
     sector = session.execute(text(
         "SELECT sector_gics FROM market.instruments WHERE id = :i"),
         {"i": instrument_id}).scalar()
@@ -451,9 +537,11 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     epv = _epv(payload, as_of, revenue_ttm=revenue_ttm, net_debt=net_debt,
                shares=shares, wacc=wacc, tax=tax, price=price)
     dcf = _dcf(payload, as_of, net_debt=net_debt, shares=shares, wacc=wacc,
-               tax=tax, price=price)
+               tax=tax, revenue_ttm=revenue_ttm, ebitda_ttm=ebitda_ttm,
+               exit_ev_ebitda=exit_ev_ebitda, exit_ev_revenue=exit_ev_revenue,
+               price=price)
     comps = _comparables(session, instrument_id, sector, payload, as_of,
-                         eps_ttm=eps_ttm, ebitda_ttm=ebitda_ttm,
+                         eps_ttm=eps_ttm, ebitda_ttm=ebitda_ttm, ebit_ttm=ebit_ttm,
                          revenue_ttm=revenue_ttm, book_ps=book_ps,
                          net_debt=net_debt, shares=shares, price=price)
     dupont = _dupont(payload, as_of)
