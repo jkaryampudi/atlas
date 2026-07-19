@@ -97,6 +97,17 @@
   .fvverdict.gd{color:var(--gold);border-color:rgba(226,185,91,0.5)}
   .gd{color:var(--gold)}
 
+  /* health score pillars */
+  .hcomposite{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+  .hcomposite .big{font-family:var(--mono);font-size:34px;font-weight:600;line-height:1}
+  .hpillars{display:flex;flex-direction:column;gap:11px}
+  .hpillar{display:grid;grid-template-columns:132px 1fr 40px 60px;gap:12px;align-items:center}
+  .hpillar .plab{font-size:12.5px;color:var(--dim)}
+  .hbar{height:8px;border-radius:4px;background:rgba(150,170,210,0.14);overflow:hidden}
+  .hbar span{display:block;height:100%;border-radius:4px}
+  .hscore{font-family:var(--mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+  .hrating{font-family:var(--mono);font-size:11px;color:var(--gold);text-align:right;letter-spacing:1px}
+
   @media print{
     .tbl th:first-child,.tbl td:first-child{background:#fff}
     .statements[data-gran="quarterly"] .q{display:none} .statements .a{display:block!important}
@@ -197,6 +208,21 @@ function compsTable(comps){
   return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
     +`<div class="subnote">Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.</div>`;
 }
+function healthColor(sc){ return sc==null?"var(--dim)":sc>=60?"var(--green)":sc>=40?"var(--gold)":"var(--red)"; }
+function stars(r){ return r==null?"—":"★".repeat(r)+"☆".repeat(5-r); }
+function buildHealth(H){
+  const c=H.composite||{}, P=H.pillars||{};
+  const order=["relative_value","profitability","growth","cash_flow","momentum"];
+  const rows=order.map(k=>{const p=P[k]||{}, sc=p.score;
+    return `<div class="hpillar"><span class="plab">${esc(p.label||k)}</span>`
+      +`<span class="hbar"><span style="width:${sc==null?0:sc}%;background:${healthColor(sc)}"></span></span>`
+      +`<span class="hscore">${sc==null?"—":sc.toFixed(0)}</span>`
+      +`<span class="hrating">${stars(p.rating)}</span></div>`;}).join("");
+  return `<div class="card full"><div class="ctitle">Atlas Health Score <span style="text-transform:none;letter-spacing:0;color:var(--faint)">our factor percentiles vs ${H.universe_n||0} S&amp;P 500 names · not a vendor score</span></div>
+    <div class="hcomposite"><span class="big" style="color:${healthColor(c.score)}">${c.score==null?"—":c.score.toFixed(0)}</span><span style="color:var(--faint);font-size:13px">/ 100 composite</span><span class="hrating" style="font-size:16px;margin-left:auto">${stars(c.rating)}</span></div>
+    <div class="hpillars">${rows}</div>
+    <div class="subnote">${esc(H.note||"")} Each pillar is the average percentile of its factors vs the universe; higher = healthier.</div></div>`;
+}
 function buildValuation(V){
   const sm=V.summary||{}, coc=V.cost_of_capital||{}, a=coc.assumptions||{}, epv=V.epv||{}, dcf=V.dcf||{}, comps=V.comparables||{}, dp=V.dupont||{};
   const vc = sm.verdict==="below our model range"?"g":sm.verdict==="above our model range"?"r":"gd";
@@ -270,6 +296,7 @@ function render(d){
   const M=d.models||{}, t=M.technical||{}, mo=M.momentum||{}, v=M.valuation||{}, q=M.quality||{}, rk=M.risk||{};
   const F=d.financials||null, ks=(F&&F.key_stats)||{}, finHTML=F?buildFinancials(F):"";
   const V=d.valuation||null, valHTML=V?buildValuation(V):"";
+  const H=d.health||null, healthHTML=H?buildHealth(H):"";
   document.title = `${d.ticker} — Atlas dossier`;
   const perf = [5,10,20,60].map(h=>`<div class="h"><div class="hl">vs SPY @${h}s</div><div class="hv ${sign(x[h])}">${x[h]==null?'<span class="imm">immature</span>':(x[h]>0?"+":"")+pct(x[h])}</div></div>`).join("");
 
@@ -364,6 +391,8 @@ function render(d){
     </div>
 
     ${finHTML}
+
+    ${healthHTML}
 
     ${valHTML}
 
