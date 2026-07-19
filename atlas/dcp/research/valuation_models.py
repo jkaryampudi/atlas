@@ -24,6 +24,13 @@ sector peers in our universe, and its price:
 Then a fair-value RANGE across the methods and Atlas's own verdict (price is
 below / within / above our model range).
 
+SECTOR ADAPTATION. For a bank / broker / insurer / REIT (GICS Financials or Real
+Estate) the EV-based comparables, the FCF-DCF and EPV are meaningless — net debt,
+enterprise value and free cash flow are OPERATING items there, not capital
+structure. Those methods are still computed and shown (flagged not-applicable)
+but are EXCLUDED from the fair-value range, which is built from equity multiples
+(P/E, P/B, P/S), P/B the primary lens.
+
 HONESTY (Constitution: no invented numbers).
   * Every input is a reported fact or a mechanical function of reported facts.
   * The only free parameters are the CAPM constants (risk-free rate, equity
@@ -368,6 +375,13 @@ _MULTIPLE_LABELS = {
     "pe": "P/E", "ev_ebitda": "EV/EBITDA", "ev_ebit": "EV/EBIT",
     "ev_revenue": "EV/Revenue", "ps": "P/S", "pb": "P/B",
 }
+# Equity multiples value EQUITY directly; EV multiples value ENTERPRISE and need
+# the net-debt bridge. For a bank / broker / insurer / REIT, debt, cash,
+# enterprise value and free cash flow are OPERATING items — not capital
+# structure — so the EV multiples, the FCF-DCF and EPV are meaningless there.
+# Those sectors are valued on equity multiples only (P/B the primary lens).
+_EQUITY_MULTIPLES = ("pe", "ps", "pb")
+_EQUITY_ONLY_SECTORS = frozenset({"Financials", "Real Estate"})
 
 
 def _ev_ebit(payload: dict[str, object], as_of: date) -> float | None:
@@ -442,7 +456,8 @@ def _comparables(session: Session, instrument_id: str, sector: str | None,
                  eps_ttm: float | None, ebitda_ttm: float | None,
                  ebit_ttm: float | None, revenue_ttm: float | None,
                  book_ps: float | None, net_debt: float | None,
-                 shares: float | None, price: float | None) -> dict[str, object]:
+                 shares: float | None, price: float | None,
+                 is_financial: bool = False) -> dict[str, object]:
     peers, n_peers = _peer_multiples(session, instrument_id, sector, as_of)
     # stock's own metric per multiple, and the per-share value the peer median
     # implies for it. EV-based multiples imply an ENTERPRISE value and bridge to
@@ -475,15 +490,19 @@ def _comparables(session: Session, instrument_id: str, sector: str | None,
         # EXPLICITLY (> 0 above): applying a positive multiple to a negative
         # EBIT/EBITDA gives a negative implied EV that a net-CASH bridge would
         # otherwise launder into a spurious positive per-share value.
-        if imp is not None and math.isfinite(imp) and imp > 0:
+        # for a financial / REIT the EV multiples don't apply (net-debt bridge is
+        # meaningless) — kept VISIBLE for transparency but excluded from the blend.
+        applicable = (not is_financial) or key in _EQUITY_MULTIPLES
+        if applicable and imp is not None and math.isfinite(imp) and imp > 0:
             implied.append(imp)
         detail[key] = {"label": _MULTIPLE_LABELS[key], "stock": own,
                        "peer_median": med, "n_peers": len(pop),
-                       "percentile": pctile, "implied_value": imp}
+                       "percentile": pctile, "implied_value": imp,
+                       "applicable": applicable}
     blended = statistics.median(implied) if implied else None
     return {
-        "sector": sector, "n_peers": n_peers, "multiples": detail,
-        "blended_fair_value": blended,
+        "sector": sector, "n_peers": n_peers, "equity_only": is_financial,
+        "multiples": detail, "blended_fair_value": blended,
         "upside_pct": (blended / price - 1.0) if (blended and price) else None,
     }
 
@@ -538,6 +557,9 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     sector = session.execute(text(
         "SELECT sector_gics FROM market.instruments WHERE id = :i"),
         {"i": instrument_id}).scalar()
+    # a bank / broker / insurer / REIT is valued on equity multiples only — the
+    # EV-based and free-cash-flow methods don't apply (see _EQUITY_ONLY_SECTORS).
+    is_financial = sector in _EQUITY_ONLY_SECTORS
     market_cap = (price * shares) if (price and shares) else None
 
     coc = _cost_of_capital(payload, as_of, market_cap=market_cap, tax=tax)
@@ -552,28 +574,49 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     comps = _comparables(session, instrument_id, sector, payload, as_of,
                          eps_ttm=eps_ttm, ebitda_ttm=ebitda_ttm, ebit_ttm=ebit_ttm,
                          revenue_ttm=revenue_ttm, book_ps=book_ps,
-                         net_debt=net_debt, shares=shares, price=price)
+                         net_debt=net_debt, shares=shares, price=price,
+                         is_financial=is_financial)
     dupont = _dupont(payload, as_of)
+    # EPV and the FCF-DCF don't apply to a financial / REIT — flag them so the
+    # dossier can mark them and the range below can exclude them.
+    epv["applicable"] = not is_financial
+    dcf["applicable"] = not is_financial
 
-    # fair-value range across methods (each method's central estimate)
+    # fair-value range across the APPLICABLE methods. Operating companies use
+    # EPV + DCF + the (6-multiple) comparables blend. A financial / REIT uses
+    # only the equity multiples (P/E, P/B, P/S) — the EV/FCF methods are
+    # meaningless for a bank/broker/insurer, so they never enter the range.
     centrals: list[tuple[str, float]] = []
-    if isinstance(epv["fair_value_per_share"], (int, float)):
-        centrals.append(("EPV (no-growth floor)", float(epv["fair_value_per_share"])))
-    if isinstance(dcf["fair_value_per_share"], (int, float)):
-        centrals.append(("DCF (central)", float(dcf["fair_value_per_share"])))
-    if isinstance(comps["blended_fair_value"], (int, float)):
-        centrals.append(("Comparables (blended)", float(comps["blended_fair_value"])))
+    mult = comps["multiples"] if isinstance(comps["multiples"], dict) else {}
+    if is_financial:
+        for k in _EQUITY_MULTIPLES:
+            cell = mult.get(k)
+            v = cell.get("implied_value") if isinstance(cell, dict) else None
+            if isinstance(v, (int, float)) and v > 0:
+                centrals.append((f"{_MULTIPLE_LABELS[k]} comp", float(v)))
+        note = ("Adapted for a financial / REIT: enterprise-value and free-cash-"
+                "flow methods (the EV multiples, DCF and EPV) don't apply to a "
+                "bank, broker, insurer or REIT — the range uses equity multiples "
+                "(P/E, P/B, P/S), with P/B the primary lens. Not a price target.")
+    else:
+        if isinstance(epv["fair_value_per_share"], (int, float)):
+            centrals.append(("EPV (no-growth floor)", float(epv["fair_value_per_share"])))
+        if isinstance(dcf["fair_value_per_share"], (int, float)):
+            centrals.append(("DCF (central)", float(dcf["fair_value_per_share"])))
+        if isinstance(comps["blended_fair_value"], (int, float)):
+            centrals.append(("Comparables (blended)", float(comps["blended_fair_value"])))
+        note = ("Atlas mechanical models — educational, assumption-sensitive, "
+                "NOT a price target. These methods do not credit hyper-growth; "
+                "a rich verdict on a high-growth name reflects that by design.")
     fv_values = [v for _n, v in centrals]
     summary: dict[str, object] = {
         "price": price,
+        "valuation_basis": "financial" if is_financial else "operating",
         "methods": [n for n, _v in centrals],
         "fair_value_low": min(fv_values) if fv_values else None,
         "fair_value_central": statistics.median(fv_values) if fv_values else None,
         "fair_value_high": max(fv_values) if fv_values else None,
-        "verdict": None, "upside_to_central_pct": None,
-        "note": ("Atlas mechanical models — educational, assumption-sensitive, "
-                 "NOT a price target. These methods do not credit hyper-growth; "
-                 "a rich verdict on a high-growth name reflects that by design."),
+        "verdict": None, "upside_to_central_pct": None, "note": note,
     }
     if fv_values and price:
         lo = min(fv_values)

@@ -205,6 +205,7 @@ function buildFinancials(F){
 }
 function upClass(v){ return v==null?"neu":v>0?"g":v<0?"r":"neu"; }
 function upTxt(v){ return v==null?"—":(v>0?"+":"")+(v*100).toFixed(1)+"%"; }
+function naNote(app){ return app===false?'<div class="subnote" style="color:var(--gold);font-style:normal">Not applicable to a financial / REIT — shown for transparency, excluded from the fair-value range.</div>':""; }
 function dcfGrid(dcf){
   const g=dcf.sensitivity||[];
   if(!g.length) return '<div class="subnote">insufficient data for a DCF (needs positive free cash flow, share count, and WACC above terminal growth)</div>';
@@ -232,10 +233,14 @@ function compsTable(comps){
   if(!comps.n_peers) return '<div class="subnote">no sector peers with comparable multiples available</div>';
   const m=comps.multiples||{}, rows=[["P/E","pe"],["EV/EBITDA","ev_ebitda"],["EV/EBIT","ev_ebit"],["EV/Revenue","ev_revenue"],["P/S","ps"],["P/B","pb"]];
   const head='<th>Multiple</th><th>Stock</th><th>Sector median</th><th>Percentile</th><th>Implied value</th>';
-  const body=rows.map(([lab,k])=>{const c=m[k]||{};
-    return `<tr><td>${lab}</td><td>${num(c.stock,1)}</td><td>${num(c.peer_median,1)}</td><td>${c.percentile==null?"—":(c.percentile*100).toFixed(0)+"%"}</td><td>${num(c.implied_value,2)}</td></tr>`;}).join("");
+  const body=rows.map(([lab,k])=>{const c=m[k]||{}, na=c.applicable===false;
+    const impl=na?'<span style="color:var(--faint)" title="not applicable to a financial / REIT">n/a</span>':num(c.implied_value,2);
+    return `<tr${na?' style="opacity:0.5"':''}><td>${lab}</td><td>${num(c.stock,1)}</td><td>${num(c.peer_median,1)}</td><td>${c.percentile==null?"—":(c.percentile*100).toFixed(0)+"%"}</td><td>${impl}</td></tr>`;}).join("");
+  const note=comps.equity_only
+    ? `EV multiples are shown but <b style="color:var(--gold)">excluded</b> for a financial / REIT — enterprise value and net debt aren't capital structure for a bank/broker. Fair value uses P/E, P/B, P/S (P/B primary).`
+    : `Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.`;
   return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
-    +`<div class="subnote">Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.</div>`;
+    +`<div class="subnote">${note}</div>`;
 }
 function buildAutopsy(A){
   const flags=A.flags||[], lvl=A.level||"clear", n=(A.n_alerts||0)+(A.n_warns||0);
@@ -288,7 +293,7 @@ function buildValuation(V){
         ["Normalized op. margin",pct(epv.normalized_operating_margin)],
         ["Normalized EBIT",fmtMoney(epv.normalized_ebit)],
         ["NOPAT",fmtMoney(epv.nopat)],
-      ])}<div class="subnote">${esc(epv.note||"")}</div></div>
+      ])}<div class="subnote">${esc(epv.note||"")}</div>${naNote(epv.applicable)}</div>
 
       <div class="card"><div class="ctitle">DCF — central estimate</div>${kv([
         ["Fair value / share","<b>"+num(dcf.fair_value_per_share,2)+"</b>"],
@@ -301,7 +306,7 @@ function buildValuation(V){
         ["Forecast horizon",dcf.forecast_years==null?"—":dcf.forecast_years+"y + terminal"],
         ["Terminal growth",pct(dcf.terminal_growth)],
         ["WACC",pct(dcf.wacc)],
-      ])}</div>
+      ])}${naNote(dcf.applicable)}</div>
 
       <div class="card"><div class="ctitle">Cost of Capital (WACC)</div>${kv([
         ["Beta",num(coc.beta)],
@@ -320,8 +325,8 @@ function buildValuation(V){
         ["= Return on equity",pct(dp.roe),upClass(dp.roe)],
       ])}</div>
     </div>
-    <div class="card full"><div class="ctitle">DCF — 6 variants (horizon × terminal method)</div>${dcfVariants(dcf)}</div>
-    <div class="card full"><div class="ctitle">DCF sensitivity — fair value / share across growth × WACC</div>${dcfGrid(dcf)}</div>
+    <div class="card full"><div class="ctitle">DCF — 6 variants (horizon × terminal method)</div>${naNote(dcf.applicable)}${dcfVariants(dcf)}</div>
+    <div class="card full"><div class="ctitle">DCF sensitivity — fair value / share across growth × WACC</div>${naNote(dcf.applicable)}${dcfGrid(dcf)}</div>
     <div class="card full"><div class="ctitle">Comparables — 6 sector-peer multiples</div>${compsTable(comps)}</div>`;
 }
 

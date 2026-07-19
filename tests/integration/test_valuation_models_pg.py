@@ -246,6 +246,53 @@ def test_ev_multiples_require_positive_metric_even_with_net_cash(pg_session):
     assert v["net_debt"] == -20000000000.0
 
 
+def test_financial_sector_uses_equity_multiples_only(pg_session):
+    s = pg_session
+    iid = _instrument(s, "BANKX", sector="Financials")
+    _fund(s, iid, date(2025, 12, 31), _VALU)
+    _bar(s, iid, date(2025, 12, 31), 30.0)               # price in the equity range
+    _peer(s, "FA", 10, 8, 10, 1, 1, 1, sector="Financials")
+    _peer(s, "FB", 20, 10, 16, 2, 2, 2, sector="Financials")
+    _peer(s, "FC", 30, 12, 20, 3, 3, 3, sector="Financials")
+
+    v = compute_valuation(s, iid, "BANKX", date(2026, 1, 1))
+    comps = v["comparables"]
+    assert comps["equity_only"] is True
+    m = comps["multiples"]
+    # equity multiples apply; EV multiples are still computed but flagged n/a
+    assert m["pe"]["applicable"] and m["pb"]["applicable"] and m["ps"]["applicable"]
+    assert m["ev_ebit"]["applicable"] is False and m["ev_revenue"]["applicable"] is False
+    assert m["ev_ebit"]["implied_value"] is not None      # shown for transparency
+    # blend uses ONLY the equity multiples: median[P/E 36, P/S 24, P/B 20] = 24
+    assert comps["blended_fair_value"] == 24.0
+    # EPV + DCF flagged not-applicable for a financial
+    assert v["epv"]["applicable"] is False and v["dcf"]["applicable"] is False
+    # the range is built from equity multiples only
+    sm = v["summary"]
+    assert sm["valuation_basis"] == "financial"
+    assert set(sm["methods"]) == {"P/E comp", "P/S comp", "P/B comp"}
+    assert sm["fair_value_low"] == 20.0 and sm["fair_value_central"] == 24.0
+    assert sm["fair_value_high"] == 36.0
+    assert sm["verdict"] == "within our model range"       # price 30 in [20, 36]
+
+
+def test_operating_sector_unchanged_by_the_adaptation(pg_session):
+    s = pg_session
+    iid = _instrument(s, "OPCO", sector="Information Technology")
+    _fund(s, iid, date(2025, 12, 31), _VALU)
+    _bar(s, iid, date(2025, 12, 31), 50.0)
+    _peer(s, "OA", 10, 8, 10, 1, 1, 1, sector="Information Technology")
+    _peer(s, "OB", 20, 10, 16, 2, 2, 2, sector="Information Technology")
+    _peer(s, "OC", 30, 12, 20, 3, 3, 3, sector="Information Technology")
+    v = compute_valuation(s, iid, "OPCO", date(2026, 1, 1))
+    assert v["comparables"]["equity_only"] is False
+    assert v["epv"]["applicable"] is True and v["dcf"]["applicable"] is True
+    # all 6 multiples contribute -> blend is the full-6 median (26.5, as before)
+    assert v["comparables"]["blended_fair_value"] == 26.5
+    assert v["summary"]["valuation_basis"] == "operating"
+    assert len(v["summary"]["methods"]) == 3               # EPV, DCF, Comparables
+
+
 def test_net_debt_fail_soft_when_leg_missing(pg_session):
     s = pg_session
     iid = _instrument(s, "NDBT")
