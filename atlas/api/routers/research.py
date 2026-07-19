@@ -23,6 +23,7 @@ from sqlalchemy import text
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
+from atlas.dcp.research.autopsy import compute_autopsy
 from atlas.dcp.research.financials_panel import compute_financials
 from atlas.dcp.research.health_score import compute_health_score
 from atlas.dcp.research.stock_models import compute_models
@@ -265,6 +266,9 @@ def _compose_dossier(s: Any, instrument_id: Any, ticker: str, *,
     financials = compute_financials(s, instrument_id, ticker, today) if has_iid else None
     valuation = compute_valuation(s, instrument_id, ticker, today) if has_iid else None
     health = compute_health_score(s, instrument_id, ticker, today) if has_iid else None
+    # fragility markers ("pick autopsy"): a pure derivation of WHY this name looks
+    # fragile, from the panels just computed — descriptive, never a filter.
+    autopsy = compute_autopsy(models, valuation)
 
     memo = s.execute(text(
         "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
@@ -321,7 +325,7 @@ def _compose_dossier(s: Any, instrument_id: Any, ticker: str, *,
                                                 if sig["formation_return"] is not None else None)}
                           for sig in signals],
         "models": models, "financials": financials, "valuation": valuation,
-        "health": health, "cross_check": cross,
+        "health": health, "autopsy": autopsy, "cross_check": cross,
     }
 
 

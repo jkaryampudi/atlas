@@ -97,6 +97,19 @@
   .fvverdict.gd{color:var(--gold);border-color:rgba(226,185,91,0.5)}
   .gd{color:var(--gold)}
 
+  /* fragility markers (pick autopsy) */
+  .fraglevel{display:inline-flex;align-items:center;gap:8px;font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:0.02em;padding:5px 14px;border:1.5px solid;border-radius:6px;margin-bottom:14px}
+  .fraglevel.fragile{color:var(--red);border-color:var(--red)}
+  .fraglevel.caution{color:var(--gold);border-color:rgba(226,185,91,0.5)}
+  .fraglevel.clear{color:var(--green);border-color:var(--green)}
+  .flaglist{display:flex;flex-direction:column;gap:11px}
+  .flag{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:baseline}
+  .sevdot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px}
+  .sevdot.alert{background:var(--red)} .sevdot.warn{background:var(--gold)} .sevdot.info{background:var(--dim)}
+  .flag .fl{font-size:13.5px;line-height:1.5}
+  .flag .fl b{font-family:var(--disp);font-weight:600}
+  .flag .fl .d{color:var(--dim)}
+
   /* health score pillars */
   .hcomposite{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
   .hcomposite .big{font-family:var(--mono);font-size:34px;font-weight:600;line-height:1}
@@ -210,6 +223,19 @@ function compsTable(comps){
   return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
     +`<div class="subnote">Percentile = how rich vs the ${esc(comps.sector||"sector")} peers (${comps.n_peers} names): higher = more expensive than more of the sector.</div>`;
 }
+function buildAutopsy(A){
+  const flags=A.flags||[], lvl=A.level||"clear", n=(A.n_alerts||0)+(A.n_warns||0);
+  const lvlTxt = lvl==="fragile" ? `FRAGILE · ${A.n_alerts} alert${A.n_alerts===1?"":"s"}`
+    : lvl==="caution" ? `CAUTION · ${n} marker${n===1?"":"s"}`
+    : "NO FRAGILITY MARKERS";
+  const rows = flags.map(f=>`<div class="flag"><span class="sevdot ${esc(f.severity)}"></span><span class="fl"><b>${esc(f.label)}</b> <span class="d">— ${esc(f.detail)}</span></span></div>`).join("");
+  return `<div class="card full">
+    <div class="ctitle">Fragility Markers <span style="text-transform:none;letter-spacing:0;color:var(--faint)">Atlas's pick autopsy — descriptive, not a filter</span></div>
+    <div class="fraglevel ${esc(lvl)}">${lvlTxt}</div>
+    ${flags.length?`<div class="flaglist">${rows}</div><div class="subnote">${esc(A.note||"")}</div>`
+      :`<div class="subnote">None of Atlas's descriptive risk checks tripped for this name.</div>`}
+  </div>`;
+}
 function healthColor(sc){ return sc==null?"var(--dim)":sc>=60?"var(--green)":sc>=40?"var(--gold)":"var(--red)"; }
 function stars(r){ return r==null?"—":"★".repeat(r)+"☆".repeat(5-r); }
 function buildHealth(H){
@@ -302,6 +328,7 @@ function render(d){
   const F=d.financials||null, ks=(F&&F.key_stats)||{}, finHTML=F?buildFinancials(F):"";
   const V=d.valuation||null, valHTML=V?buildValuation(V):"";
   const H=d.health||null, healthHTML=H?buildHealth(H):"";
+  const A=d.autopsy||null, autopsyHTML=(A&&(A.flags||[]).length)?buildAutopsy(A):"";
   document.title = `${d.ticker} — Atlas dossier`;
   const perf = [5,10,20,60].map(h=>`<div class="h"><div class="hl">vs SPY @${h}s</div><div class="hv ${sign(x[h])}">${x[h]==null?'<span class="imm">immature</span>':(x[h]>0?"+":"")+pct(x[h])}</div></div>`).join("");
 
@@ -329,6 +356,8 @@ function render(d){
         <div class="check"><div class="lab">Outcome so far (vs SPY @20s)</div><div class="st">${c.outcome_so_far==="outperforming"?'<span class="g">outperforming</span>':c.outcome_so_far==="underperforming"?'<span class="r">underperforming</span>':'<span class="neu">'+esc(c.outcome_so_far||"—")+'</span>'}</div></div>
       </div>
     </div>
+
+    ${autopsyHTML}
 
     ${d.source
       ? `<div class="card full"><div class="ctitle">Performance vs SPY</div><div class="perf">${perf}</div></div>`
