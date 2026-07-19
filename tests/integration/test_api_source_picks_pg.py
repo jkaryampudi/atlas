@@ -152,3 +152,39 @@ def test_dossier_unknown_pick_is_404(client):
     r = c.get("/v1/research/source-picks/00000000-0000-0000-0000-000000000000/dossier")
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_ticker_dossier_by_symbol_for_atlas_suggestion(client):
+    """The same full dossier for ANY symbol (an Atlas suggestion, not an external
+    pick): source is None, the committee memo composes, outcome is 'not tracked',
+    and all four Atlas panels are present (fail-soft dicts)."""
+    c, s = client
+    iid = s.execute(text(
+        "SELECT id FROM market.instruments WHERE symbol = 'ATLZ'")).scalar()
+    if iid is None:
+        s.execute(text(
+            "INSERT INTO market.instruments (symbol, exchange, market, "
+            " instrument_type, name, currency, is_active) "
+            "VALUES ('ATLZ','US','US','stock','ATLZ','USD',true)"))
+    s.execute(text(
+        "INSERT INTO research.memos (memo_type, instrument_symbol, recommendation, "
+        " conviction, thesis, dissent, evidence_refs, source) "
+        "VALUES ('committee','ATLZ','BUY','HIGH','clean momentum','crowded','[]',NULL)"))
+    s.commit()
+
+    d = c.get("/v1/research/tickers/atlz/dossier").json()   # case-insensitive
+    assert d["ticker"] == "ATLZ"
+    assert d["source"] is None                              # not an external pick
+    assert d["memo"]["recommendation"] == "BUY"
+    assert d["cross_check"]["source_call"] is None
+    assert d["cross_check"]["atlas_committee"] == "BUY"
+    assert d["cross_check"]["outcome_so_far"] == "not tracked"
+    for k in ("models", "financials", "valuation", "health"):
+        assert isinstance(d[k], dict)
+
+
+def test_ticker_dossier_unknown_symbol_is_404(client):
+    c, _ = client
+    r = c.get("/v1/research/tickers/NOSUCHXY/dossier")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"

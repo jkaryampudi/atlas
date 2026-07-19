@@ -131,7 +131,9 @@
 </div>
 <script>
 "use strict";
-const id = new URLSearchParams(location.search).get("id");
+const _params = new URLSearchParams(location.search);
+const id = _params.get("id");
+const symbol = _params.get("symbol");
 const $ = s => document.getElementById(s);
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function pct(v){ return v==null?"—":(v*100).toFixed(1)+"%"; }
@@ -282,9 +284,12 @@ function buildValuation(V){
 }
 
 async function load(){
-  if(!id){ $("body").innerHTML = '<div class="loading">no pick id in the URL</div>'; return; }
+  let url;
+  if(id) url = `/v1/research/source-picks/${encodeURIComponent(id)}/dossier`;
+  else if(symbol) url = `/v1/research/tickers/${encodeURIComponent(symbol)}/dossier`;
+  else { $("body").innerHTML = '<div class="loading">no ticker in the URL</div>'; return; }
   let r;
-  try{ r = await fetch(`/v1/research/source-picks/${encodeURIComponent(id)}/dossier`); }
+  try{ r = await fetch(url); }
   catch(e){ $("body").innerHTML = '<div class="loading">could not reach the API</div>'; return; }
   if(!r.ok){ $("body").innerHTML = `<div class="loading">dossier not found (${r.status})</div>`; return; }
   const d = await r.json();
@@ -303,9 +308,13 @@ function render(d){
   $("body").innerHTML = `
     <div class="hero">
       <div class="tkr">${esc(d.ticker)}</div>
-      <div class="srcbadge">${esc(d.source)} · ${esc(d.source_recommendation)}</div>
+      ${d.source
+        ? `<div class="srcbadge">${esc(d.source)} · ${esc(d.source_recommendation)}</div>`
+        : `<div class="srcbadge" style="color:var(--blue);border-color:rgba(90,167,255,0.45)">ATLAS RESEARCH</div>`}
     </div>
-    <div class="herometa">Recommended ${esc(d.recommendation_date)} · features point-in-time as of ${esc(d.as_of_session)} · measured, never traded — no path to capital</div>
+    <div class="herometa">${d.source
+      ? `Recommended ${esc(d.recommendation_date)} · features point-in-time as of ${esc(d.as_of_session)} · measured, never traded — no path to capital`
+      : `Atlas research dossier · figures live as of today · measured, never a path to capital`}</div>
 
     <div class="band">
       <div class="verdict">
@@ -321,7 +330,9 @@ function render(d){
       </div>
     </div>
 
-    <div class="card full"><div class="ctitle">Performance vs SPY</div><div class="perf">${perf}</div></div>
+    ${d.source
+      ? `<div class="card full"><div class="ctitle">Performance vs SPY</div><div class="perf">${perf}</div></div>`
+      : ""}
 
     <div class="grid">
       <div class="card"><div class="ctitle">Key Indicators</div>${kv([

@@ -252,6 +252,104 @@ def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[
     return out
 
 
+def _compose_dossier(s: Any, instrument_id: Any, ticker: str, *,
+                     pick: Any, models_as_of: Any) -> dict[str, Any]:
+    """Assemble the full dossier for a name — the four Atlas panels (models,
+    financials, valuation, health), the latest committee memo, the live signal
+    flags, and a cross-check. Works WITH a source pick (external suggestion: adds
+    its PIT features + SPY-relative outcome) or WITHOUT one (an Atlas suggestion —
+    a memo/signal/proposal name — viewed present-tense)."""
+    today = SystemClock().now().date()
+    has_iid = instrument_id is not None
+    models = compute_models(s, instrument_id, ticker, models_as_of) if has_iid else None
+    financials = compute_financials(s, instrument_id, ticker, today) if has_iid else None
+    valuation = compute_valuation(s, instrument_id, ticker, today) if has_iid else None
+    health = compute_health_score(s, instrument_id, ticker, today) if has_iid else None
+
+    memo = s.execute(text(
+        "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
+        " source, created_at FROM research.memos "
+        "WHERE instrument_symbol = :t ORDER BY created_at DESC LIMIT 1"),
+        {"t": ticker}).mappings().first()
+
+    signal_asof = pick["recommendation_date"] if pick else today
+    signals = [dict(r) for r in s.execute(text(
+        "SELECT st.family, sig.rank, sig.formation_return, sig.valid_until "
+        "FROM quant.signals sig "
+        "JOIN market.instruments i ON i.id = sig.instrument_id "
+        "JOIN quant.strategies st ON st.id = sig.strategy_id "
+        "WHERE i.symbol = :t AND sig.valid_until >= :d "
+        "ORDER BY sig.rank NULLS LAST"),
+        {"t": ticker, "d": signal_asof}).mappings()]
+
+    feats = (pick["features"] or {}) if pick else {}
+    excess = ({h: (float(pick[f"excess_{h}"]) if pick[f"excess_{h}"] is not None else None)
+               for h in (5, 10, 20, 60)} if pick
+              else {5: None, 10: None, 20: None, 60: None})
+    mom = feats.get("mom_12_1")
+    if mom is None and models is not None:
+        mom = (models.get("momentum") or {}).get("mom_12_1")
+
+    atlas_rec = memo["recommendation"] if memo else None
+    source_bullish = (pick["source_recommendation"] == "BUY") if pick else None
+    cross = {
+        "source_call": pick["source_recommendation"] if pick else None,
+        "atlas_committee": atlas_rec or "not analyzed",
+        "atlas_agrees": (None if (atlas_rec is None or source_bullish is None)
+                         else (atlas_rec == "BUY") == source_bullish),
+        "momentum_supports": (None if mom is None else mom > 0),
+        "atlas_signal_flags": [sig["family"] for sig in signals],
+        "outcome_so_far": ("not tracked" if not pick else (
+            "too early" if excess[20] is None else
+            ("outperforming" if excess[20] > 0 else
+             "underperforming" if excess[20] < 0 else "flat"))),
+    }
+    return {
+        "ticker": ticker,
+        "source": pick["source"] if pick else None,
+        "source_recommendation": pick["source_recommendation"] if pick else None,
+        "recommendation_date": (pick["recommendation_date"].isoformat() if pick else None),
+        "as_of_session": (pick["as_of_session"].isoformat() if pick else None),
+        "features": feats, "excess": excess,
+        "memo": (None if memo is None else {
+            "recommendation": memo["recommendation"], "conviction": memo["conviction"],
+            "thesis": memo["thesis"], "dissent": memo["dissent"],
+            "kill_criteria": memo["kill_criteria"], "source": memo["source"],
+            "created_at": memo["created_at"].isoformat()}),
+        "atlas_signals": [{"family": sig["family"], "rank": sig["rank"],
+                           "formation_return": (float(sig["formation_return"])
+                                                if sig["formation_return"] is not None else None)}
+                          for sig in signals],
+        "models": models, "financials": financials, "valuation": valuation,
+        "health": health, "cross_check": cross,
+    }
+
+
+@router.get("/tickers/{symbol}/dossier")
+def ticker_dossier(symbol: str) -> Any:
+    """Full research dossier for ANY symbol — Atlas's own suggestions (committee
+    memos, signals, proposals), not only external picks. Present-tense: models,
+    financials, valuation and health are as of today. If the name also has a
+    tracked external pick, its features and SPY-relative outcome enrich the view."""
+    sym = symbol.upper()
+    with session_scope() as s:
+        iid = s.execute(text(
+            "SELECT id FROM market.instruments WHERE symbol = :s "
+            "ORDER BY is_active DESC LIMIT 1"), {"s": sym}).scalar()
+        if iid is None:
+            return JSONResponse(status_code=404, content={"error": {
+                "code": "NOT_FOUND", "message": f"unknown symbol {sym}",
+                "details": None}})
+        pick = s.execute(text(
+            "SELECT id, instrument_id, source, ticker, recommendation_date, "
+            " as_of_session, source_recommendation, excess_5, excess_10, "
+            " excess_20, excess_60, features FROM research.source_picks "
+            "WHERE ticker = :s ORDER BY recommendation_date DESC LIMIT 1"),
+            {"s": sym}).mappings().first()
+        return _compose_dossier(s, iid, sym, pick=pick,
+                                models_as_of=SystemClock().now().date())
+
+
 @router.get("/source-picks/{pick_id}/dossier")
 def source_pick_dossier(pick_id: str) -> Any:
     """One pick's full research dossier: the recommendation, its point-in-time
@@ -270,87 +368,8 @@ def source_pick_dossier(pick_id: str) -> Any:
             return JSONResponse(status_code=404, content={"error": {
                 "code": "NOT_FOUND", "message": f"unknown pick {pick_id}",
                 "details": None}})
-        ticker = pick["ticker"]
-        feats = pick["features"] or {}
-        models = (compute_models(s, pick["instrument_id"], ticker, pick["as_of_session"])
-                  if pick["instrument_id"] is not None else None)
-        # Financials panel is a PRESENT-TENSE reference (reported statements,
-        # earnings history, current consensus) a human reads NOW — historical
-        # facts that feed no signal/sizing/learning label, so it is bounded to
-        # TODAY (labelled with the vendor snapshot date), not frozen to the
-        # pick's as-of. The pick's point-in-time fingerprint stays in `features`
-        # and the pit-dated model panel above.
-        today = SystemClock().now().date()
-        financials = (compute_financials(s, pick["instrument_id"], ticker, today)
-                      if pick["instrument_id"] is not None else None)
-        # Atlas's own mechanical valuation models (present-tense reference, same
-        # as the financials panel) — our answer to the report's proprietary
-        # "fair value", built from our data and clearly labelled as ours.
-        valuation = (compute_valuation(s, pick["instrument_id"], ticker, today)
-                     if pick["instrument_id"] is not None else None)
-        # Atlas's own composite health score — factor percentiles vs the whole
-        # S&P 500 universe (our answer to the report's proprietary health panel).
-        health = (compute_health_score(s, pick["instrument_id"], ticker, today)
-                  if pick["instrument_id"] is not None else None)
-
-        memo = s.execute(text(
-            "SELECT recommendation, conviction, thesis, dissent, kill_criteria, "
-            " source, created_at FROM research.memos "
-            "WHERE instrument_symbol = :t ORDER BY created_at DESC LIMIT 1"),
-            {"t": ticker}).mappings().first()
-
-        # Atlas's OWN statistical signals still valid for this name (the models
-        # independently flagging it): family + rank + formation return.
-        signals = [dict(r) for r in s.execute(text(
-            "SELECT st.family, sig.rank, sig.formation_return, sig.valid_until "
-            "FROM quant.signals sig "
-            "JOIN market.instruments i ON i.id = sig.instrument_id "
-            "JOIN quant.strategies st ON st.id = sig.strategy_id "
-            "WHERE i.symbol = :t AND sig.valid_until >= :d "
-            "ORDER BY sig.rank NULLS LAST"),
-            {"t": ticker, "d": pick["recommendation_date"]}).mappings()]
-
-        excess = {h: (float(pick[f"excess_{h}"]) if pick[f"excess_{h}"] is not None
-                      else None) for h in (5, 10, 20, 60)}
-        mom = feats.get("mom_12_1")
-
-        # ---- cross-check: does everyone agree? ----
-        atlas_rec = memo["recommendation"] if memo else None
-        source_bullish = pick["source_recommendation"] == "BUY"
-        cross = {
-            "source_call": pick["source_recommendation"],
-            "atlas_committee": atlas_rec or "not analyzed",
-            "atlas_agrees": (None if atlas_rec is None else
-                             (atlas_rec == "BUY") == source_bullish),
-            "momentum_supports": (None if mom is None else mom > 0),
-            "atlas_signal_flags": [sig["family"] for sig in signals],
-            "outcome_so_far": (
-                "too early" if excess[20] is None else
-                ("outperforming" if excess[20] > 0 else
-                 "underperforming" if excess[20] < 0 else "flat")),
-        }
-        return {
-            "ticker": ticker, "source": pick["source"],
-            "source_recommendation": pick["source_recommendation"],
-            "recommendation_date": pick["recommendation_date"].isoformat(),
-            "as_of_session": pick["as_of_session"].isoformat(),
-            "features": feats, "excess": excess,
-            "memo": (None if memo is None else {
-                "recommendation": memo["recommendation"],
-                "conviction": memo["conviction"], "thesis": memo["thesis"],
-                "dissent": memo["dissent"], "kill_criteria": memo["kill_criteria"],
-                "source": memo["source"],
-                "created_at": memo["created_at"].isoformat()}),
-            "atlas_signals": [{"family": sig["family"], "rank": sig["rank"],
-                               "formation_return": (float(sig["formation_return"])
-                                                    if sig["formation_return"] is not None
-                                                    else None)} for sig in signals],
-            "models": models,
-            "financials": financials,
-            "valuation": valuation,
-            "health": health,
-            "cross_check": cross,
-        }
+        return _compose_dossier(s, pick["instrument_id"], pick["ticker"],
+                                pick=pick, models_as_of=pick["as_of_session"])
 
 
 @router.get("/memos/{memo_id}/decision-flow")

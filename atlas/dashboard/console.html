@@ -79,6 +79,8 @@
   .rec.REJECT{color:var(--red);border-color:var(--red)}
   .rec.INSUFFICIENT_EVIDENCE{color:var(--dim);border-color:var(--line-strong);font-size:12px}
   .sym{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:0.08em}
+  .dossier-sym{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--blue);letter-spacing:inherit;cursor:pointer;border-bottom:1px dotted currentColor}
+  .dossier-sym:hover{color:var(--txt);border-bottom-color:var(--txt)}
   .conv{font-family:var(--mono);font-size:10px;letter-spacing:0.14em;color:var(--dim)}
   .shadow-ribbon{position:absolute;top:14px;right:-42px;transform:rotate(38deg);background:rgba(226,185,91,0.15);border:1px solid rgba(226,185,91,0.5);color:var(--gold);font-family:var(--mono);font-size:9px;letter-spacing:0.14em;padding:3px 44px}
   .memo-body{padding:18px 20px;display:grid;gap:16px}
@@ -353,6 +355,16 @@ const API = location.origin;  // served BY the API — same origin, no CORS
 const esc = s => String(s ?? "").replace(/[&<>"']/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
+// Any Atlas suggestion's ticker -> its full research dossier (by symbol), in a
+// new tab. One delegated listener survives every re-render.
+const symLink = sym => (!sym || sym==="—" || sym==="?" || sym==="-")
+  ? esc(sym || "—")
+  : `<button class="dossier-sym" data-sym="${esc(sym)}">${esc(sym)}</button>`;
+document.addEventListener("click", e => {
+  const b = e.target.closest("button.dossier-sym");
+  if(b) window.open(`/console/dossier?symbol=${encodeURIComponent(b.dataset.sym)}`, "_blank");
+});
+
 async function get(path){
   try{
     const r = await fetch(API + path, {cache:"no-store"});
@@ -495,7 +507,7 @@ async function renderTradingBrief(){
     banners.push(`<div class="alert-red">■ NO CYCLE RUN recorded for ${esc(p.session_date)} — the machine did not run itself.</div>`);
   const na = `<span style="color:var(--faint)">n/a</span>`;
   const queueRows = (q.proposals||[]).map(x=>`<tr>
-      <td>${esc(x.symbol||"?")}</td><td>${esc(x.origin)}</td><td>${esc(x.action)}</td>
+      <td>${symLink(x.symbol)}</td><td>${esc(x.origin)}</td><td>${esc(x.action)}</td>
       <td>${esc(x.qty)}</td><td>A$${esc(x.value_aud)}</td>
       <td class="${x.expiring_soon?"num-neg":""}">${esc(x.hours_left)}h left${x.expiring_soon?" ⚠":""}</td></tr>`).join("");
   const queueTable = (q.proposals||[]).length
@@ -624,7 +636,7 @@ async function renderResearch(){
       ${x.shadow?`<div class="shadow-ribbon">SHADOW — NON-ACTIONABLE</div>`:""}
       <div class="memo-head">
         <span class="rec ${esc(x.recommendation)}">${esc(x.recommendation)}</span>
-        <span class="sym">${esc(x.instrument_symbol||"—")}</span>
+        <span class="sym">${symLink(x.instrument_symbol)}</span>
         <span class="conv">CONVICTION ${esc(x.conviction)}</span>
         ${x.source?`<span class="chip" style="color:var(--gold);border-color:rgba(226,185,91,0.5)" title="external origin — tagged when the Principal queued this analysis">src: ${esc(x.source)}</span>`:""}
         ${x.outcome_20?`<span class="pill ${x.outcome_20.vindicated===true?"g":x.outcome_20.vindicated===false?"r":"gray"}" style="margin-left:auto" title="20-session outcome vs SPY (scorecard)">${esc(pctS(x.outcome_20.excess))} vs SPY @20s${x.outcome_20.vindicated===true?" ✓":x.outcome_20.vindicated===false?" ✗":""}</span>`:""}
@@ -1092,7 +1104,7 @@ async function renderScorecard(){
   const tbl = !rows.length ? "" :
     `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th><th>DISSENT</th></tr>` +
     rows.map(o=>`<tr>
-      <td>${esc(o.symbol||"—")}${o.source?` <span style="color:var(--gold);font-size:9.5px" title="external origin">${esc(o.source)}</span>`:""}</td>
+      <td>${symLink(o.symbol)}${o.source?` <span style="color:var(--gold);font-size:9.5px" title="external origin">${esc(o.source)}</span>`:""}</td>
       <td><span class="pill ${o.recommendation==="BUY"?"g":o.recommendation==="REJECT"?"r":"gray"}" title="conviction ${esc(o.conviction||"—")}">${esc(o.recommendation)}</span></td>
       <td>${esc(o.horizon)}s</td>
       <td class="${o.fwd_return<0?"num-neg":"num-pos"}">${esc(pctS(o.fwd_return))}</td>
@@ -1294,7 +1306,7 @@ document.getElementById("pf-run").onclick = async()=>{
     <div class="${d.verdict==="PASS"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:10px">
       <span class="stamp">${esc(d.verdict)}</span>
       <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.9">
-        <b style="color:var(--txt)">${esc(d.symbol)}</b> · ${sized}<br>
+        <b style="color:var(--txt)">${symLink(d.symbol)}</b> · ${sized}<br>
         breaker ${esc(String(d.breaker).toUpperCase())} · limit set v${esc(d.limit_set_version)} · NAV A$${(+d.nav_aud).toFixed(2)}
       </div>
     </div>
@@ -1359,7 +1371,7 @@ async function renderQuant(){
       <div class="${s.verdict==="PASS"?"fail-seal pass-seal":"fail-seal"}" style="margin-bottom:12px;align-items:flex-start">
         <span class="stamp">${esc(s.verdict)}</span>
         <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim);line-height:1.9">
-          <b style="color:var(--txt)">${esc(s.symbol)}</b> · ${esc(gr.data.strategy)} · ${esc(s.window)}<br>
+          <b style="color:var(--txt)">${symLink(s.symbol)}</b> · ${esc(gr.data.strategy)} · ${esc(s.window)}<br>
           null-model p <span class="${(s.null_p??1)>s.null_p_max?"num-neg":"num-pos"}">${s.null_p??"—"}</span> vs ≤ ${s.null_p_max}
           · deflated Sharpe <span class="${(s.dsr??0)<s.dsr_min?"num-neg":"num-pos"}">${s.dsr??"—"}</span> vs ≥ ${s.dsr_min} (n_trials ${s.n_trials??"—"})<br>
           strategy ${s.strategy_return_pct??"—"}% vs buy-and-hold ${s.bh_return_pct??"—"}%
@@ -1477,7 +1489,7 @@ const reconOpen = new Set();   /* proposal ids expanded in the Decided list —
 function reconTree(d){
   const p = d.proposal || {}, m = d.memo || {}, run = m.agent_run, rev = m.review;
   const head = `<div style="font-family:var(--mono);font-size:11px;color:var(--txt);margin-bottom:8px">
-    ${esc(p.symbol||"—")} ${esc((p.action||"").toUpperCase())} ${esc(p.position_size)} sh
+    ${symLink(p.symbol)} ${esc((p.action||"").toUpperCase())} ${esc(p.position_size)} sh
     · entry ${num(p.entry_price)} · stop ${num(p.stop_loss)} · target ${num(p.target_price)}
     · A$${(+p.position_value_aud||0).toFixed(2)}
     · <span style="letter-spacing:0.1em">${esc((p.state||"").toUpperCase())}</span>
@@ -1661,7 +1673,7 @@ async function renderTrading(force){
       ${poss.data.map(p=>{
         const upl = (p.last_close!=null && p.avg_cost!=null) ? (p.last_close/p.avg_cost-1)*100 : null;
         return `<tr>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(p.symbol||"—")}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${symLink(p.symbol)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(p.qty)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${num(p.avg_cost)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${p.last_close!=null?num(p.last_close):"—"}</td>
@@ -1690,7 +1702,7 @@ async function renderTrading(force){
     oel.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px">
       <tr style="color:var(--dim);text-align:left">${["SYMBOL","SIDE","QTY","STATE","CREATED","FILL","SHORTFALL",""].map(h=>`<th style="padding:6px 10px;border-bottom:1px solid var(--line-strong);font-weight:400;letter-spacing:0.1em;font-size:9.5px">${h}</th>`).join("")}</tr>
       ${ords.data.map(o=>`<tr>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.symbol||"—")}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${symLink(o.symbol)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.side||"—")}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line)">${esc(o.qty)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--line);color:${o.state==="filled"?"var(--green)":o.state==="cancelled"?"var(--dim)":"var(--gold)"}">${esc(o.state)}</td>
@@ -1722,7 +1734,7 @@ async function renderTrading(force){
                          voided:"var(--red)",expired:"var(--gold)"}[s]||"var(--dim)");
       del.innerHTML = done.map(p=>`<div style="display:flex;gap:14px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px">
         <span style="color:${col(p.state)};letter-spacing:0.1em">${esc(p.state.toUpperCase())}</span>
-        <span>${esc(p.symbol||"—")}</span>
+        <span>${symLink(p.symbol)}</span>
         <span style="color:var(--dim)">${esc(p.position_size)} sh · A$${(+p.position_value_aud||0).toFixed(2)}</span>
         <span style="color:var(--dim);margin-left:auto">${esc(ts(p.created_at))}</span>
         <button class="tr-recon" data-pid="${esc(p.id)}" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;padding:2px 8px;cursor:pointer">${reconOpen.has(p.id)?"COLLAPSE":"RECONSTRUCT"}</button></div>
