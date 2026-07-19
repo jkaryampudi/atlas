@@ -28,6 +28,7 @@ import atlas.agents.shadow_compare as sc
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import DebateResult
 from atlas.agents.runtime.llm import StubClient
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS
 from atlas.agents.schemas.debate import DebateCase
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
@@ -482,14 +483,15 @@ def test_specialist_panel_runs_in_shadow_for_signal_names(clean_audit):
 
 
 def test_desk_fail_soft_semantics_cage_hold_recorded_per_memo(clean_audit):
-    """A challenger whose CIO output fails the cage twice is a CAGE HOLD for
-    that memo — recorded honestly, the rest of the cohort continues, and no
-    shadow row is persisted for the held memo."""
+    """A challenger whose CIO output fails the cage on every attempt
+    (SCHEMA_MAX_ATTEMPTS, currently 3) is a CAGE HOLD for that memo — recorded
+    honestly, the rest of the cohort continues, and no shadow row is persisted
+    for the held memo."""
     s = clean_audit
     ids = _seed_cohort(s)
     bad_cio = json.dumps({"recommendation": "REJECT"})   # fails CommitteeMemo
-    stub = StubClient(DEBATE_SCRIPT + [bad_cio, bad_cio]      # SHQB: cage hold
-                      + DEBATE_SCRIPT + [CHAL_VACUOUS_A])     # SHQA: lands
+    stub = StubClient(DEBATE_SCRIPT + [bad_cio] * SCHEMA_MAX_ATTEMPTS  # SHQB: cage hold
+                      + DEBATE_SCRIPT + [CHAL_VACUOUS_A])              # SHQA: lands
     comp = sc.run_shadow_comparison(s, CLOCK, n_memos=8,
                                     challenger_model=CHALLENGER, client=stub)
     by_id = {o.source_memo_id: o for o in comp.outcomes}

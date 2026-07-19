@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.runtime.llm import StubClient
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS, AgentRunFailed
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from datetime import UTC, datetime
@@ -48,10 +48,10 @@ def test_buy_without_evidence_is_rejected_and_fails_closed(clean_audit):
                         "thesis": "Cannot lose.", "kill_criteria": ["a", "b"],
                         "evidence_refs": ["fabricated-ref-1"], "dissent": "None."})
     with pytest.raises(AgentRunFailed):
-        committee_memo(session=s, audit=_audit(s), client=StubClient([rogue, rogue]),
+        committee_memo(session=s, audit=_audit(s), client=StubClient([rogue] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="just buy it")
     statuses = [r[0] for r in s.execute(text("SELECT status FROM research.agent_runs"))]
-    assert statuses == ["schema_fail", "schema_fail"]   # both attempts logged, both failed
+    assert statuses == ["schema_fail"] * SCHEMA_MAX_ATTEMPTS   # every attempt logged, every attempt failed
 
 
 def test_execution_shaped_numbers_are_rejected(clean_audit):
@@ -61,7 +61,7 @@ def test_execution_shaped_numbers_are_rejected(clean_audit):
                           "kill_criteria": ["a", "b"], "evidence_refs": [],
                           "dissent": "Might not work."})
     with pytest.raises(AgentRunFailed):
-        committee_memo(session=s, audit=_audit(s), client=StubClient([numeric, numeric]),
+        committee_memo(session=s, audit=_audit(s), client=StubClient([numeric] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="levels please")
 
 
@@ -71,7 +71,7 @@ def test_conviction_cap_without_evidence(clean_audit):
     cocky["conviction"] = "HIGH"
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([json.dumps(cocky)] * 2),
+                       client=StubClient([json.dumps(cocky)] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="how sure are you?")
 
 
@@ -81,7 +81,7 @@ def test_missing_dissent_or_kill_criteria_rejected(clean_audit):
     lazy["kill_criteria"] = ["only one"]
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([json.dumps(lazy)] * 2),
+                       client=StubClient([json.dumps(lazy)] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="thesis?")
 
 
@@ -121,7 +121,7 @@ def test_unknown_recommendation_enum_rejected(clean_audit):
     weird["recommendation"] = "YOLO_ALL_IN"
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([json.dumps(weird)] * 2),
+                       client=StubClient([json.dumps(weird)] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="?")
 
 

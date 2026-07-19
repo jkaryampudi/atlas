@@ -37,7 +37,11 @@ from atlas.agents.roles.specialists import (
 )
 from atlas.agents.runtime.budget import BudgetExhausted
 from atlas.agents.runtime.llm import LlmResult, StubClient
-from atlas.agents.runtime.runner import AgentRunFailed, current_budget_surface
+from atlas.agents.runtime.runner import (
+    SCHEMA_MAX_ATTEMPTS,
+    AgentRunFailed,
+    current_budget_surface,
+)
 from atlas.agents.schemas.specialist import SpecialistAssessment
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
@@ -162,14 +166,14 @@ def test_sector_evidence_reads_the_registry_and_is_honest_when_absent(clean_audi
 
 def test_fabricated_number_in_specialist_output_fails_closed(clean_audit):
     """A hostile quality analyst asserts a number that exists nowhere in its
-    lane: grounding kills it, twice, and the run fails closed with the
+    lane: grounding kills it on every attempt, and the run fails closed with the
     dedicated audit event. Specialists are advisory text — the cage is the
     control, not trust."""
     s = clean_audit
     fabricated = _assessment(points=[
         "ROE printed at 45.3 this quarter per my recollection",
         "Margins are stable per the fundamentals ref"])
-    stubs = {"quality": StubClient([fabricated, fabricated]),
+    stubs = {"quality": StubClient([fabricated] * SCHEMA_MAX_ATTEMPTS),
              "growth": StubClient([_assessment()]),
              "macro": StubClient([_assessment()])}
     panel = run_specialists(session=s, audit=_audit(s), symbol="AVGO",
@@ -178,11 +182,11 @@ def test_fabricated_number_in_specialist_output_fails_closed(clean_audit):
     assert panel.absences["quality"].startswith("cage held:")
     statuses = s.execute(text("SELECT status FROM research.agent_runs "
                               "WHERE agent_role='quality_analyst'")).scalars().all()
-    assert statuses == ["schema_fail", "schema_fail"]
+    assert statuses == ["schema_fail"] * SCHEMA_MAX_ATTEMPTS
     n = s.execute(text("SELECT count(*) FROM audit.decision_events "
                        "WHERE event_type='agent.grounding.failed' "
                        "  AND actor_id='quality_analyst'")).scalar()
-    assert n == 2
+    assert n == SCHEMA_MAX_ATTEMPTS
 
 
 def test_number_imported_from_another_lane_is_fabrication(clean_audit):
@@ -197,7 +201,7 @@ def test_number_imported_from_another_lane_is_fabrication(clean_audit):
         "Nothing in the lane contradicts the stance taken here"])
     stubs = {"quality": StubClient([_assessment()]),
              "growth": StubClient([cites_34]),           # 34 in-lane: grounded
-             "macro": StubClient([cites_34, cites_34])}  # 34 cross-lane: killed
+             "macro": StubClient([cites_34] * SCHEMA_MAX_ATTEMPTS)}  # cross-lane: killed every attempt
     panel = run_specialists(session=s, audit=_audit(s), symbol="AVGO",
                             evidence=FULL, clients=stubs)
     assert "growth" in panel.assessments
@@ -206,7 +210,7 @@ def test_number_imported_from_another_lane_is_fabrication(clean_audit):
     n = s.execute(text("SELECT count(*) FROM audit.decision_events "
                        "WHERE event_type='agent.grounding.failed' "
                        "  AND actor_id='macro_analyst'")).scalar()
-    assert n == 2
+    assert n == SCHEMA_MAX_ATTEMPTS
 
 
 # --- fail-soft semantics ------------------------------------------------------
@@ -386,7 +390,7 @@ def test_cage_failed_memo_persists_no_specialist_rows(clean_audit):
         "evidence_refs": ["fake"], "dissent": "none", "debate_summary": ""})
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([buy_without_evidence] * 2),
+                       client=StubClient([buy_without_evidence] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="buy?", evidence=None,
                        specialists=panel)
     assert s.execute(text("SELECT count(*) FROM research.memos")).scalar() == 0

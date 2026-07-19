@@ -12,7 +12,7 @@ from sqlalchemy import text
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import DebateResult, run_debate
 from atlas.agents.runtime.llm import StubClient
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS, AgentRunFailed
 from atlas.agents.schemas.debate import DebateCase
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
@@ -88,7 +88,7 @@ def test_bull_smuggling_price_target_fails_closed(clean_audit):
         "concede": "Capex cycles mean-revert.",
     })
     with pytest.raises(AgentRunFailed):
-        run_debate(session=s, audit=_audit(s), client=StubClient([bad, bad]),
+        run_debate(session=s, audit=_audit(s), client=StubClient([bad] * SCHEMA_MAX_ATTEMPTS),
                    symbol="AVGO", evidence=EVIDENCE)
     statuses = s.execute(text("SELECT DISTINCT status FROM research.agent_runs "
                               "WHERE agent_role='debate_bull'")).scalars().all()
@@ -128,7 +128,7 @@ def test_unanimous_debate_cannot_open_buy_without_dcp_evidence(clean_audit):
         "evidence_refs": ["debate"], "dissent": "Agreement may be shared blindness.",
         "debate_summary": "Bull and bear converge on demand durability."})
     with pytest.raises(AgentRunFailed):
-        committee_memo(session=s, audit=_audit(s), client=StubClient([buy, buy]),
+        committee_memo(session=s, audit=_audit(s), client=StubClient([buy] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="buy?", evidence=None,
                        debate=_unanimous_debate())
     n = s.execute(text("SELECT count(*) FROM research.memos")).scalar()
@@ -163,6 +163,6 @@ def test_missing_debate_summary_when_debate_present_fails_closed(clean_audit):
         "debate_summary": ""})
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([no_summary, no_summary]),
+                       client=StubClient([no_summary] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="buy?", evidence=EVIDENCE,
                        debate=_unanimous_debate())

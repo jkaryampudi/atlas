@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.runtime.llm import StubClient
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS, AgentRunFailed
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from tests.conftest import requires_pg
@@ -63,7 +63,7 @@ def test_cage_fail_persists_no_memo_and_no_evidence(clean_audit):
         "evidence_refs": ["fake"], "dissent": "none"})
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([buy_without_evidence, buy_without_evidence]),
+                       client=StubClient([buy_without_evidence] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="buy?", evidence=None)
     assert s.execute(text("SELECT count(*) FROM research.memos")).scalar() == 0
     assert s.execute(text("SELECT count(*) FROM research.memo_evidence")).scalar() == 0

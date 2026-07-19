@@ -15,7 +15,7 @@ from sqlalchemy import text
 from atlas.agents.roles.cio import committee_memo
 from atlas.agents.roles.debate import DebateResult
 from atlas.agents.runtime.llm import StubClient
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS, AgentRunFailed
 from atlas.agents.schemas.debate import DebateCase
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
@@ -90,7 +90,7 @@ def test_cage_fail_persists_no_memo_and_no_debate_rows(clean_audit):
         "debate_summary": "unanimous"})
     with pytest.raises(AgentRunFailed):
         committee_memo(session=s, audit=_audit(s),
-                       client=StubClient([buy_without_evidence] * 2),
+                       client=StubClient([buy_without_evidence] * SCHEMA_MAX_ATTEMPTS),
                        symbol="AVGO", question="buy?", evidence=None,
                        debate=_debate())
     assert s.execute(text("SELECT count(*) FROM research.memos")).scalar() == 0

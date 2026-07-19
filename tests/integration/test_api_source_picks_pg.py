@@ -159,13 +159,22 @@ def test_ticker_dossier_by_symbol_for_atlas_suggestion(client):
     pick): source is None, the committee memo composes, outcome is 'not tracked',
     and all four Atlas panels are present (fail-soft dicts)."""
     c, s = client
+    # is_active=FALSE — the production analysis-only convention (ops/analyze
+    # _resolve_instrument): the dossier finds inactive names, while the quality
+    # gates and universe surfaces never see them. An ACTIVE fake here leaks into
+    # the shared test DB and turns the ingest-replay gates RED ("ATLZ missing
+    # bars") for every later test — the exact defect this guard fixes.
     iid = s.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = 'ATLZ'")).scalar()
     if iid is None:
         s.execute(text(
             "INSERT INTO market.instruments (symbol, exchange, market, "
             " instrument_type, name, currency, is_active) "
-            "VALUES ('ATLZ','US','US','stock','ATLZ','USD',true)"))
+            "VALUES ('ATLZ','US','US','stock','ATLZ','USD',false)"))
+    else:   # repair a leaked active row from an earlier run of this test
+        s.execute(text(
+            "UPDATE market.instruments SET is_active = false "
+            "WHERE symbol = 'ATLZ'"))
     s.execute(text(
         "INSERT INTO research.memos (memo_type, instrument_symbol, recommendation, "
         " conviction, thesis, dissent, evidence_refs, source) "

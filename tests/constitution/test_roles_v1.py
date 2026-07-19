@@ -7,7 +7,7 @@ import pytest
 from atlas.agents.roles.committee import (macro_regime, research_memo,
                                           scanner_shortlist, sector_note)
 from atlas.agents.runtime.llm import StubClient
-from atlas.agents.runtime.runner import AgentRunFailed
+from atlas.agents.runtime.runner import SCHEMA_MAX_ATTEMPTS, AgentRunFailed
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from tests.conftest import requires_pg
@@ -30,7 +30,7 @@ def test_scanner_cannot_invent_candidates(clean_audit):
         "excluded_count": 0})
     with pytest.raises(AgentRunFailed):
         scanner_shortlist(session=s, audit=_audit(s),
-                          client=StubClient([rogue, rogue]),
+                          client=StubClient([rogue] * SCHEMA_MAX_ATTEMPTS),
                           candidates=CANDS, max_candidates=2)
 
 
@@ -40,7 +40,7 @@ def test_scanner_cannot_exceed_funnel_cap(clean_audit):
         {"symbol": sym, "signal_ref": ref, "rationale": "fits"} for sym, ref, _ in CANDS],
         "excluded_count": 0})
     with pytest.raises(AgentRunFailed):
-        scanner_shortlist(session=s, audit=_audit(s), client=StubClient([over, over]),
+        scanner_shortlist(session=s, audit=_audit(s), client=StubClient([over] * SCHEMA_MAX_ATTEMPTS),
                           candidates=CANDS, max_candidates=2)
 
 
@@ -61,7 +61,7 @@ def test_research_buy_gate_matches_cio_rules(clean_audit):
                         "kill_criteria": ["a", "b"], "evidence_refs": ["fake"],
                         "dissent": "none"})
     with pytest.raises(AgentRunFailed):
-        research_memo(session=s, audit=_audit(s), client=StubClient([rogue, rogue]),
+        research_memo(session=s, audit=_audit(s), client=StubClient([rogue] * SCHEMA_MAX_ATTEMPTS),
                       symbol="AVGO", evidence=[])
 
 
@@ -71,7 +71,7 @@ def test_macro_enum_and_numeric_guard(clean_audit):
                           "summary": "Cut rates to 3.5% means +12% upside for banks.",
                           "sector_tags": [], "evidence_refs": ["m:1"], "dissent": "x"})
     with pytest.raises(AgentRunFailed):
-        macro_regime(session=s, audit=_audit(s), client=StubClient([numeric, numeric]),
+        macro_regime(session=s, audit=_audit(s), client=StubClient([numeric] * SCHEMA_MAX_ATTEMPTS),
                      evidence=[("m:1", "policy statement digest")])
 
 
