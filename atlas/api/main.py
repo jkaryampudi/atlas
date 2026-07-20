@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 
 from atlas.api.routers import (
     audit,
+    factory,
     learning,
     market,
     portfolio,
@@ -71,6 +72,7 @@ app.include_router(market.router, prefix="/v1/market", tags=["market"])
 app.include_router(portfolio.router, prefix="/v1/portfolio", tags=["portfolio"])
 app.include_router(audit.router, prefix="/v1/audit", tags=["audit"])
 app.include_router(quant.router, prefix="/v1/quant", tags=["quant"])
+app.include_router(factory.router, prefix="/v1/factory", tags=["factory"])
 app.include_router(research.router, prefix="/v1/research", tags=["research"])
 app.include_router(risk.router, prefix="/v1/risk", tags=["risk"])
 app.include_router(trading.router, prefix="/v1/trading", tags=["trading"])

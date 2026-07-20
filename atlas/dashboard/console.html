@@ -277,6 +277,25 @@
       <div id="gate-report"><div class="quiet">awaiting data</div></div>
       <h2>Approval Decisions — Change Control</h2>
       <div class="grid" id="verdicts"><div class="quiet">awaiting data</div></div>
+      <h2>Research Factory — Recipe Gauntlet</h2>
+      <div class="note">Author a <b>pre-registered hypothesis</b> and run it through the full five-gate gauntlet on the point-in-time store. Every run burns <b>two counted trials</b> (main + pre-committed kill leg) against the feature's lineage — the deflated-Sharpe bar rises for every later trial on that line. A hypothesis, never a knob sweep. Advisory only: approval stays a separate signed workflow.</div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input id="rc-name" placeholder="name e.g. mom-12-1-top3" size="22" maxlength="41" style="font-family:var(--mono);font-size:12px">
+          <select id="rc-feature" style="font-family:var(--mono);font-size:12px"></select>
+          <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">top <input id="rc-topn" type="number" value="5" min="1" max="10" style="width:48px;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:5px 6px"></label>
+          <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">kill start <input id="rc-kill" type="date" value="2016-01-01" style="font-family:var(--mono);font-size:12px"></label>
+          <span id="rc-fixed" style="font-family:var(--mono);font-size:10.5px;color:var(--faint)">monthly · pit-sp500 · desc · 10 bps/side (fixed)</span>
+        </div>
+        <textarea id="rc-rationale" rows="3" placeholder="Economic rationale — REQUIRED. The hypothesis, registered verbatim before the result exists. No rationale, no run." style="width:100%;box-sizing:border-box;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:8px"></textarea>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
+          <button id="rc-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">RUN THE GAUNTLET</button>
+          <span id="rc-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
+        </div>
+      </div>
+      <div class="card" style="overflow-x:auto" id="rc-board"><div class="quiet">no recipe trials yet</div></div>
+      <div class="card" id="rc-report" style="display:none;white-space:pre-wrap;font-family:var(--mono);font-size:11px;max-height:480px;overflow:auto"></div>
+
       <h2>Trial Registry</h2>
       <div class="note">Every backtest is registered — the deflated Sharpe uses this count. <span id="trial-count"></span></div>
       <div class="card" style="overflow-x:auto" id="trials"><div class="quiet">awaiting data</div></div>
@@ -2086,6 +2105,143 @@ async function renderSleeveAttribution(){
 }
 
 /* ---------- refresh loop ---------- */
+/* ---------- research factory — recipe gauntlet (submit + board) ----------
+   Same background-job contract as analyze/screen: POST /v1/factory/recipes/run
+   starts it (grammar refusals come back verbatim), a 3s poller watches
+   /status, the board lists every registered recipe trial with its verdict.
+   Advisory only — approval stays a separate signed workflow. */
+let rcTimer = null, rcCatalog = null;
+function rcShow(html, color){
+  const el = document.getElementById("rc-status");
+  el.innerHTML = html; el.style.color = color || "var(--dim)";
+}
+async function rcLoadCatalog(){
+  if(rcCatalog) return rcCatalog;
+  const r = await get("/v1/factory/recipes/catalog");
+  if(r.err || !r.data) return null;
+  rcCatalog = r.data;
+  const sel = document.getElementById("rc-feature");
+  sel.innerHTML = rcCatalog.features.map(f=>
+    `<option value="${esc(f.name)}" data-lineage="${esc(f.lineage)}">${esc(f.name)} (lineage: ${esc(f.lineage)}, n=${esc(String(f.lineage_count??"?"))})</option>`).join("");
+  return rcCatalog;
+}
+function rcVerdictPill(row, struck){
+  if(!row.completed) return `<span class="pill gray">registered — no completed result</span>`;
+  if(!row.gate_passed) return `<span class="pill r">FAIL</span>`;
+  /* a main-leg PASS whose completed kill leg FAILED is a STRIKE, not a green
+     pass — the demote-only rule must be visible on the board itself */
+  if(struck) return `<span class="pill am">PASS → STRIKE (kill leg failed)</span>`;
+  return `<span class="pill g">PASS</span>`;
+}
+async function renderRecipeBoard(){
+  await rcLoadCatalog();
+  const r = await get("/v1/factory/recipes");
+  const el = document.getElementById("rc-board");
+  if(r.err) return deg(el, r.err);
+  const rows = r.data || [];
+  if(!rows.length){ el.innerHTML = `<div class="quiet">no recipe trials yet — author the first hypothesis above</div>`; return; }
+  /* recipe-level strike detection: a main leg is struck when ITS kill leg
+     completed and failed while the main passed */
+  const killFail = {};
+  rows.forEach(x=>{ if(x.leg==="kill" && x.completed && x.gate_passed===false) killFail[x.name]=true; });
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">RECIPE</th><th>LEG</th><th>LINEAGE</th><th>VERDICT</th><th style="text-align:right">DSR</th><th style="text-align:right">NULL p</th><th style="text-align:right">n</th><th>REASONS</th><th>WHEN</th><th></th></tr>
+    ${rows.map(x=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px"><b>${esc(x.name)}</b></td>
+      <td style="color:${x.leg==="kill"?"var(--gold)":"var(--dim)"}">${esc(x.leg)}</td>
+      <td style="color:var(--dim)">${esc(x.lineage||"—")}</td>
+      <td>${rcVerdictPill(x, x.leg==="main" && killFail[x.name])}</td>
+      <td style="text-align:right">${x.dsr!=null?(+x.dsr).toFixed(3):"·"}</td>
+      <td style="text-align:right">${x.null_p!=null?(+x.null_p).toFixed(3):"·"}</td>
+      <td style="text-align:right;color:var(--faint)">${esc(String(x.n_trials??"·"))}</td>
+      <td style="white-space:normal;color:var(--faint);max-width:300px">${esc((x.gate_reasons||[]).join(" · "))||"—"}</td>
+      <td style="color:var(--faint)">${esc(ts(x.created_at))}</td>
+      <td>${x.leg==="main"?`<button class="rc-rep" data-name="${esc(x.name)}" style="background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;padding:3px 8px;cursor:pointer">REPORT</button>`:""}</td>
+    </tr>`).join("")}
+  </table>
+  <div class="note" style="margin:10px 0 0">A main-window PASS whose kill leg FAILS is a strike — the recipe does not advance (demote-only rule). Hypotheses are registered verbatim in the trial row; the full spec and rationale are in the report.</div>`;
+  el.querySelectorAll("button.rc-rep").forEach(b=>b.onclick=async()=>{
+    const box = document.getElementById("rc-report");
+    box.style.display = "block";
+    try {
+      const rep = await fetch(`/v1/factory/recipes/${encodeURIComponent(b.dataset.name)}/report`);
+      box.textContent = rep.ok ? await rep.text()
+                               : `report unavailable (HTTP ${rep.status})`;
+    } catch (e) {
+      box.textContent = "report fetch failed — network error";
+    }
+    box.scrollIntoView({behavior:"smooth", block:"nearest"});
+  });
+  good(el);
+}
+async function rcPoll(){
+  const r = await get("/v1/factory/recipes/status");
+  if(r.err || !r.data) return;             /* transient — keep polling */
+  const s = r.data;
+  if(s.phase === "running"){ rcShow(`◌ ${esc(s.detail||"gauntlet running")}`); return; }
+  clearInterval(rcTimer); rcTimer = null;
+  const btn = document.getElementById("rc-btn"); if(btn) btn.disabled = false;
+  if(s.phase === "failed"){ rcShow(`■ ${esc(s.detail||"run failed")}`, "var(--red)"); renderRecipeBoard(); return; }
+  if(s.phase === "done"){
+    const v = (s.result&&s.result.verdict)||"done";
+    const col = v.startsWith("PASS") ? "var(--green)" : v.startsWith("STRIKE") ? "var(--gold)" : "var(--red)";
+    rcShow(`✓ ${esc(v)}`, col); renderRecipeBoard(); return;
+  }
+  /* idle or unknown mid-watch: the API restarted and its in-memory status is
+     gone — say so instead of watching forever; the board is the durable truth */
+  rcShow("■ run status lost (API restarted?) — the registry board below is the durable record", "var(--gold)");
+  renderRecipeBoard();
+}
+document.getElementById("rc-btn").onclick = async()=>{
+  const btn = document.getElementById("rc-btn");
+  btn.disabled = true;                       /* close the double-submit window FIRST */
+  try {
+    const cat = await rcLoadCatalog();
+    if(!cat){ btn.disabled = false; return rcShow("■ catalog unavailable", "var(--red)"); }
+    const sel = document.getElementById("rc-feature");
+    const opt = sel.options[sel.selectedIndex];
+    /* NEVER coerce: an empty or out-of-range top_n is REFUSED here, not
+       silently rewritten into a spec the Principal didn't author */
+    const topRaw = document.getElementById("rc-topn").value.trim();
+    const topN = Number(topRaw);
+    if(!topRaw || !Number.isInteger(topN) || topN < cat.grammar.top_n_min || topN > cat.grammar.top_n_max){
+      btn.disabled = false;
+      return rcShow(`■ top_n must be an integer ${cat.grammar.top_n_min}–${cat.grammar.top_n_max} — nothing submitted, nothing burned`, "var(--red)");
+    }
+    const spec = {
+      name: document.getElementById("rc-name").value.trim(),
+      rank_feature: sel.value, direction: "desc",
+      top_n: topN,
+      rebalance: "monthly", universe: "pit-sp500",
+      cost_bps_per_side: cat.grammar.cost_bps_per_side,
+      lineage: opt ? opt.dataset.lineage : "",
+      rationale: document.getElementById("rc-rationale").value.trim(),
+      kill_start: document.getElementById("rc-kill").value,
+    };
+    const r = await postFull("/v1/factory/recipes/run", {spec});
+    if(r.err){ btn.disabled = false; return rcShow(`■ ${esc(r.err)}`, "var(--red)"); }
+    if(r.status === 400){
+      btn.disabled = false;
+      return rcShow(`■ REFUSED: ${esc((r.data&&r.data.error&&r.data.error.message)||"grammar refusal")}`, "var(--red)");
+    }
+    if(!r.data.started){ btn.disabled = false; return rcShow(`◌ ${esc(r.data.note||"busy")}`, "var(--gold)"); }
+    rcShow("◌ registered — gauntlet running (burns 2 counted trials)…");
+    if(!rcTimer) rcTimer = setInterval(rcPoll, 3000);
+    rcPoll();
+  } catch (e) {
+    btn.disabled = false;
+    rcShow("■ submit failed — network error; nothing confirmed as started", "var(--red)");
+  }
+};
+/* resume the watch after a mid-run console reload */
+(async()=>{
+  const r = await get("/v1/factory/recipes/status");
+  if(r.data && r.data.phase === "running"){
+    document.getElementById("rc-btn").disabled = true;
+    if(!rcTimer) rcTimer = setInterval(rcPoll, 3000); rcPoll();
+  }
+})();
+
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
@@ -2094,7 +2250,7 @@ const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderStrategy, renderTrading,
                    renderResearch, renderScorecard, renderLearning,
                    renderProgress, renderRuns,
-                   renderQuant, renderRisk, renderMarket];
+                   renderQuant, renderRecipeBoard, renderRisk, renderMarket];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")
