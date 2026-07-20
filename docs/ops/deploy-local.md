@@ -17,7 +17,9 @@ sudo apt install -y python3.12 python3.12-venv   # (or 3.13)
 
 # 3. Tailscale — the private path to the console from your Mac and phone.
 #    The API binds to 127.0.0.1 ONLY (it has no auth yet); Tailscale IS the
-#    auth boundary until step-up tokens ship.
+#    auth boundary until step-up tokens ship. (ADR-0018: docker-compose was
+#    fixed to publish the api on 127.0.0.1:8000 — it previously bound
+#    0.0.0.0:8000, exposing the unauthenticated API on all interfaces.)
 curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
 ```
 

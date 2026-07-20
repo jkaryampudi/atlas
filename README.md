@@ -2,9 +2,19 @@
 
 AI investment operating system — hypothetical A$100k, US + India equities, long-only,
 **paper mode**, capital preservation first. Architecture in `docs/architecture/`;
-signed decisions in `docs/adr/` (17 ADRs). Nothing here is investment advice.
+signed decisions in `docs/adr/` (18 ADRs). Nothing here is investment advice.
 
-## Status (2026-07-20): the measuring era — one validated sleeve, satellite-heavy book
+## Status (2026-07-20): the momentum sleeve is in RESEARCH_SHADOW pending re-validation
+
+> **ADR-0018 (2026-07-20):** an independent review returned REJECT STRATEGY
+> EVIDENCE for the executable `xsmom-pit-tr` (deployed price-return signal ≠
+> validated total-return signal; DSR ≈0.85 at the lineage count; not
+> reproducible). The strategy is **downgraded from `paper` to `research_shadow`**:
+> non-authoritative, deploys no capital, never reported as validated, and
+> un-promotable without a fresh signed validation artifact. The 40% sleeve below
+> is now **frozen as shadow exposure** — the fund's honest state is **zero
+> validated deployed strategies** pending re-validation. No strategy math,
+> parameters, or historical numbers changed.
 
 - **Book (ADR-0017, signed 2026-07-20)**: SATELLITE-HEAVY, **no ETFs** by
   Principal directive — momentum sleeve `xsmom-pit-tr` at **40% of NAV**

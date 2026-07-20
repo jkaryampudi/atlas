@@ -6,7 +6,7 @@ and gated behind human arming. Nothing here is investment advice.
 
 ## Read first
 - `docs/architecture/` — 9 design docs. 01 (system), 02 (Agent Constitution), 04 (risk), 05 (DB), 08 (roadmap) matter most.
-- `docs/adr/` — 17 signed decisions. Load-bearing: 0006 (stop derivation), 0007 (universe), 0009 (approval bar = beat SPY total return, absolute), 0010 (first paper approval: xsmom, with demotion bands), **0017 (satellite-heavy book, signed 2026-07-20: ETF core RETIRED — no ETFs, Principal directive; momentum sleeve 40% of NAV at the L1 cap edge; PEAD 0; remainder cash; costs signed in ink: ~−16pp crash exposure, structural cash drag vs SPY, L3 sector shaving)**.
+- `docs/adr/` — 18 signed decisions. Load-bearing: 0006 (stop derivation), 0007 (universe), 0009 (approval bar = beat SPY total return, absolute), 0010 (first paper approval: xsmom, with demotion bands), 0017 (satellite-heavy book, signed 2026-07-20: ETF core RETIRED — no ETFs, Principal directive; momentum sleeve 40% of NAV at the L1 cap edge; PEAD 0; remainder cash; costs signed in ink: ~−16pp crash exposure, structural cash drag vs SPY, L3 sector shaving), **0018 (independent-review verdict, signed 2026-07-20: xsmom-pit-tr DOWNGRADED paper→`research_shadow` — non-authoritative, deploys no capital; the 40% sleeve is frozen as shadow exposure; re-promotion is fail-closed behind a fresh signed validation artifact; docker API bound to 127.0.0.1. No strategy math/params/historical numbers changed)**.
 - `README.md` — phase-by-phase status checklists.
 
 ## Hard invariants — tests enforce these; NEVER violate
@@ -44,13 +44,19 @@ on this Mac (TCC blocks `~/Documents`; exit 127 since install). Deterministic re
   next-session-open fills, build→approve-with-recheck→settle→snapshot, exits + FIFO
   sell settlement, T0–T9 daily cycle with in-process scheduler, reconciliation,
   console as sole control surface on port 8001).
-- **First approved strategy (2026-07-13, ADR-0010)**: `xsmom-pit-tr` at state
-  **'paper'** — 12-1 cross-sectional momentum, monthly; approved on regenerated
-  artifacts (+737.31% vs SPY TR +593.89%, p=0.000, DSR 0.995, WF 4/4). Fully wired
-  (migration 0020): quant.signals generation in the cycle (t6b), signal-first desk
-  lane + SIGNALS evidence block, bridge resolves real signal UUIDs (fail-closed),
-  daily band check (t5b) demotes to latched 'suspended' on DD −40% / 126-session
-  excess −25pp. Caveats + tighten-only bands in the ADR.
+- **First approved strategy (2026-07-13, ADR-0010) — DOWNGRADED 2026-07-20 to
+  `research_shadow` (ADR-0018)**: `xsmom-pit-tr` was approved at state **'paper'**
+  — 12-1 cross-sectional momentum, monthly; approved on regenerated artifacts
+  (+737.31% vs SPY TR +593.89%, p=0.000, DSR 0.995, WF 4/4). The 2026-07-20
+  independent review returned REJECT STRATEGY EVIDENCE (deployed price-return
+  signal ≠ validated total-return signal; DSR ≈0.85 at the lineage count,
+  grandfathered per ADR-0016; not reproducible). It is now **`research_shadow`**:
+  non-authoritative, deploys **no capital** (bridge fail-closed guard), never
+  reported as validated (authoritative=false label), and un-promotable without a
+  fresh signed validation artifact. The wiring stands (migration 0020: quant.signals
+  gen t6b, signal-first desk lane + SIGNALS evidence, bridge real-UUID resolution,
+  band check t5b) but is dormant while shadow. Re-promotion path in ADR-0018;
+  historical numbers unchanged.
 
 ## Task queue (priority order)
 1. ~~**P1 exit — real data**~~ DONE (calendars XNYS/XASX, FX job, backfill CLI; 1y history per ADR-0004, zero red gates under per-instrument coverage rules).
