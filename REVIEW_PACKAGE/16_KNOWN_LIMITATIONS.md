@@ -20,10 +20,43 @@ chain, no-agent-numbers wall, refuse-to-weaken-gates), not investable edge or pr
   signal is in the graveyard or suspended. Single-strategy concentration is the dominant
   portfolio risk and it is now *by design*. Evidence: `atlas/dcp/trading/bridge.py`
   `SLEEVE_BUDGET_FRACTION`, `docs/adr/0017-satellite-heavy-reallocation.md`.
-- 🔴 **The headline +737% is a concentrated top-5 momentum backtest and must never be read as
-  expected return.** It travels with large drawdowns (the strategy's own demotion band is
-  −40%). The defensible evidence is the *gate verdict* (null p=0.000, deflated Sharpe 0.995,
-  walk-forward 4/4 vs SPY total return), not the return magnitude. `docs/adr/0010`.
+- 🔴 **The headline +737.31% (vs SPY TR +593.89%) is a concentrated top-5 momentum backtest and
+  must never be read as expected return.** It travels with large drawdowns (the strategy's own
+  demotion band is −40%). The defensible evidence is the *gate verdict* (null p=0.000, deflated
+  Sharpe 0.999, walk-forward 4/4 vs SPY total return), not the return magnitude. `docs/adr/0010`.
+  **Two precision caveats a quant reviewer must not miss:** (1) the "deflated Sharpe 0.999 ≥ 0.90"
+  is a **probability** (Bailey/López de Prado probabilistic-Sharpe that the true Sharpe > the
+  expected max of n_trials noise strategies), computed under an explicit **normal-returns
+  assumption** in a "simplified" implementation (`atlas/dcp/backtest/validation.py:17-19`) — it
+  is NOT a Sharpe *ratio* of 0.999 (the raw annualized Sharpe stored for this trial is ~0.82).
+  (2) 🔴 **The headline DSR 0.999 is a GRANDFATHERED n_trials=1 value that fails the gate when
+  recomputed at today's family count — and it was never recomputed.** The flagship was **momentum-
+  lineage trial #1**, scored before the family was searched. That count is NOT "its own" isolated
+  count: `xsmom_pit_run.py:147` hardcodes `LINEAGE = "momentum"`, so the flagship shares ONE
+  deflation line with every other momentum recipe, and that line now holds **23 trials**
+  (`00_GROUND_TRUTH.md` §Trial registry). ADR-0016's explicit promise — the deflation "counts the
+  full momentum LINEAGE, so renaming can never reset the penalty" (`xsmom_pit_run.py:145-147`) —
+  exists precisely to stop a strategy being grandfathered at the family's smallest count. The
+  flagship is exactly that: approved at n_trials=1 and never re-scored while its siblings drove the
+  count to 23. This is the CONCERN ADR-0016 names, not a feature — the earlier phrasing ("not
+  penalized for the whole family's search") inverted its intent. Feeding the published raw Sharpe
+  (0.82) and window (2012-07-02→2026-07-10, ~3,580 sessions) back through the exact
+  `deflated_sharpe()` (`validation.py:17-30`) at **n_trials=23 yields ≈0.87 — BELOW the ≥0.90
+  gate** (robust to rounding: clearing 0.90 at n=23 needs a raw Sharpe ≥0.860; the flagship's is
+  0.82). A sibling on the same 12-month lookback, `recipe-mom-12-0-top5`, WAS scored at the live
+  family count and FAILED: **DSR 0.818 at n_trials=22** and **0.658 at n_trials=23**
+  (`docs/reports/recipe-mom-12-0-top5.md:42,109`). So the flagship clears the DSR gate ONLY by
+  virtue of *when* it was approved; at today's momentum-lineage count it does not, and no re-run
+  has been published. (Earlier drafts/CLAUDE.md quoted 0.995; the signed ADR-0010 value 0.999
+  governs the approval record — but see the recompute above.)
+- 🔴 **Validation-vs-production signal fidelity gap: the deployed ranker is NOT bit-for-bit the
+  one that passed the gauntlet.** The live capital-path signal (`atlas/dcp/signals/xsmom/generate.py`
+  `_formation_returns`, ~:218) ranks on **split-adjusted PRICE return** (no dividend reinvestment),
+  while the approved artifact `xsmom-pit-tr` was validated in **total-return mode** where the
+  ranking key itself reinvests dividends (`xsmom_pit_run.py` `--total-return`). For non/low-dividend
+  names price ≈ TR and the winner sets coincide; for dividend-heavy names the two rankings can
+  diverge, so the signal actually trading can differ from the one that cleared approval. Surfaced
+  by the internal audit (`05_SCORING_ENGINE.md`), material for a reviewer, disclosed here.
 - 🔴 **No point-in-time fundamentals → value and quality factor families cannot be built
   honestly, and are NOT built.** EODHD restates fundamentals in place (no filing dates) and
   has no fundamentals for pre-2018 delistings. This is the single biggest research blocker.
@@ -80,6 +113,13 @@ chain, no-agent-numbers wall, refuse-to-weaken-gates), not investable edge or pr
   `target_gross_exposure` Tier-1 scaler that nothing calls; the *wired* `gross_step_gate`
   enforces 1 − L5 (10% cash floor) = **0.90**. So the book can deploy ~90% gross, not 80% —
   a doc-vs-live gap the internal audit caught; do not read the 0.80 property test as the live limit.
+  **Further: that wired 0.90 gross-LEVEL ceiling is not even an independent control — it is the
+  L5 cash floor restated.** The unlevered long-only NAV identity forces `gross_after + cash_after
+  = 1` exactly (`proposals.py:691-692`, `engine.py:319-324`, `snapshot.py:52`), so `gross_after ≤
+  1 − L5` **is** `cash_after ≥ L5`. The only things `gross_step_gate` adds beyond L1–L11 are the
+  **10%/day step cap** and the **DD2/DD3 gross-freeze** — the "vol targeting" gate is a day-step +
+  breaker guard bolted onto a restatement of L5, with no realised-vol measurement anywhere in the
+  order path. (Derivation and the sub-cent-rounding caveat: 07 §8.4.)
 - 🟠 **No explicit beta or factor-exposure targeting.** Factor overlap (§12) checks pairwise
   concentration; it does not target or neutralize market/style beta.
 - 🟠 **Stops are daily-granularity and pre-authorized, not live.** `T4` scans stops once per

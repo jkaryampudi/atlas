@@ -23,7 +23,7 @@
 | Type checking | mypy `strict` on **core + dcp + fxlab only** | `pyproject.toml:38-41` |
 | **api / ops / agents / tools / dashboard mypy** | **NOT strict-gated** | absent from mypy `files` |
 | Performance / load / stress / chaos / failover tests | **NONE** | no locust/benchmark dep; no such tier |
-| CI that runs the suite on push | **YES** — ruff+mypy+pytest+migration on push/PR | `.github/workflows/ci.yml` (postgres:16 service; runs bare `pytest`, so no coverage gate in CI — see §11) |
+| CI **runs** the suite on push (NOT a merge gate) | **RUNS: yes · GATES: no** | `.github/workflows/ci.yml` (postgres:16 service; runs bare `pytest`, so no coverage gate in CI — see §11). **No branch-protection / required-status-check / CODEOWNERS in-tree; solo direct-to-main (`git log --merges` empty) — CI is a post-push signal, not a merge gate; a red commit still lands on `main`.** |
 | Parallel execution | **NO** — serial, ~65s wall | no xdist in deps/config |
 | Test DB isolation | Hard-guarded `atlas_test*`, self-healing bootstrap | `tests/conftest.py:31,60,134` |
 | Suite stability this week | **3 flaky root-causes found + fixed**; 2 hygiene leaks; 1 retry-desync class | commits `5e0f323`, `75a78e9` |
@@ -47,15 +47,21 @@ grep 'def test_'          → 1454 funcs   (unit 754 / integration 625 / constit
 ```
 
 The 61-item gap is `@pytest.mark.parametrize` expansion (12 parametrize decorators across 9
-files). **Note the internal inconsistency in the ground-truth facts file**: it prints the
-headline "~1,515 test functions" but its own per-dir breakdown (754 / 625 / 75) sums to
-**1,454** — those are function *definitions*, not collected *items*. This document uses
-1,515 for "tests run" and 1,454 for "test functions authored". `CLAUDE.md` now reads
-"1515 passing" (`CLAUDE.md:25`) — it was **1354 at an earlier snapshot** and has since been
-updated to 1515 (the count climbed 1354 → 1486 → 1498 → 1515 over the churn described in
-§10). So the prose caught up; the residual drift is that `CLAUDE.md`'s 1515 is the
-*collected-item* count while the ground-truth file's per-dir breakdown still sums to 1,454
-*function definitions* (see the cross-document note below).
+files). **The ground-truth facts file already draws this distinction correctly**
+(`00_GROUND_TRUTH.md:22`, verbatim): "~1,515 tests passing (pytest collection incl.
+parametrized; ~1,454 `def test_` functions) (unit 754 / integration 625 / constitution 75)".
+The per-dir breakdown 754 / 625 / 75 is bound to the **1,454** *function-definition* count —
+not to the 1,515 collected-item count — and it sums correctly (independently verified:
+`grep -r 'def test_' tests` = 1454, split 754 / 625 / 75). There is therefore **no internal
+inconsistency in the GT file to flag**. An earlier draft of this review asserted one by
+misquoting the GT headline as "~1,515 test functions"; that string does not appear anywhere
+in `00_GROUND_TRUTH.md` (grep confirms), so the critique was fabricated/stale and is
+**withdrawn**. This document uses 1,515 for "tests run" and 1,454 for "test functions
+authored". `CLAUDE.md` now reads "1515 passing" (`CLAUDE.md:25`) — it was **1354 at an
+earlier snapshot** and has since been updated to 1515 (the count climbed 1354 → 1486 →
+1498 → 1515 over the churn described in §10). The one residual point worth stating plainly:
+`CLAUDE.md`'s bare "1515" is the *collected-item* count, so anyone citing it as a
+*function* count is wrong by 61 (parametrize expansion) — but the GT file itself is not.
 
 **Directory = test class (a real, enforced split):**
 
@@ -213,8 +219,9 @@ an oracle.
 - The **null-model seed is `seed=7`** everywhere (`candidate_run.py:89`,
   `impl_variant_run.py`, `pead_pit_run.py`, `portfolio_validation.py`), with the monkey-null
   using a seeded `random.Random(seed)` so `(seed, paths)` fully determines the 1,000-path
-  distribution. This is why the "+737% vs SPY, p=0.000, DSR 0.995" artifact is
-  bit-reproducible — a genuine strength for auditability.
+  distribution. This is why the "+737.31% vs SPY TR +593.89%, p=0.000, DSR 0.999" flagship
+  artifact is bit-reproducible — a genuine strength for auditability. (DSR here is a probability
+  ≥ 0.90, not a Sharpe ratio; 0.999 is the signed ADR-0010 value, CLAUDE.md's 0.995 is stale.)
 - `make replay DATE=…` gives a deterministic daily-cycle replay → gate=green, used as a
   smoke check.
 
@@ -400,16 +407,23 @@ partially accidental before this week, and the codebase churned fast enough that
 - **[PLANNED — NOT BUILT] Chaos / failover / resilience tests.** None. There is no test for
   DB-connection loss mid-cycle, vendor (EODHD) outage, partial write, or process kill during
   the single atomic daily transaction. Recovery behaviour is asserted nowhere.
-- **[PARTIAL] CI that runs the suite.** An in-tree workflow DOES exist:
-  `.github/workflows/ci.yml` triggers `on: [push, pull_request]`, provisions a `postgres:16`
-  service (so the integration tier RUNS, not skips), and gates `ruff check atlas tests` →
-  `mypy` → `pytest` → an `alembic upgrade head` migration check as pipeline steps. So lint,
-  strict-typecheck (core+dcp+fxlab), the full pytest suite, and clean migrations ARE enforced
-  in automation on every push/PR — the earlier "no workflow runs pytest" claim was wrong. The
-  one genuine gap: CI runs **bare `pytest`**, not `make cov-risk`, so the risk-engine
-  100%-branch-coverage floor is the single quality gate NOT wired into CI. Separately, whether
-  the most recent runs are actually green is unverifiable from the tree alone (needs `gh` /
-  Actions access).
+- **[PARTIAL] CI *runs* the suite — but does not *gate* merges.** An in-tree workflow DOES
+  exist: `.github/workflows/ci.yml` triggers `on: [push, pull_request]`, provisions a
+  `postgres:16` service (so the integration tier RUNS, not skips), and runs
+  `ruff check atlas tests` → `mypy` → `pytest` → an `alembic upgrade head` migration check as
+  pipeline steps. So lint, strict-typecheck (core+dcp+fxlab), the full pytest suite, and clean
+  migrations ARE **executed and reported** in automation on every push/PR — the earlier "no
+  workflow runs pytest" claim was wrong. **But "runs" is not "enforces."** There is **no
+  branch-protection rule, no required-status-check, and no CODEOWNERS anywhere in-tree** — a
+  `find .github -type f` returns only `workflows/ci.yml`; those merge controls live in GitHub
+  repo *settings*, not the tree, and none is asserted. The history is a **linear, single-author
+  (Jay Karyampudi) direct-to-main flow with zero merge/PR commits** (`git log --merges` is
+  empty). A GitHub Actions run cannot block a `git push` to `main`; absent branch protection it
+  is **post-hoc notification, not a gate** — a failing commit is NOT prevented from landing on
+  `main` (see §12: the count-drift and retry-desync-red stretches both landed there). The
+  further gaps: CI runs **bare `pytest`**, not `make cov-risk`, so the risk-engine
+  100%-branch-coverage floor is a quality gate NOT wired into CI; and whether the most recent
+  runs are actually green is unverifiable from the tree alone (needs `gh` / Actions access).
 - **[GAP] No parallelism.** Serial only (no xdist). ~65s wall today; scales linearly with the
   ~120 Postgres-backed files, so the suite will get slow as integration coverage grows.
 - **[GAP] mypy blind to the ops/api/agents planes** (§7) — the layers that touch the OS,
@@ -439,13 +453,22 @@ partially accidental before this week, and the codebase churned fast enough that
 - **The suite requires a running Postgres to be meaningful.** ~120 files skip without it; a
   "tests passed" claim on a DB-less machine is misleading. There is no marker to make skipped
   DB tests fail the run instead of silently passing.
-- **CI enforcement exists, with one hole.** `.github/workflows/ci.yml` gates
-  ruff + mypy + pytest + migration-apply on push/PR against a `postgres:16` service, so a
-  commit that breaks lint, strict types, the suite, or migrations is caught in automation —
-  these are NOT honor-system `make` targets. The remaining hole is coverage: CI runs bare
-  `pytest`, not `make cov-risk`, so nothing in the pipeline stops a commit that drops the
-  risk-engine branch-coverage floor below 100% (and global coverage is unmeasured everywhere,
-  in CI and out). Green-ness of the latest CI run is separately unverifiable from the tree.
+- **CI *runs* on push/PR — but it is a post-push signal, NOT a merge gate.**
+  `.github/workflows/ci.yml` runs ruff + mypy + pytest + migration-apply on push/PR against a
+  `postgres:16` service, so a commit that breaks lint, strict types, the suite, or migrations is
+  **surfaced** in automation rather than left to a purely honor-system local `make`. But do not
+  mistake "runs" for "enforces": there is **no branch-protection rule, no required-status-check,
+  and no CODEOWNERS anywhere in-tree** (`find .github -type f` → only `workflows/ci.yml`; those
+  controls live in GitHub *settings*, not the repo, and none is asserted), and the history is a
+  **linear, single-author (Jay Karyampudi) direct-to-main flow with zero merge/PR commits**
+  (`git log --merges` empty). A GitHub Actions run cannot block a `git push` to `main`; without
+  branch protection the check is **notification, not prevention** — a red commit can and does
+  land on `main` (the `CLAUDE.md` count-drift and the retry-desync-red stretch below are exactly
+  such commits that landed). So the guardrails are **detective, not preventive**, and the
+  "CI gates merges" assumption is neither stated nor met. Two further holes even as a signal: CI
+  runs bare `pytest`, not `make cov-risk`, so nothing flags a commit that drops the risk-engine
+  branch-coverage floor below 100% (global coverage is unmeasured in CI and out); and green-ness
+  of the latest CI run is unverifiable from the tree.
 - **No performance/resilience tier at all** — acceptable for paper mode, disqualifying for any
   step toward the (unbuilt) live phase.
 - **Count/doc drift (mostly reconciled).** `CLAUDE.md` was 1354 at an earlier snapshot and now
@@ -460,12 +483,17 @@ partially accidental before this week, and the codebase churned fast enough that
 
 ### Cross-document inconsistency noticed
 
-The **test count is reported two ways** across the package: `CLAUDE.md` now says
-"1515 passing" (updated from an earlier stale 1354, so it no longer disagrees with reality),
-while the ground-truth file's headline says "~1,515 test functions" even though its own
-per-directory breakdown (754 + 625 + 75) sums to **1,454** *functions* — and the actual
-**pytest-collected** figure is **1,515** *items* (unit 805 / integration 635 /
-constitution 75). "1,515" is correct **only** as the collected-item count; it is **not** the
-function count. Anyone citing 1,515 as "test functions" is wrong by 61 (parametrize
-expansion). The remaining inconsistency is the ground-truth file labelling a collected-item
-count as a function count, not a stale `CLAUDE.md`.
+The **test count is reported two ways** across the package, and both docs get it right:
+`CLAUDE.md` now says "1515 passing" (updated from an earlier stale 1354, so it no longer
+disagrees with reality), while the ground-truth file reads (`00_GROUND_TRUTH.md:22`,
+verbatim) "~1,515 tests passing (pytest collection incl. parametrized; ~1,454 `def test_`
+functions) (unit 754 / integration 625 / constitution 75)". The GT file **explicitly
+distinguishes** the collected-item count (1,515) from the function-definition count (1,454),
+and its per-directory breakdown 754 / 625 / 75 is attached to the 1,454 figure and sums to
+1,454 — so there is **no internal inconsistency** in it. A prior pass of this review claimed
+the GT headline said "~1,515 test functions" and manufactured a cross-document inconsistency
+on that basis; that quote is **not in the file** (grep of `00_GROUND_TRUTH.md` for "test
+functions" bound to 1,515 returns nothing), so the claim is retracted. The only correct
+caveat that survives: "1,515" is valid **only** as the collected-item count; anyone citing
+the bare number as a *function* count is wrong by 61 (parametrize expansion). Both package
+documents already state the counts correctly.

@@ -461,7 +461,7 @@ the process env — §10) is a bigger day-to-day hazard than provider lock-in.
 
 | Tool | Floor / installed | Role | Notes |
 |---|---|---|---|
-| pytest | `>=8.0` / 9.1.1 | ~1,515 tests, ~65s | Isolated to an `atlas_test` DB (self-healing bootstrap) |
+| pytest | `>=8.0` / 9.1.1 | ~1,515 tests, ~75s (measured **74.6s** this session — see doc 15 §2; the earlier "~65s" note is **stale/superseded**, ±~15% run-to-run) | Isolated to an `atlas_test` DB (self-healing bootstrap) |
 | hypothesis | `>=6.100` / 6.156.6 | Property tests | e.g. "vol-target never > 0.80 gross"; strong on the risk engine |
 | pytest-cov | `>=5.0` / 7.1.0 | Coverage | **Only** gate is `make cov-risk` = 100% branch coverage on `atlas/dcp/risk`; global coverage is **not** measured or enforced |
 | ruff | `>=0.5` / 0.15.21 | Lint | `ruff check atlas tests` in CI |

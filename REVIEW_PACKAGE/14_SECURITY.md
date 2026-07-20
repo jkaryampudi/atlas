@@ -24,7 +24,13 @@ genuine security asset** — but it is **tamper-*evident*, not tamper-*proof***,
 DB-level append-only enforcement is **scaffolding that the running application does not
 actually use**. The entire posture is load-bearing on a single assumption: *one trusted
 person, one trusted machine, one loopback interface*. Break that assumption and there is
-essentially nothing left.
+essentially nothing left — **and the "one loopback interface" leg is already broken by the
+repo's own committed artifacts**: `docker-compose.yml` publishes `db` (5432), `redis` (6379)
+and `api` (8000) to the host's `0.0.0.0`, and the `Dockerfile`/compose `api` command binds
+`--host 0.0.0.0`. Under the documented `docker compose up -d db redis` workflow (CLAUDE.md:29)
+the passwordless Redis and the literal-password Postgres are LAN-reachable, not loopback (§1,
+§4.1, §5). The 0.0.0.0 exposure below is a **shipped default in the container image**, not a
+hypothetical footgun.
 
 ---
 
@@ -40,8 +46,8 @@ flowchart TB
     direction TB
     Browser["Browser → console.html<br/>(no login, no session)"]
     API["FastAPI app :8001<br/>NO authn · NO authz · NO CORS cfg · NO rate limit · NO TLS"]
-    PG[("Postgres @ localhost:5432<br/>user 'atlas' (schema owner)<br/>pw 'atlas_local_only'<br/>no encryption at rest")]
-    Redis[("Redis @ localhost:6379<br/>redis_url default · NO password<br/>DECLARED but UNUSED — no client in app code")]
+    PG[("Postgres :5432 — compose publishes 0.0.0.0:5432<br/>(LAN-reachable, NOT loopback)<br/>user 'atlas' (schema owner)<br/>pw 'atlas_local_only'<br/>no encryption at rest")]
+    Redis[("Redis :6379 — compose publishes 0.0.0.0:6379<br/>(LAN-reachable, NOT loopback)<br/>redis_url default · NO password<br/>DECLARED but UNUSED — no client in app code")]
     ENV[".env (plaintext)<br/>Anthropic key · EODHD key · DB URL"]
     Sched["in-process scheduler<br/>(ATLAS_INPROC_SCHEDULER=1)"]
     Browser -->|HTTP loopback| API
@@ -56,7 +62,23 @@ flowchart TB
   class API,ENV,PG bad;
 ```
 
-**Implication.** The trust boundary is the *host*, not the *user*. Any process, any other
+**The "loopback" boundary is already broken by the repo's own compose file — code-true correction.**
+The `@ localhost` labels above describe how the *app* dials its dependencies (the DSN says
+`@localhost:5432`), **not** what interface those services listen on. The committed
+`docker-compose.yml` publishes `db` (`ports: ["5432:5432"]`), `redis` (`["6379:6379"]`) and
+`api` (`["8000:8000"]`), and Docker binds published ports to the host's **`0.0.0.0`** by default
+— i.e. **every host/LAN interface**, not loopback. CLAUDE.md:29 prescribes the standard local
+workflow as **`docker compose up -d db redis`**, so on the actual Mac the Postgres instance
+(literal password `atlas_local_only`) and the passwordless Redis are reachable from **any device
+on the LAN**, not `127.0.0.1`. The subgraph's "SINGLE TRUSTED HOST = the ENTIRE trust boundary"
+premise is therefore **false as shipped**: two of the three data services already extend past the
+host to the local network. (The Mac *API* process, launched via `make api` →
+`uvicorn … --port 8001` with no `--host`, does still bind uvicorn's loopback default — see §5 —
+but its own container image does not; see below.) Hardening: publish only to loopback, e.g.
+`"127.0.0.1:5432:5432"` / `"127.0.0.1:6379:6379"`.
+
+**Implication.** The trust boundary is the *host*, not the *user* — **and, per the correction
+above, not even fully the host**: the DB and Redis ports are LAN-published. Any process, any other
 person at the keyboard, anything that can open a TCP connection to `127.0.0.1:8001` (SSH
 tunnel, a malicious local dependency, a browser tab exploiting the lack of CORS/origin
 checks on a non-preflighted request) inherits **full operator authority**: approve trades,
@@ -174,13 +196,17 @@ breaker.
   `atlas/agents/shadow_compare.py:299`, `atlas/ops/daily.py:695`). It is **not** modelled
   in `Settings`; the agent runtime reads it out of `os.environ` at call time.
 - **Redis URL** — `redis_url: str = "redis://localhost:6379/0"` (`config.py:9`), a
-  **no-password** connection string, backed by a `redis:7` service on loopback
-  (`docker-compose.yml:11`). But **no application code imports or connects to Redis** — a
-  grep for `import redis`/`from redis` across `atlas/` returns nothing; the only reference
-  is a `docker compose up -d db redis` hint string in `doctor.py:44`. Redis is
-  **declared-but-unused**: a config default and a running container with no live client.
-  Attack value is low *today* (nothing reads or writes it), but it is an unauthenticated
-  service on loopback and a latent surface the moment any code wires it in.
+  **no-password** connection string. The DSN dials `localhost`, but the backing `redis:7`
+  service is **not on loopback**: `docker-compose.yml` publishes it with `ports: ["6379:6379"]`,
+  which Docker binds to the host's **`0.0.0.0`** — i.e. **every LAN interface**. So the
+  passwordless Redis started by the documented `docker compose up -d db redis` workflow
+  (CLAUDE.md:29) is reachable from any device on the local network, not just `127.0.0.1`.
+  **No application code imports or connects to Redis** — a grep for `import redis`/`from redis`
+  across `atlas/` returns nothing; the only reference is a `docker compose up -d db redis` hint
+  string in `doctor.py:44`. Redis is **declared-but-unused**: a config default and a running
+  container with no live client. Attack value is low *today* (nothing reads or writes it), but
+  it is an **unauthenticated, LAN-published** service and a latent surface the moment any code
+  wires it in. Hardening: publish to `"127.0.0.1:6379:6379"`.
 
 ### 4.2 How they are loaded
 
@@ -230,9 +256,23 @@ TLS**. All console↔API traffic is **cleartext HTTP over loopback**. That is ac
 interface or tunnelled, every request (including the `acknowledged_risks` approvals and
 any future step-up token) is on the wire in the clear.
 
-- The app binds via uvicorn defaults; nothing in code pins `host=127.0.0.1`. **ASSUMPTION:**
-  uvicorn's default host keeps it on loopback; there is no code-level guard forcing that,
-  so a stray `--host 0.0.0.0` would silently expose the unauthenticated surface to the LAN.
+- The **Mac** API run (`make api` → `uvicorn atlas.api.main:app --port 8001`, no `--host`,
+  `Makefile:26`) does rely on uvicorn's loopback default; nothing in code pins `host=127.0.0.1`.
+  **ASSUMPTION:** uvicorn's default host keeps *that* process on loopback; there is no
+  code-level guard forcing it.
+- **But 0.0.0.0 exposure is NOT hypothetical — it is a shipped default in the committed
+  container artifacts.** The `Dockerfile` CMD is
+  `["uvicorn","atlas.api.main:app","--host","0.0.0.0","--port","8000"]` (with `EXPOSE 8000`),
+  and the `docker-compose.yml` `api` service runs
+  `uvicorn atlas.api.main:app --host 0.0.0.0 --port 8000` and publishes `ports: ["8000:8000"]`.
+  Anyone who runs the container image or the `api` compose service gets the **unauthenticated
+  API bound to `0.0.0.0` and LAN-published** — no "stray flag" required; it is the default in
+  the repo. Separately (see §1, §4.1), the `db` and `redis` services the documented workflow
+  *does* start (`docker compose up -d db redis`, CLAUDE.md:29) are already published to the
+  host's `0.0.0.0`. The correct framing is therefore: **loopback is not the security control
+  the doc's §0 verdict claims — the repo's own compose/Docker defaults already reach the LAN.**
+  Hardening: set `--host 127.0.0.1` in the Dockerfile/compose command and publish ports only to
+  `127.0.0.1` (e.g. `"127.0.0.1:8000:8000"`).
 - **Outbound** transport is fine: Anthropic and EODHD calls use `httpx` with default
   certificate verification on (`llm.py:61`, `eodhd.py`), i.e. TLS is enforced going out.
 
@@ -439,6 +479,15 @@ The chain proves *that* something changed; it does **not prevent** the change, a
    hash chain making any out-of-band mutation *detectable at the next verify*** — **not**
    by privilege. This gap should be stated in any claim that the audit log is
    "append-only": it is append-only *by convention + detection*, not by enforcement.
+   For completeness, `atlas_audit_writer` is **not** the only least-privilege role in the
+   scaffold: migration 0001 also creates a sibling read role **`atlas_agent_reader`**
+   (`SELECT`-only, `0001_initial.py:116,121-122`), actively maintained with SELECT grants
+   across **~14 migrations** (0001–0004, 0010, 0013–0016, 0019, 0020, 0024, 0025, 0027,
+   0029, 0031, 0033) and deliberately given **no** grants on `risk.*` (Constitution §3.2,
+   `0001_initial.py:123`). It is equally `NOLOGIN` and equally never `SET ROLE`d, so it too
+   is present-but-inert — the two roles are a **fully-granted least-privilege scaffold that
+   nothing at runtime assumes**, not merely one inert audit role. The third role the design
+   promised (`dcp_writer`) was never built (grep: none).
 2. **Not signed, not notarized, not externally anchored.** The chain is plain SHA-256 with
    **no HMAC key, no digital signature, and no external timestamp/anchor** (no RFC-3161
    TSA, no public-ledger anchoring). An attacker with write access who is willing to
@@ -479,11 +528,19 @@ verified nightly*; **not** a defense against a determined insider with DB write 
   (DB dumps / `.env`-adjacent files syncing to a cloud account).
 - **No encryption at rest** on Postgres or on the app directory beyond whatever
   FileVault the host provides (**ASSUMPTION** about the host, not a code control).
-- **CI exists** (`.github/workflows/ci.yml`) — runs `ruff` + `mypy` + `pytest` +
-  `alembic upgrade head` on every `push` and `pull_request`, with a Postgres 16 service.
-  There is **no CD**: no automated deploy, no image build, no signed release, no
-  environment promotion. (See §12 — this *contradicts* the ground-truth memo, which states
-  "No CI/CD pipeline that runs the suite on push.")
+- **CI *runs* but does not *gate* — no merge control on `main`.**
+  `.github/workflows/ci.yml` runs `ruff` + `mypy` + `pytest` + `alembic upgrade head` on every
+  `push` and `pull_request`, with a Postgres 16 service. There is **no CD**: no automated deploy,
+  no image build, no signed release, no environment promotion. (See §12 — this *contradicts* the
+  ground-truth memo, which states "No CI/CD pipeline that runs the suite on push.") Security-
+  relevant caveat: the workflow **runs and reports, it does not enforce**. There is **no
+  branch-protection rule, no required-status-check, and no CODEOWNERS anywhere in-tree** (`find
+  .github -type f` → only `workflows/ci.yml`; those controls live in GitHub repo *settings*, not
+  the tree, and none is asserted), and the history is a **linear, single-author direct-to-main
+  flow with zero merge/PR commits** (`git log --merges` empty). A GitHub Actions run cannot block
+  a `git push` to `main`, so CI is a **post-push signal, not a gate** — a red (or, in a
+  compromised-contributor scenario, a malicious) commit lands on `main` uncontested, and CI would
+  only surface it after the fact.
 - **Alerting is optional and often off.** The only alert channel is an ntfy webhook
   (`ATLAS_ALERT_URL`), which degrades to stderr when unset (**OPERATIONAL FACT**). A
   security-relevant failure (audit-chain break, reconciliation break) may surface only on a
@@ -547,7 +604,12 @@ review did not execute.)
   breaker clearance, is open to anyone on the port.
 - **No authorization / no step-up** (§3) — `step_up_token`/scope explicitly *deferred*
   (`trading.py:14`); `acknowledged_risks` is self-attested, not authenticated.
-- **No TLS** (§5) — cleartext HTTP; nothing in code pins the bind to loopback.
+- **No TLS** (§5) — cleartext HTTP; nothing in code pins the bind to loopback. Worse, the
+  committed `Dockerfile`/`docker-compose.yml` **already** bind the API to `--host 0.0.0.0` and
+  publish `db`/`redis`/`api` (5432/6379/8000) to the host's `0.0.0.0`, so the documented
+  `docker compose up -d db redis` workflow makes the passwordless Redis and literal-password
+  Postgres LAN-reachable today (§1, §4.1, §5) — the loopback assumption is not the control the
+  §0 verdict treats it as.
 - **Plaintext secrets, literal DB password in a public repo, no secrets manager, no at-rest
   encryption, no rotation** (§4, §6.1).
 - **Audit append-only is not enforced at runtime** (§8.1) — role scaffolding exists but the

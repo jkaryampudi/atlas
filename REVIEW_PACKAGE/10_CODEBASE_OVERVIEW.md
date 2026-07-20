@@ -499,11 +499,16 @@ register.
   **`atlas/agents`, `atlas/api`, `atlas/ops`, `atlas/tools` are NOT strict-typed.**
 - **Coverage is enforced at 100% branch on `dcp/risk` ONLY** (`make cov-risk`). Global
   coverage is **not measured or gated**.
-- **CI exists and runs the suite** — `.github/workflows/ci.yml` runs `ruff`, `mypy`,
-  `pytest`, and a migration apply-from-zero check on every push/PR against a Postgres
-  service. (This **contradicts the ground-truth line** "No CI/CD pipeline that runs the suite
-  on push" — see §7. Whether the runs are actually *green* is not verifiable from the repo
-  alone, but the pipeline definitely executes the suite.)
+- **CI *runs* the suite — but does not *gate* merges.** `.github/workflows/ci.yml` runs
+  `ruff`, `mypy`, `pytest`, and a migration apply-from-zero check on every push/PR against a
+  Postgres service. (This **contradicts the ground-truth line** "No CI/CD pipeline that runs the
+  suite on push" — see §7. Whether the runs are actually *green* is not verifiable from the repo
+  alone, but the pipeline definitely executes the suite.) **It runs; it does not enforce:** there
+  is **no branch-protection, no required-status-check, and no CODEOWNERS in-tree** (`find .github
+  -type f` → only `workflows/ci.yml`; those controls live in GitHub settings, none asserted), and
+  the history is **linear single-author direct-to-main with zero merge commits** (`git log
+  --merges` empty). Actions cannot block a `git push` to `main`, so CI here is a **post-push
+  signal, not a merge gate** — a red commit still lands on `main`.
 - **No performance/load/stress test tier.** Migration-cycle tests can exhaust Postgres's
   1600-column budget, so the test DB self-heals by rebuild on upgrade failure — a workaround,
   not a fix.

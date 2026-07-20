@@ -120,17 +120,18 @@ that is declared but not used by any application code (see `10_CODEBASE_OVERVIEW
 
 ```mermaid
 graph LR
+  subgraph DET["DETERMINISTIC PLANE — atlas/dcp (produces NUMBERS)"]
+    SC[Scanner<br/>dcp/scanner/v1.py<br/>deterministic, NOT an LLM]
+    SGE[signals + backtest gauntlet] --> BR[bridge<br/>memo→sized proposal]
+    BR --> RK[risk engine L1–L11]
+    RK --> LC[lifecycle → approval → PaperBroker fill]
+  end
   subgraph REASON["REASONING PLANE — atlas/agents (produces MEMOS only)"]
-    SC[Scanner] --> SP[Specialists<br/>quality/growth/macro]
-    SP --> DB[Bull/Bear Debate]
-    DB --> CIO[CIO / committee_memo]
+    DB[Bull/Bear Debate] --> SP[Specialists<br/>quality/growth/macro<br/>signal-lane names only]
+    SP --> CIO[CIO / committee_memo]
   end
   WALL{{"TWO-PLANE WALL<br/>+ no-agent-numbers<br/>+ grounding cage"}}
-  subgraph DET["DETERMINISTIC PLANE — atlas/dcp (produces NUMBERS)"]
-    BR[bridge<br/>memo→sized proposal] --> RK[risk engine L1–L11]
-    RK --> LC[lifecycle → approval → PaperBroker fill]
-    SGE[signals + backtest gauntlet] --> BR
-  end
+  SC -.->|attention shortlist:<br/>routes where the desk LOOKS,<br/>never sizing/pricing| DB
   CIO -->|recommendation + evidence refs| WALL
   WALL --> BR
   HUM([HUMAN: approves every trade]) --> LC
@@ -138,6 +139,13 @@ graph LR
   DET --> AUD
   REASON --> AUD
 ```
+*Two corrections vs. earlier drafts of this figure, both now reconciled to the code and to `02 §5.1`:
+(1) the **Scanner is a deterministic DCP module** (`atlas/dcp/scanner/v1.py:15` "deterministic compute
+plane"; it is **not** the dormant LLM `scanner_shortlist` role — see `09`), so it sits in the
+DETERMINISTIC plane and merely feeds the desk's attention, and (2) the built desk order is
+**debate → specialists → CIO** (`atlas/agents/desk.py:122,141` — debate first, specialists "AFTER the
+debate, BEFORE the CIO," signal-lane only), **not** specialists-then-debate. The reasoning plane is
+therefore **~3 LLM roles**, not six.*
 
 ## G. Cross-references
 - Full weakness inventory: `16_KNOWN_LIMITATIONS.md`

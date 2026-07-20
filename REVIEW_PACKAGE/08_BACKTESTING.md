@@ -426,8 +426,11 @@ population stdev, `× √252`, with no excess-return adjustment (`engine.py:107-
 `portfolio.py:250-253`). Over the 2012→ window's nonzero cash rates, an `rf = 0` Sharpe
 modestly **inflates** both the Sharpe and the DSR it feeds — the same direction as the
 missing skew/kurtosis term, so the two effects compound. The committee should read
-"deflated Sharpe 0.995" as "an expected-max-of-N penalty under a normal-returns, rf=0
-assumption," not as the canonical DSR.
+"deflated Sharpe 0.999" as "an expected-max-of-N penalty under a normal-returns, rf=0
+assumption," not as the canonical DSR. (This is a **probability in [0,1]**, not a Sharpe
+*ratio* — the raw annualized Sharpe stored for this trial is ~0.82. The signed ADR-0010
+value is **0.999** per `docs/reports/xsmom-pit-total-return-2026-07.md:65,204`; earlier
+drafts and `CLAUDE.md` quote a stale **0.995** — the report value governs.)
 
 The **trial count is the load-bearing input**, and it is lineage-scoped (ADR-0016):
 `lineage_count(session, "momentum")` counts every trial across every family name the
@@ -437,6 +440,25 @@ computed with **exactly** the current lineage count and refuses a gate deflated 
 count (`approval.py:64-67`) — stricter going forward, never retroactive. Legacy NULL-lineage
 rows are counted nowhere and that gap is documented, not hidden (`registry.py:63-70`,
 migration 0032).
+
+> **The lineage-count penalty did NOT bind on the flagship — read this before crediting the
+> approved strategy with multiple-testing robustness.** `n_trials` is computed *after* the
+> trial registers, as `lineage_count(session, LINEAGE)` at approval time
+> (`xsmom_pit_run.py:697-703`, `LINEAGE='momentum'` at `:148`). Because `approve_xsmom_paper`
+> runs on a seed-pinned deterministic DB that held **only that one momentum-lineage trial**,
+> the approved `xsmom-pit-tr` — and the deployed `xsmom-impl500-tr` — were both scored at
+> **`n_trials=1`** (`xsmom-pit-total-return-2026-07.md:65`; `sp500-impl-variant-2026-07.md:65`).
+> So the flagship absorbed a
+> **one-trial** expected-max penalty, not the 23-trial momentum-lineage penalty (`04:64`,
+> `momentum 23`) nor the 51-trial cross-family one. The "51-trial / lineage-count" defense
+> described above is **the design of the gate going forward; it never bound on the approved
+> artifact.** Two consequences a committee must not miss: (1) had the flagship been deflated
+> at the true momentum-lineage count its DSR would be materially lower (Doc 16:32; `04:207`);
+> (2) the very n-consistency re-check praised here — `gate.n_trials != lineage_count`
+> (`approval.py:64-67`) — **would now reject the flagship's own stored gate**, since its
+> `n_trials=1` no longer equals the current momentum `lineage_count` (~23). "Never
+> retroactive" is what saves the standing approval; it is not a claim that the flagship
+> passed the lineage-count bar. Doc 08 alone previously implied it did — it did not.
 
 ### 6.3 Beat SPY buy-and-hold total return — `[IMPLEMENTED]`, absolute (ADR-0009)
 
@@ -480,11 +502,20 @@ failure (`approval.py:70-71`) — for k=4, **3 of 4**. The approved `xsmom-pit-t
 > (`portfolio_validation.py:26-30`): for an unfitted strategy the walk-forward folds are
 > **sub-period robustness checks, not out-of-sample parameter validation**. Purged
 > walk-forward is designed to catch leakage from *fitting*; with nothing fit, it only tells
-> you the effect showed up in each of 4 sub-periods. **The real defense against
+> you the effect showed up in each of 4 sub-periods. The gate's **designed** defense against
 > selection/meta-overfitting across the 51 registered trials is the deflated Sharpe at
-> lineage count**, not the walk-forward. A hostile reviewer should weight the DSR and the
-> monkey null far above the 4/4, and should note that 4 folds over one ~14-year window is a
-> thin robustness sample.
+> lineage count, not the walk-forward — **but that defense did not bind on this approval:**
+> `xsmom-pit-tr` (and the deployed `impl500-tr`) were scored at **`n_trials=1`**
+> (`xsmom-pit-total-return-2026-07.md:65`, `sp500-impl-variant-2026-07.md:65`; see §6.2), so
+> their DSR carried a one-trial
+> penalty, not the 23-trial momentum-lineage or 51-trial cross-family one. Weighting "the DSR
+> and the monkey null far above the 4/4" therefore leans on a DSR that was **not** lineage-
+> count-deflated on the flagship; the lineage-count penalty binds only future runs, and the
+> flagship's own gate would no longer clear the n-consistency re-check (`approval.py:64-67`).
+> A hostile reviewer should note that both the 4/4 walk-forward **and** the headline DSR are
+> thinner robustness evidence than the framing suggests — 4 folds over one ~14-year window,
+> and a single-trial deflation — and that the monkey null (p=0.000) is the one input here that
+> did not depend on the trial count.
 
 ### 6.5 The honor-system fifth input — `[IMPLEMENTED]`, but unverifiable
 
@@ -507,7 +538,7 @@ prove. A peeked-at holdout would still clear all four mechanical gates.
 |---|---|---|---|---|
 | `momentum-v1` (SPY, AVGO) | single-instrument | ~1yr real (EODHD) | **FAIL**, and flagged **not decision-grade** (ADR-0004 short window) | `real_run.py`, `docs/reports/first-real-backtest-momentum-v1.md` |
 | `xsmom-pit` price-return | PIT sibling | 2012→ PIT S&P 500 | PASS on price-return — then **suspended**: violated ADR-0009's TR benchmark | `xsmom_pit_run.py:48-62` |
-| **`xsmom-pit-tr`** total-return | PIT sibling | 2012→ TR panel | **PASS** — +737% vs SPY TR +594%, null p=0.000, DSR 0.995, WF 4/4 → state `paper` (ADR-0010) | `xsmom_pit_run.py`, ground truth |
+| **`xsmom-pit-tr`** total-return | PIT sibling | 2012→ TR panel | **PASS** — +737% vs SPY TR +594%, null p=0.000, DSR 0.999, WF 4/4 → state `paper` (ADR-0010) | `xsmom_pit_run.py`, ground truth |
 | `xsmom-pit-tr-2016` | PIT sibling | 2016→ (pre-committed kill leg) | demote-only trial, can never validate | `xsmom_pit_run.py:151-168` |
 | `xsmom-impl500-tr` (top-5, no liquidity screen) | impl variant | TR panel | **PASS** — +2235% vs SPY TR +594%, null p=0.000, max DD −42.74% (ADR-0016). **This is the construction the live sleeve actually trades** — see the caveat below | `impl_variant_run.py`, ADR-0016 |
 | `pead-sue-tr` implementable top-5 | PEAD PIT | TR panel | **FAIL** the null (p=0.132) → sleeve budget 0 (ADR-0015) | `pead_pit_run.py`, ground truth |
@@ -525,6 +556,21 @@ prove. A peeked-at holdout would still clear all four mechanical gates.
 > and null; but a reviewer citing "+737%" as the live sleeve's evidence is citing the wrong
 > trial. The deployed top-5 form is more concentrated, higher-variance, and carries its own
 > (also passing, but distinct) evidence file.
+
+> **The deployed form's own kill test FAILS the DSR gate at its true lineage count — the
+> single most material quant caveat on the book, and it is a documented run, not a
+> hypothetical.** The "PASS" for `xsmom-impl500-tr` above holds **only under the n_trials=1
+> per-family convention in force when it ran**. ADR-0016 states verbatim (§"The counting
+> defect this ADR also resolves", lines 30–32): recomputed at the **momentum LINEAGE count
+> (15 prior related trials)** this validation's kill leg scores **DSR ≈ 0.85 < 0.90 and
+> "would not clear the bar."** It was accepted under the old convention and **grandfathered
+> — "no retroactive re-judgment of past verdicts"** — while the code (`impl_variant_run.py:120-121,640,647`:
+> `deflated_sharpe(..., lineage_count(session, "momentum"))`) now deflates every FUTURE run
+> at the lineage count, so a byte-identical re-run of the *deployed* form **today would FAIL
+> this gate**. The book therefore trades a construction whose multiple-testing-honest
+> deflated Sharpe is **below the approval bar**; it is live purely on a counting convention
+> the same ADR abandoned in the same breath. The string "0.85" appears nowhere else in this
+> package — a committee must not miss it.
 
 **Reproducibility.** Every run: seeded RNG (`seed=7` throughout), `FrozenClock` derived
 from the last stored bar rather than the wall clock (`real_run.py:258-265`), a
@@ -573,7 +619,7 @@ hash-chained `quant.backtest.completed` audit event with the verbatim gate reaso
 | PIT membership is genuinely point-in-time | **ASSUMPTION** (on EODHD) | depends on vendor `HistoricalTickerComponents` dating; undated rows fail-closed |
 | 10 bps/side reflects real trading cost | **ASSUMPTION**, optimistic | no spread/impact/ADV; understated for concentrated/illiquid trades |
 | Next-open fill at the raw open is achievable | **ASSUMPTION**, optimistic | PaperBroker fills at next-session open at the open price — no slippage vs the print |
-| "Deflated Sharpe 0.995" is a rigorous DSR | **PARTIALLY TRUE** | simplified; omits skew/kurtosis; normal-returns assumption |
+| "Deflated Sharpe 0.999" is a rigorous DSR | **PARTIALLY TRUE** | simplified; omits skew/kurtosis; normal-returns assumption; it is a probability in [0,1], not a Sharpe ratio (raw Sharpe ~0.82). Value is **0.999** per the approval report; a stale **0.995** persists in `CLAUDE.md` |
 | Walk-forward 4/4 proves out-of-sample robustness | **PARTIALLY TRUE** | unfitted recipe → sub-period robustness only; DSR is the real overfitting defense |
 | +737% is the headline result | **VERIFIED number, MISLEADING alone** | concentrated top-decile; large drawdown (own demotion band −40%); DSR/null/WF are the evidence, not the magnitude |
 | +737% is the *deployed* sleeve's evidence | **FALSE** — wrong trial | +737% is the winner-**decile** (`xsmom-pit-tr`); the live sleeve trades **top-5** (`xsmom-impl500-tr`, +2235%, DD −42.74%, ADR-0016/0017) — a separate, more-concentrated trial |

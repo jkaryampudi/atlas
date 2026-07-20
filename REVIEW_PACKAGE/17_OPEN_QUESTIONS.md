@@ -30,7 +30,10 @@
    graded verdicts (~Aug–Oct 2026) beating a dartboard. If not, they are honest scaffolding to retire.
 
 6. **Is the null-model + deflated-Sharpe + walk-forward gauntlet strict enough — or too strict?**
-   Stance: it has killed 8 of 9 tested lineages. Resolve: an overfit-canary confirms it rejects
+   Stance: of the 9 registered lineages only one (momentum) reached live capital; **six are
+   graveyard FAILs**, one (PEAD) is suspended-at-0%, and one (the momentum+PEAD combined variant)
+   passed but deploys no standalone capital — so the honest count is 6 killed of 9, not "8 of 9."
+   Resolve: an overfit-canary confirms it rejects
    junk (it does); but is the DSR ≥ 0.9 bar and the 1000-path monkey null the right calibration
    for an absolute-return mandate? Worth an external quant's eyes.
 
@@ -111,5 +114,6 @@
    secondary if the one strategy doesn't hold.
 2. **Is the operational posture (no independent backups/restore, single machine, no auth)
    acceptable for the fund's current stage?** (Q14–16)
-3. **Is the gauntlet's rejection of 8/9 lineages evidence of rigor, or of a bar so high nothing
-   will ever pass — including things that should?** (Q6)
+3. **Is the gauntlet's rejection record — six of nine registered lineages in the graveyard (one
+   live, one suspended-at-0%, one passed-but-undeployed) — evidence of rigor, or of a bar so high
+   nothing will ever pass, including things that should?** (Q6)

@@ -18,9 +18,16 @@ Four commitments, enforced in code, not prose:
 1. **Capital preservation first.** Absolute benchmark: a strategy must beat SPY *total return*
    after costs to be approved (ADR-0009) — outperforming a falling market is not enough.
 2. **Nothing trades without surviving a gauntlet.** Null-model (1000-path monkey), deflated
-   Sharpe at a lineage-scoped trial count, purged walk-forward, on a point-in-time,
-   delisting-inclusive S&P 500 panel. Gates are never weakened to pass a strategy — 8 of 9
-   tested lineages are in the graveyard. See `04_FACTOR_LIBRARY.md`, `08_BACKTESTING.md`.
+   Sharpe at a lineage-scoped trial count (a *probability* ≥ 0.90 under a normal-returns
+   assumption — not a Sharpe ratio), purged walk-forward, on a point-in-time,
+   delisting-inclusive S&P 500 panel. Gates are never weakened to pass a strategy — of the 9
+   registered lineages, exactly one (momentum) cleared the bar to live capital and **six are
+   graveyard FAILs** (breakout, trend, meanrev, FX, quality, low-vol); the other two are PEAD
+   (suspended-at-0%, a forward experiment) and the momentum+PEAD combined variant (passed its
+   gate but deploys no standalone capital) — so the true graveyard count is **6 of 9**, *not*
+   "8 of 9" (the old phrasing lumped the suspended and passed-but-undeployed lineages into the
+   graveyard; see 00's three-bucket taxonomy). See `00_GROUND_TRUTH.md`, `04_FACTOR_LIBRARY.md`,
+   `08_BACKTESTING.md`.
 3. **The machine proposes; the human disposes.** Every trade requires human approval; no LLM
    output ever becomes a sizing/pricing number (the "no-agent-numbers" wall). See `09_AI_AGENT_DESIGN.md`.
 4. **Honest failures are deliverables.** Verdicts are recorded verbatim in an append-only audit
@@ -32,7 +39,7 @@ Four commitments, enforced in code, not prose:
 | Age | ~10 days of git history (137 commits, 2026-07-11→20); built by one Principal + an AI pair-builder. |
 | Trading | **Paper only.** Live trading (Phase 7) is designed but **entirely unbuilt** — no broker integration. |
 | Validated strategies | **Exactly one** (`xsmom-pit-tr`, 12-1 momentum, state 'paper'). Everything else is graveyard, suspended, or experimental. |
-| Book state | **Was 100% cash** at review time (core proposals expired unapproved); first fills (AMD, INTC) settle in the next cycle. |
+| Book state | **Was 100% cash** at review time (core proposals expired unapproved). AMD/INTC were approved **Sat 2026-07-18**; per the paper-fill rule the earliest they *can* fill is the **Mon 2026-07-20** open, executed by the 07-20 evening cycle — **not** routine overnight settlement, and conditional on that cycle firing. The operating loop is fragile (dead launchd; disarms on a bare API restart; documented missed/late/skipped fires 07-15/16/17), so "pending" may mean "the loop that would produce them has not reliably run" — see `16`. |
 | Deployment | **One machine** (the Principal's MacBook), one process, Docker Postgres. **Zero backups taken to date** (first ever scheduled the night of the review). |
 | Data | **One vendor** (EODHD, $99/mo). No point-in-time fundamentals → value/quality unbuildable. |
 | Testing | ~1,515 tests, CI on push; but coverage measured only on the risk engine. |
@@ -43,8 +50,11 @@ production fund. Do not evaluate it as the latter.
 ## Current capabilities (what is genuinely [IMPLEMENTED])
 - A **point-in-time backtest gauntlet** (delisting-aware engine, monthly rebalance, next-open
   fills, flat 10 bps/side costs, null-model + deflated-Sharpe + purged walk-forward). `08`.
-- A **six-role LLM research desk** (scanner → specialists → bull/bear debate → CIO memo) with a
-  **grounding cage** (every quoted number must appear in cited evidence) and a **budget breaker**. `09`.
+- A **deterministic scanner** (`atlas/dcp/scanner/v1.py`, *not* an LLM) feeding a **~3-LLM-role
+  research desk** (bull/bear debate → specialists → CIO memo) with a **grounding cage** (every quoted
+  number must appear in cited evidence) and a **budget breaker**. `09`. (The scanner is DCP, not an
+  agent role; the order is debate-then-specialists per `desk.py`; "six-role LLM desk" was wrong on
+  both counts and contradicted `02`'s "~3 LLM roles + deterministic scanner.")
 - A **deterministic memo→proposal bridge** (ADR-0006): sizes, derives stops, risk-checks — the
   only path from reasoning to a trade. `05`, `06`.
 - An **11-limit risk engine** (L1–L11) + latched drawdown breakers + a property-tested vol-target,
@@ -58,7 +68,7 @@ production fund. Do not evaluate it as the latter.
   investing.com edge trial — none reach capital. `05`.
 - A **single-file web console** as the sole control surface; a read/trigger **FastAPI**. `02`, `14`.
 
-## Major limitations (the five that matter most — full list in `16`)
+## Major limitations (the six that matter most — full list in `16`)
 1. **One validated strategy carries the entire (40%-of-NAV) invested book** — extreme
    concentration, now by design (ADR-0017). No fallback sleeve: demotion → 100% cash.
 2. **No point-in-time fundamentals** → value/quality factors cannot be built honestly and are not.
@@ -68,6 +78,10 @@ production fund. Do not evaluate it as the latter.
    posture that no code enforces.
 5. **Paper-only realism gaps**: fills at next-open at the open price; flat 10 bps costs; no
    slippage/impact/spread; daily-granularity stops. Real-world costs and fills untested.
+6. **Signal-fidelity + benchmark-integrity gaps** (surfaced by the internal audit, full detail in
+   `16`): the live ranker uses split-adjusted *price* return while approval used *total*-return
+   formation (deployed signal ≠ validated signal for dividend payers); and dividend ingest is
+   manual-only, so the SPY-total-return approval bar silently decays between hand-runs.
 
 ## Major risks (ranked)
 1. **Strategy risk** — the momentum edge may not survive out-of-sample or a regime change; the

@@ -533,6 +533,16 @@ the live deployment ceiling. This matters for the concentration/capacity questio
 90% gross headroom (not 80%) is what a stacked discretionary book (§3.5) could fill.
 `[HONESTY FLAG — earlier drafts conflated the two constants]`.
 
+**And do not over-credit the VOL gross ceiling as a second control.** Its gross-LEVEL arm is
+**algebraically the L5 cash floor restated**, not an independent overlay. In the unlevered,
+long-only pro-forma book the NAV identity forces `gross_after + cash_after = 1` exactly
+(pending-buy cost and this proposal's cost cancel between the two numerators —
+`proposals.py:389-390,449-451,691-692`; `engine.py:319-324`; `snapshot.py:52`), so
+`gross_after ≤ 1 − L5` **is** `cash_after ≥ L5`, boundary included. The only exposure
+protections `gross_step_gate` adds beyond L1–L11 are the **10%/day step cap** (`MAX_STEP`) and the
+**DD2/DD3 gross-freeze**; the "90% ceiling" itself is L5. (Exact up to sub-cent per-holding
+rounding, ~1e-7 of NAV — see 07 §8.4 for the derivation.)
+
 ---
 
 ## 9. Diversification math today (the concentration picture)

@@ -187,10 +187,11 @@ Full window 2012‑07‑02 → 2026‑07‑10, total return:
    travels with large drawdown. **The DSR / null / walk-forward are the evidence — not the +737%.**
 2. **Endpoint fragility (decile form).** The decile beat SPY at only **8 of 25** month-end
    endpoints, all in the final months — at 2026‑03‑31 it was still trailing SPY. A robust edge
-   should not need a particular month to end on. (The top‑5 implementable form is markedly less
-   fragile — it **beats SPY at 25/25** endpoints and passes the *full gate* at **21/25** — see
-   below, but the *validated object* is the decile. Note these are two different metrics: the
-   decile's 8/25 is beat-SPY, the top‑5's 21/25 is full-PASS; its own beat-SPY count is 25/25.)
+   should not need a particular month to end on. (The **deployed** top‑5 form — `xsmom-impl500-tr`,
+   top‑5 of the full PIT S&P 500 — is markedly less fragile: it **beats SPY at 25/25** endpoints AND
+   passes the *full gate* at **25/25** — see below, but the *validated object* is the decile. The
+   superseded S&P‑100 approximation `xsmom-impl-tr` passed the full gate at only 21/25; do not carry
+   that stale count forward. Note the decile's 8/25 is a beat-SPY count, not a full-PASS count.)
 3. **Early-window membership undercount.** 2012‑2015 rides a biased S&P 500 membership undercount
    that flatters the head start; the kill test (2016 start) is the honest read. It still passed,
    which is the real defense.
@@ -205,16 +206,42 @@ Full window 2012‑07‑02 → 2026‑07‑10, total return:
    *hypothetical* factory re-run of the identical math would face. **This is the most material
    methodological tension in the library** and a hostile committee will press it: had the approved
    strategy been counted at the full momentum-lineage trial count, its deflated Sharpe would be
-   lower (the `mom-6-1` full window at n=18 was 0.921, barely above the 0.90 bar). It still likely
-   clears — and this higher-count penalty is hypothetical, not a run that exists — but the
-   asymmetry is real.
+   lower (the `mom-6-1` full window at n=18 was 0.921, barely above the 0.90 bar).
+   **Correction — the lineage-count penalty is NOT hypothetical for the form the book
+   actually trades; it is a documented FAIL.** An earlier draft of this point claimed the
+   higher-count penalty was "hypothetical, not a run that exists." That is false. ADR‑0016
+   (§"The counting defect this ADR also resolves", lines 30–32) performed exactly this
+   recomputation on the **deployed** live form `xsmom-impl500-tr`: at the **momentum LINEAGE
+   count (15 prior related trials)** its kill leg scores **DSR ≈ 0.85 < 0.90** and, verbatim,
+   "would not clear the bar." It is live only because it was scored at n_trials=1 under the
+   family convention in force when it ran and was **grandfathered ("no retroactive
+   re-judgment of past verdicts")** — the same ADR that switched all FUTURE runs to lineage
+   counting. What genuinely does *not* exist is a separate re-gauntlet of the 12‑1 **decile
+   flagship** math at high lineage count (no `recipe-mom-12-1` report); but the deployed
+   **top‑5** form's lineage-count kill is a run that exists and fails, so the honest read is
+   that the deployed sleeve's multiple-testing-honest deflated Sharpe sits **below the 0.90
+   bar** — not "still likely clears." The asymmetry is not merely real; for the traded
+   construction it is disqualifying under the gate now in force.
 
-**Implementable top‑5 form** (`xsmom-impl-tr`, `docs/reports/implementable-variant-2026-07.md`):
-+2201.86% vs SPY +593.76%, p=0.000, DSR 0.999, **25/25 endpoints beat SPY, 21/25 full PASS**,
-2016 kill PASS. This is the form the book actually trades and it validated cleanly — but on an
-**S&P 100 *approximation*** (top-100 by trailing dollar volume, because a true PIT S&P 100 does
-not exist at the vendor; current-list overlap 68/101), and the ADR‑0006 stop overlay / staggered
-entries / sub-account frictions were **NOT modeled** (report §caveats).
+**Implementable top‑5 form — CURRENT live-form evidence** (`xsmom-impl500-tr`,
+`docs/reports/sp500-impl-variant-2026-07.md`): +2235.12% vs SPY TR +593.76%, p=0.000, DSR 0.999,
+**25/25 endpoints beat SPY AND 25/25 full PASS**, max DD **−42.74%**, 2016 kill PASS (+991.82% vs
++364.89%, p=0.001, 24/25 beat, DSR 0.995). Post‑ADR‑0016 (2026‑07‑18) the live universe is the
+**full ~511‑name S&P 500 with NO liquidity screen**, and the live ranker trades
+top‑`SLEEVE_MAX_NAMES` (=5) by rank off that active set with no ADV filter
+(`xsmom/generate.py:324‑343` — `WHERE … i.is_active … AND s.rank <= :maxn`). ADR‑0016 calls this
+run "exactly the post‑expansion live form" verbatim, so `xsmom-impl500-tr` — **not** the S&P‑100
+approximation below — is the construction the book actually trades. The ADR‑0006 stop overlay /
+staggered entries / sub-account frictions are still **NOT modeled** (report §caveats).
+
+**Superseded pre‑expansion approximation — do NOT cite as the deployed book** (`xsmom-impl-tr`,
+`docs/reports/implementable-variant-2026-07.md`): +2201.86% vs SPY +593.76%, p=0.000, DSR 0.999,
+**25/25 beat SPY, only 21/25 full PASS**, max DD **−51.97%** (deeper). This validated cleanly but
+on an **S&P 100 *approximation*** (top-100 by trailing dollar volume, because a true PIT S&P 100
+does not exist at the vendor; current-list overlap 68/101) — the live form *before* ADR‑0016
+expanded the universe. The wider full‑500 tail *diversifies* the extreme drawdown (−42.74% vs
+−51.97%). Its −52% drawdown and 21/25 count are the **wrong evidence** for the deployed sleeve;
+use `xsmom-impl500-tr` and reconcile with Doc 08 §7.
 
 ### 2.5 Limitations
 
@@ -592,10 +619,14 @@ anti-/orthogonal-to-momentum lines Atlas tested, and both failed.
   it *would* face is hypothetical. The flagship faced a smaller multiple-testing penalty than a
   factory re-run of the same math would. It likely still clears at the higher count, but the
   inconsistency is real and a hostile committee will press it.
-- **Momentum's headline is fragile by endpoint.** The *validated decile* beat SPY at only 8/25
-  month-ends (all terminal); the deployed top‑5 form is better (beats SPY at 25/25 endpoints, of
-  which 21/25 pass the full gate) but was validated on an **S&P 100 approximation**, and the
-  ADR‑0006 stop overlay / staggered entries / real frictions are **unmodeled**.
+- **Momentum's headline is fragile by endpoint.** The *validated decile* (`xsmom-pit-tr`, the +737%
+  headline) beat SPY at only 8/25 month-ends (all terminal). The **deployed** top‑5 form —
+  `xsmom-impl500-tr`, top‑5 of the full PIT S&P 500, "exactly the post‑expansion live form"
+  (ADR‑0016) — is stronger: it beats SPY at **25/25 endpoints and passes the full gate at 25/25**
+  (+2235.12%, max DD −42.74%, DSR 0.999). The earlier `xsmom-impl-tr` (S&P‑100 approximation, only
+  21/25 PASS, deeper −51.97% DD) is the **superseded pre‑expansion** form — do not cite it as the
+  live book (Doc 08 §7 uses `impl500-tr`; reconcile to it). Either construction leaves the ADR‑0006
+  stop overlay / staggered entries / real frictions **unmodeled**.
 - **Flat 10 bps cost model, monthly granularity.** No spread / market-impact / borrow; momentum
   grid turnover runs 63‑156%/rebalance. The high-turnover members (3‑1 at 156%) would degrade
   further under realistic costs — but they already failed, so this bites hardest for any *future*

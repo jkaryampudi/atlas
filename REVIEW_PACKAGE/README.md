@@ -23,7 +23,7 @@ supported by code, the internal adversarial audit (below) was tasked with catchi
   a finding (and, per `17` Q21, the intended test of the internal-review methodology).
 
 ## Reading order
-1. **`01_EXECUTIVE_SUMMARY.md`** — what it is, honestly; maturity; the 5 biggest limitations & risks.
+1. **`01_EXECUTIVE_SUMMARY.md`** — what it is, honestly; maturity; the 6 biggest limitations & risks.
 2. **`16_KNOWN_LIMITATIONS.md`** — the brutal inventory (read this against §01's positives).
 3. **`17_OPEN_QUESTIONS.md`** — decisions made but not validated.
 4. **`18_REVIEW_CHECKLIST.md`** — your question bank, per reviewer hat.
@@ -61,9 +61,10 @@ supported by code, the internal adversarial audit (below) was tasked with catchi
 2. **Is the operational posture acceptable even for paper?** Single machine, single process,
    **zero backups taken until the review night**, no proven restore, no API authentication.
 3. **Is the process discipline real** (audit chain, no-agent-numbers wall, refuse-to-weaken-gates,
-   honest graveyard of 8/9 lineages) **— or rigorous scaffolding around one fragile bet?**
+   honest graveyard — 6 of 9 registered lineages killed, 1 live, 1 suspended-at-0%, 1
+   passed-but-undeployed) **— or rigorous scaffolding around one fragile bet?**
 
 ## System status at time of review (2026-07-20)
-Paper mode only · A$100k hypothetical · book was 100% cash (first fills pending) · 1 validated
+Paper mode only · A$100k hypothetical · book was 100% cash (AMD/INTC approved Sat 07-18; earliest fill is the Mon 07-20 cycle — pending that cycle actually firing, and the loop had missed/late/skipped fires 07-15/16/17) · 1 validated
 strategy · 17 signed ADRs · ~1,515 tests passing · single-vendor data · single-machine deployment.
 Nothing in this repository is investment advice.

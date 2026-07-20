@@ -527,6 +527,16 @@ project on this machine). Anything pointing at `ATLAS_API_URL` must match the *a
 port (default already 8001). The compose `api` service is not the deployment of record on the
 Mac.
 
+**Bind-interface drift — the compose services are `0.0.0.0`, not loopback.** `docker-compose.yml`
+publishes `db` (`ports: ["5432:5432"]`), `redis` (`["6379:6379"]`) and `api` (`["8000:8000"]`),
+and the `Dockerfile`/compose `api` command runs `uvicorn … --host 0.0.0.0`. Docker binds
+published ports to the host's `0.0.0.0` by default, so the documented `docker compose up -d db
+redis` workflow (CLAUDE.md:29) exposes the **literal-password Postgres (`atlas_local_only`) and
+the passwordless Redis on every host/LAN interface — not `127.0.0.1`**. The Mac API run
+(`make api` → `uvicorn … --port 8001`, no `--host`) uses uvicorn's loopback default, but the
+container image's default is a `0.0.0.0` API bind. Publish to `"127.0.0.1:5432:5432"` /
+`"127.0.0.1:6379:6379"` to actually confine these to loopback. See 14_SECURITY §1/§4.1/§5.
+
 ---
 
 ## 6. Secrets & security posture (state plainly)

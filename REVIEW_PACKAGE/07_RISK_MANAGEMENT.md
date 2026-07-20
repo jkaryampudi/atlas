@@ -295,6 +295,26 @@ Three honesty flags, in ascending severity:
    do not read calibrated precision into them." So unlike L1–L11, these caps are **not versioned,
    not dual-confirmed, and change by editing code.**
 
+   > **The "aligned with L3" claim is a hardcoded coincidence, not an enforced tie `[TECH DEBT]`.**
+   > The docstring asserts the sector cap is "0.25 … aligned with L3" (`factor_overlap.py:11`), and
+   > the live call site takes the dataclass default with **no `caps=` override** (`proposals.py:689`),
+   > so the sector backstop is the literal constant **`FactorCaps.sector = Decimal("0.25")`**
+   > (`factor_overlap.py:42,49`). But **L3's 0.25 lives in the versioned, dual-confirm-gated
+   > `risk.limit_sets`** (v1 = 0.25 in `seeds/limit_set_v1.json:9`; v2 *inherits* it via
+   > `dict(v1_limits)` in `seed_limit_set_v2.py:56` — v2 only touches L2/L5) and is read at
+   > evaluation as `limits.l3_max_sector_exposure` (`engine.py:125,301-305`). **Nothing derives
+   > `FactorCaps.sector` from the active limit set, and no test pins `FactorCaps().sector == active
+   > L3`** — `test_factor_overlap.py:24-28` only pins the default against the *literal* `0.25`. The
+   > two 0.25s are therefore **two independently-maintained numbers that happen to match**, not one
+   > enforced value. This matters precisely because §3.2 leans on the §12 sector arm as the
+   > *intended backstop* to L3's proposal-own-sector-only blind spot: the moment a signed limit set
+   > changes L3 — the entire purpose of the versioned, dual-confirmed path — the §12 every-sector
+   > backstop stays **stranded at 0.25**, silently desynced from the signed L3. A *tightening* of L3
+   > would be quietly undercut by a now-looser §12 backstop; a *loosening* would leave §12 rejecting
+   > trades the signed policy now permits. **Fix:** either derive `FactorCaps.sector` from
+   > `limits.l3_max_sector_exposure` at the call site, or add a test asserting `FactorCaps().sector
+   > == active L3` — until one of those exists, "aligned with L3" is documentation, not enforcement.
+
 2. **Two of three arms cannot bind under the current config `[PARTIAL]`.** This is documented
    honestly in the wiring (`proposals.py:551-561, 658-670`):
    - **market_beta** is a *class-level* `Decimal(1)` for every holding (`proposals.py:682-687`) —
@@ -405,6 +425,37 @@ Residual accepted at v1 land (documented, `proposals.py:664-670`): the VOL day-s
 to 2× `MAX_STEP`. Over-refusal / audit-honesty only, not a dangerous-trade path — but a real
 edge-case in the cap's exactness.
 
+### 8.4 The gross-CEILING arm is the L5 cash floor restated — it adds *no* independent control
+
+The "vol targeting is a misnomer" point above is actually **stronger** than §8.3 lets on. The
+gross-level arm of `gross_step_gate` (`gross_after ≤ gross_cap`) is **not** a second, independent
+exposure control layered on top of L1–L11 — it is **algebraically identical to the L5 cash-floor
+check**, restated. Proven against code, not asserted:
+
+- In the worst-case pro-forma book, `gross_after = (Σ holdings.value_aud + proposal.cost) / nav`
+  (`proposals.py:691-692`) with `gross_cap = 1 − l5_min_cash_reserve` (`:740`).
+- L5 checks `cash_after = (state.cash_aud − proposal.cost) / nav ≥ l5_min_cash_reserve`
+  (`engine.py:319-324`).
+- The book is unlevered, long-only, so the NAV identity holds: `nav = ledger_cash + Σ open-position
+  market value` (`proposals.py:389-390`, `snapshot.py:52`), while `state.cash_aud = ledger_cash −
+  pending_cost` and `holdings` = open positions **plus** pending buys at cost (`:405-451`). Sum the
+  two numerators — `pending_cost` and `proposal.cost` cancel — and you are left with
+  `Σ open_market + ledger_cash = nav`. Therefore **`gross_after + cash_after = 1`**, so
+  `gross_after ≤ 1 − L5` is the **same inequality** as `cash_after ≥ L5`, boundary (0.90 / 0.10)
+  included.
+
+> **So the only protections the wired "VOL" gate adds beyond L1–L11 are (i) the day-step cap
+> (`MAX_STEP = 0.10` of NAV) and (ii) the DD2/DD3 gross-freeze.** The much-touted "0.90 live gross
+> ceiling" is L5 wearing a different name — it can never fire when L5 passes, or pass when L5 fires.
+> A committee should not count it as a distinct exposure control.
+
+*Precision caveat (stated so the claim survives audit):* the identity is exact **up to sub-cent
+per-holding rounding**. `compute_snapshot` quantizes each holding value to the cent
+(`snapshot.py:46-52`) whereas `gross_after` and `pending_cost` use the raw `qty × price × fx`
+products (`:371,:408,:691`), so the two arms can differ only within a band of order (cents / NAV) ≈
+1e-7 at A$100k — far below any limit's precision. The "adds nothing" conclusion is unaffected: there
+is no realistic book on which the gross arm and L5 disagree.
+
 ---
 
 ## 9. Stress testing (§7) — built, but effectively non-binding
@@ -485,6 +536,14 @@ not a PASS, catching a §2.1 violation loudly). Wired in `proposals.py:975`. **[
 > still blocks a new position), but a book that drifts into, say, a §12 sector-loading breach
 > between build and approval would **not** be caught at approval. The code flags this as a tracked
 > follow-up rather than hiding it — good hygiene, real gap.
+>
+> **Narrowing correction (per §8.4):** the gap is smaller than "the whole VOL row is skipped at
+> approval" implies. `recheck_at_approval` runs the full L1–L11 including **L5** (`approval_recheck.py:50`
+> → `engine.py:319-324`), and by the §8.4 identity `gross_after = 1 − cash_after`, re-running L5 on the
+> fresh book **is** re-checking the VOL gate's gross-LEVEL arm. What is genuinely *not* re-evaluated
+> at approval is only the VOL gate's **day-step cap** and its DD2/DD3 freeze-arm (the DD *level* still
+> re-runs via `validate`'s own DD gate), plus the STRESS and FACTOR overlays. So: gross-exposure level
+> = re-checked; day-step + STRESS + FACTOR = not.
 
 ---
 
@@ -568,7 +627,10 @@ expected-shortfall/cvxpy/scipy.optimize/mean-variance/efficient-frontier/markowi
 5. **STRESS gate is near-inert** for an unlevered long-only book (§9); rate-beta table is a
    placeholder.
 6. **§2.2 re-check does not re-evaluate the overlay gates** on the fresh book (§11).
-7. **§12 caps are hardcoded, not versioned/dual-confirmed** like L1–L11 (§6).
+7. **§12 caps are hardcoded, not versioned/dual-confirmed** like L1–L11 (§6) — and the sector cap's
+   "aligned with L3" claim is an **unenforced coincidence**: nothing ties `FactorCaps.sector` (0.25,
+   hardcoded) to the active `limits.l3_max_sector_exposure`, and no test pins them equal, so a signed
+   L3 change silently desyncs the every-sector backstop that §3.2 relies on to cover L3's blind spot.
 8. **"vol targeting" is a misnomer** — no realised-vol measurement in the order path (§8).
 9. **L2 core-index 60% carve-out is vestigial** post-ADR-0017 (§3.3).
 

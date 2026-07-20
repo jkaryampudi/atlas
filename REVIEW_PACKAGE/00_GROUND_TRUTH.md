@@ -45,10 +45,10 @@ portfolio 239 · execution 172 · indicators 115.
 
 ## Current portfolio / strategy state (the honest core)
 - **ONE validated strategy exists**: `xsmom-pit-tr` — 12-1 cross-sectional momentum, monthly,
-  top-5, state 'paper' (ADR-0010). Approved on regenerated artifacts: **+737% vs SPY TR +594%,
-  null p=0.000, deflated Sharpe 0.995, walk-forward 4/4**. CAVEAT: this is a *concentrated top-5
+  top-5, state 'paper' (ADR-0010). Approved on artifacts REGENERATED live by a deterministic seed-pinned re-run (approve_xsmom_paper.py; the registry only grows, not run-until-pass): **+737.31% vs SPY TR +593.89%,
+  null p=0.000, deflated Sharpe (probability) 0.999, walk-forward 4/4** (signed ADR-0010 value; CLAUDE.md's 0.995 is stale). CAVEAT: this is a *concentrated top-5
   momentum backtest* — high headline return travels with large drawdown (its own demotion band
-  is −40%); the DSR/null/WF are the real evidence, not the +737%.
+  is −40%); the DSR/null/WF are the real evidence, not the +737%. NOTE for reviewers: 'deflated Sharpe' here is a PROBABILITY (Bailey/Lopez de Prado, normal-returns assumption, validation.py:17-19), gate >=0.90; raw annualized Sharpe is ~0.82. GRANDFATHERED COUNT: that 0.999 was computed at n_trials=1 — the flagship was momentum-lineage trial #1 — and was NEVER recomputed as siblings drove the SHARED 'momentum' lineage (hardcoded `LINEAGE="momentum"`, xsmom_pit_run.py:147) to 23 trials; re-run through the exact deflated_sharpe() at n_trials=23 the headline is ~0.87, BELOW the >=0.90 gate (sibling recipe-mom-12-0 scores 0.818@22 / 0.658@23 and FAILS). ADR-0016's lineage counting was meant to PREVENT exactly this grandfathering, so 0.999 is not the count-honest number. And the LIVE ranker uses split-adjusted PRICE return while approval used TOTAL-return formation - deployed signal != validated signal for dividend payers.
 - **ADR-0017 (signed 2026-07-20)**: book is now **satellite-heavy, NO ETFs** — momentum sleeve
   40% of NAV (8%/name = the L1 cap), remainder cash; the former 70% SPY/INDA index core is
   RETIRED. Consequence: **the entire invested book rests on ONE strategy** (concentration).
@@ -62,7 +62,22 @@ portfolio 239 · execution 172 · indicators 115.
 - **Trial registry**: 51 trials across 9 lineages (momentum 23, pead 7, breakout/trend/meanrev 4
   each, fxlab 3, quality 2, low-vol 2, momentum+pead 2).
 - **THE BOOK IS CURRENTLY 100% CASH** (found 2026-07-20): core proposals always expired
-  unapproved; the Principal approved AMD+INTC on 2026-07-18 (fill at the next cycle).
+  unapproved; the Principal approved AMD+INTC on **Saturday 2026-07-18**. FILL MECHANICS
+  (`atlas/dcp/execution/paper.py:148-151`): a Saturday approval's next US session is **Monday
+  2026-07-20**, and `PaperBroker.submit` returns None (order stays 'pending_submit') until the
+  injected clock passes that session's open (13:30 UTC) AND the 07-20 open bar is ingested — so
+  the earliest the buys CAN fill is the **Monday-07-20 evening cycle (23:30 UTC)**. A 100%-cash
+  book seen *during the day* on 07-20 is therefore EXPECTED even with a healthy loop and does not
+  by itself prove a stall (the seed audit's "any cycle between 07-18 and 07-20 would have filled"
+  is a code error: the weekend cycles cannot fill an unopened Monday session). THE REAL CAVEAT:
+  whether those fills ever land depends on the 07-20 cycle actually firing, and this fund's
+  operating loop is NOT reliable — launchd is dead (see Operations, below) and the in-process
+  scheduler only arms when `ATLAS_INPROC_SCHEDULER=1`, so **a bare API restart silently disarms
+  it** (`atlas/api/main.py:43`); its own code comments record **missed/late/skipped fires on
+  2026-07-15 (16 min late), 07-16 (never fired before a restart re-armed it), and 07-17 (skipped
+  outright)** (`atlas/ops/scheduler.py:146-154`). The last *successfully completed* cycle date is
+  NOT independently recorded anywhere in this package — so read "fill at the next cycle" as
+  "conditional on a loop with a live 3-day failure history," NOT as routine overnight settlement.
 
 ## Data plane (single vendor — lock-in)
 - **EODHD "All-In-One" ($99/mo)** is the ONLY market-data vendor: daily bars (~2.47M rows),
@@ -84,13 +99,21 @@ portfolio 239 · execution 172 · indicators 115.
   (`committee_memo`). Prompts in `atlas/agents/prompts/` (constitution prepended, hashed).
 - Models: Anthropic via a per-role registry (`ATLAS_MODEL_<ROLE>` → `ATLAS_MODEL_DEFAULT`);
   OpenAI-compatible local option. Budget breaker $10/day global, sub-caps nightly $6 / analyze
-  $5 (raised from $3 by the Principal today) / shadow $3.
+  **$3** / shadow $3 — these are the committed defaults (`runner.py:169`
+  `SURFACE_BUDGET_DEFAULTS_USD = {"nightly": 6.00, "analyze": 3.00, "shadow": 3.00}`, echoed by
+  the `ops/analyze.py` comment "default $3.00"). A local, **gitignored, untracked** `.env` on
+  this machine overrides analyze to $5 (`ATLAS_BUDGET_ANALYZE=5.00`, commented "raised from $3
+  -> $5 by Jay 2026-07-19"). That override is NOT in the committed tree and NOT openable by a
+  reviewer of the repo, so by this doc's own "trust the code" rule the ground-truth sub-cap is
+  **$3**. The earlier "$5 (raised from $3 by the Principal today)" was unsupported by any
+  committed file — do not restate it as fact without the .env caveat.
 - **Grounding cage**: every numeric token in narrative must appear verbatim in cited evidence,
   else the run fails closed (`agent.grounding.failed`). SCHEMA_MAX_ATTEMPTS=3 retries then hold.
 - Agents produce MEMOS ONLY (recommendation + thesis + kill criteria + dissent + evidence refs).
   A deterministic **bridge** (`atlas/dcp/trading/bridge.py`, ADR-0006) turns a signed-strategy
   BUY memo into a sized, stop-derived, risk-checked proposal. No LLM number ever sizes anything.
-- Shadow-mode model comparison (sonnet-5 vs sonnet-4-6) done 2026-07-20 (report exists); a
+- Shadow-mode model comparison (sonnet-5 vs sonnet-4-6) done 2026-07-19 (report:
+  `docs/reports/shadow-model-comparison-2026-07-19.md`, run stamp `shadow-20260719T225134Z`); a
   model switch is a Principal registry decision. Learning loop is MEASURED, NEVER APPLIED
   (Brier-scored conviction weights computed + displayed, applied nowhere; Tier-1 activation is
   a future Principal signature, ~60 sessions of labels needed).
@@ -101,7 +124,12 @@ portfolio 239 · execution 172 · indicators 115.
   correlation threshold 0.8 / combined-corr weight 12% · L9 max 2 new positions/day · L10 max
   5% ADV · L11 max non-AUD 85%. Values live in `risk.limit_sets` (versioned, dual-confirm CHECK).
 - DD1–DD3 drawdown breakers (latched), stress §7, factor-overlap §12, correlations, approval
-  re-check §2.2, vol-target (property-tested: never > 0.80 gross). `make cov-risk` enforces
+  re-check §2.2, vol-target — a property test bounds the **UNWIRED** `target_gross_exposure`
+  scaler at **0.80** gross (`vol_target.py:35` MAX_GROSS, kept only as a v1-era default the
+  wired gate never reads), but the **WIRED** `gross_step_gate` ceiling is **1 − L5 = 0.90**
+  under limit_set v2 (`proposals.py:740`; `test_vol_target.py:18-19` CAP_V2=0.90), so the
+  **live deployment ceiling is 0.90, not 0.80** — do NOT read the 0.80 property test as the
+  live limit (matches 02/06/07/16). `make cov-risk` enforces
   **100% branch coverage on the risk engine** (the only module with that bar).
 - NOT IMPLEMENTED: VaR, CVaR, explicit beta targeting, portfolio optimizer (equal-weight only),
   intraday risk, live market-risk monitoring. Stops are pre-authorized exits, scanned daily

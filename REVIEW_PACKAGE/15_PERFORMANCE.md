@@ -25,7 +25,7 @@ audit events, 511 active US instruments (verified this session).
 |---|---|---|
 | Formal perf testing | **None.** No benchmark/load/stress tier; `pytest` addopts is just `-q`. | `pyproject.toml` `[tool.pytest.ini_options]`; no `pytest-benchmark`/`pytest-xdist` installed |
 | Parallelism | **Effectively none for compute.** No `numpy`/`pandas`, no `multiprocessing`, no `concurrent.futures`. Pure-Python `Decimal`/`float` loops. | `grep` for `numpy\|pandas\|multiprocessing\|concurrent.futures` over `atlas/` → **zero hits** in compute paths |
-| Process model | **Single** uvicorn process; scheduler is one asyncio task; the daily cycle runs in **one daemon thread as one atomic DB transaction**. | `atlas/api/main.py:43-46`, `atlas/ops/scheduler.py:119`, `atlas/ops/daily.py:86-97` |
+| Process model | uvicorn is **one** process; the in-proc scheduler is one asyncio task. But the daily cycle does **not** run inside uvicorn: a daemon thread (`scheduler.py:119`) only launches and `wait()`-supervises a **separate OS subprocess** (`python -m atlas.ops.daily`, `scheduler.py:69`) that runs the cycle as one atomic DB transaction. **During a cycle window there are TWO Python processes and TWO connection pools**, which is precisely *why* a cycle crash rolls the day back atomically without taking the API down. The "single process / single engine" resource claim holds only *outside* the nightly cycle. | `atlas/api/main.py:43-46`, `atlas/ops/scheduler.py:69,119`, `atlas/ops/daily.py:702` |
 | Database | **Single Postgres**, single engine, default `QueuePool` (5+10), `pool_pre_ping`. No replica, no partitioning, no query cache. | `atlas/core/db.py:18` |
 | Caching | Feature-store `dataset_version` (content-addressed materialization pins, *not* a runtime cache); `functools.lru_cache` on calendars; per-request in-memory dicts. **Redis is provisioned but the application never connects to it.** | `atlas/dcp/features/store.py`, `atlas/core/config.py:9`, `atlas/tools/doctor.py:44` |
 | Dominant bottleneck | **Per-name query loops** (screen/valuation N+1 over jsonb) and **serial per-instrument vendor fetch** in ingest. | `atlas/dcp/research/valuation_models.py:413`, `atlas/dcp/market_data/daily.py:247-266` |
@@ -112,13 +112,13 @@ shape of each node.
 
 ```mermaid
 sequenceDiagram
-    participant Sched as In-proc scheduler (asyncio task)
-    participant Cyc as Daily cycle (1 daemon thread, 1 DB txn)
+    participant Sched as In-proc scheduler (asyncio task, in uvicorn)
+    participant Cyc as Daily cycle (SEPARATE subprocess: python -m atlas.ops.daily, own engine, 1 DB txn)
     participant PG as Postgres (single)
     participant EODHD as EODHD vendor (per-instrument HTTP)
     participant LLM as Anthropic (sequential per name)
 
-    Sched->>Cyc: fire daily-<date> (23:30 UTC)
+    Sched->>Cyc: Popen subprocess for daily-<date> (23:30 UTC), then wait()
     Cyc->>PG: t0 ingest — LOOP 511 US names
     loop per instrument (serial)
         Cyc->>EODHD: fetch_splits + fetch_bars (2 calls)
@@ -314,22 +314,26 @@ that **grow silently** and will bite later without a code change.
 
 ```mermaid
 flowchart TD
-    subgraph proc["Single uvicorn process (port 8001)"]
+    subgraph proc["uvicorn process (port 8001) — own engine + QueuePool 5+10"]
         API["FastAPI sync handlers<br/>blocking DB I/O"]
         SCHED["asyncio scheduler task<br/>(ATLAS_INPROC_SCHEDULER=1)"]
-        subgraph workers["Fire-and-forget daemon threads (one job per surface)"]
+        subgraph workers["In-process daemon threads (one job per surface)"]
             SCR["screen worker<br/>non-blocking lock"]
             ANA["analyze/desk worker<br/>non-blocking lock"]
             REC["recipe gauntlet worker<br/>non-blocking lock"]
-            CYC["daily cycle thread<br/>ONE atomic DB txn"]
+            SUP["cycle SUPERVISOR thread<br/>(scheduler.py:119) — only Popen + wait()"]
         end
     end
-    API --> PG[("Single Postgres<br/>QueuePool 5+10")]
+    subgraph cycproc["SEPARATE OS subprocess: python -m atlas.ops.daily — its OWN engine + QueuePool"]
+        CYC["daily cycle<br/>ONE atomic DB txn"]
+    end
+    API --> PG[("Single Postgres<br/>(each process opens its own pool)")]
     SCR --> PG
     ANA --> PG
     REC --> PG
     CYC --> PG
-    SCHED -.spawns.-> CYC
+    SCHED -. start_cycle .-> SUP
+    SUP -. Popen + wait .-> CYC
     REDIS[("Redis container<br/>PROVISIONED, UNUSED")]:::unused
     classDef unused fill:#fee,stroke:#c33,stroke-dasharray: 5 5;
 ```
@@ -339,13 +343,22 @@ flowchart TD
   (`api/main.py:43-46`).
 - **Background jobs are single daemon threads guarded by a non-blocking `threading.Lock`** —
   screen (`ops/screen.py:68`), analyze/desk (`ops/analyze.py:231`), recipes
-  (`ops/recipes.py:234`), pick-ingest (`ops/ingest_picks.py:183`), and the cycle
-  (`ops/scheduler.py:119`). The pattern is deliberate: **"one at a time; busy is an answer,
-  not an error."** This gives the console a responsive UI (kick off a long job, poll status)
-  but means, e.g., two screens or two gauntlets cannot run concurrently — by design.
-- **The daily cycle runs as one daemon thread inside one atomic DB transaction.** A process
-  death rolls the day back atomically; a re-run replays from T0 deterministically
-  (`ops/daily.py:86-97`). Correctness-first, throughput-last.
+  (`ops/recipes.py:234`), and pick-ingest (`ops/ingest_picks.py:183`) all run their work
+  *in-process*. The daily-cycle daemon thread (`ops/scheduler.py:119`) is the **exception**: it
+  holds the same non-blocking lock, but its body is only a
+  `subprocess.Popen([sys.executable, "-m", "atlas.ops.daily"])` + `proc.wait()`
+  (`scheduler.py:69-92`) — the cycle work itself executes in that *child process*, not the
+  thread. The pattern is deliberate: **"one at a time; busy is an answer, not an error."** This
+  gives the console a responsive UI (kick off a long job, poll status) but means, e.g., two
+  screens or two gauntlets cannot run concurrently — by design.
+- **The daily cycle runs as a separate OS subprocess, not a thread inside uvicorn.** The daemon
+  thread only launches and `wait()`-supervises `python -m atlas.ops.daily`
+  (`scheduler.py:69,119`); that child imports `atlas.core.db` fresh and builds its **own**
+  SQLAlchemy engine + QueuePool (`daily.py:702` → `db.py:18`), then runs the whole cycle in one
+  atomic DB transaction. So a cycle window is **two processes with two connection pools**, and
+  the subprocess boundary is exactly *why* a cycle crash (even a segfault, per `scheduler.py:46`)
+  rolls the day back atomically without taking the API down; a re-run replays from T0
+  deterministically (`ops/daily.py:86-97`). Correctness-first, throughput-last.
 - **The LLM desk is sequential across names** (`agents/desk.py:115`), each name running
   debate → specialists → CIO in order, with `SCHEMA_MAX_ATTEMPTS=3` retries per role on cage
   failure (so a stubborn name can cost up to 3× its LLM calls before the run holds). No
@@ -396,10 +409,15 @@ payloads are re-fetched and re-parsed once per name within the *same* call.
 
 ## 11. Database performance **[STRUCTURAL + MEASURED]**
 
-**Single Postgres, single engine.** `atlas/core/db.py:18` creates one engine with
-`pool_pre_ping=True` and otherwise **default SQLAlchemy `QueuePool` (size 5, max_overflow
+**Single Postgres — but one engine *per process*.** `atlas/core/db.py:18` creates one engine
+with `pool_pre_ping=True` and otherwise **default SQLAlchemy `QueuePool` (size 5, max_overflow
 10)** — no explicit pool tuning, no read replica, no connection multiplexing (PgBouncer),
-no partitioning, no table clustering. `expire_on_commit=False`.
+no partitioning, no table clustering. `expire_on_commit=False`. The `_session_factory` is a
+module-global memoized *within a single process* (`db.py:12-20`), **not** shared across
+processes: the nightly cycle subprocess (§9) therefore builds a **second** engine + QueuePool
+against the same Postgres, so a cycle window holds up to 2×(5+10) connections across two pools,
+not one. The database is single; the "single engine" framing is true only for the uvicorn
+process in isolation.
 
 **Index landscape.** 34 migrations create **19 explicit `CREATE INDEX` statements**; the hot
 paths mostly ride **primary keys / unique constraints** rather than secondary indexes:
@@ -525,8 +543,11 @@ and I am **not** implying any of it is in progress.
 - **No performance test tier of any kind.** No benchmarks, no load/stress tests, no latency
   budgets, no regression tracking. Every number in this doc is ad-hoc. *(This is the headline
   weakness.)*
-- **Single everything:** one machine, one Postgres, one process, one core for compute, one
-  job per surface, one transaction per day. Coherent for N=1; not a throughput design.
+- **Single everything:** one machine, one Postgres, one core for compute, one job per surface,
+  one transaction per day. (Process count is the one *exception* to "single": the nightly cycle
+  runs as a **separate subprocess** with its own engine/pool — §9/§11 — so a cycle window is two
+  processes, not one. That is a deliberate crash-isolation choice, not a scaling feature.)
+  Coherent for N=1; not a throughput design.
 - **Pure-Python compute, no numpy/pandas.** The 1000-path nulls and portfolio replays are
   serial Python `Decimal`/`float` loops — the largest latent CPU cost, fully unparallelized.
 - **Two O(N)-in-universe serial loops** (per-instrument ingest fetch; per-name valuation
