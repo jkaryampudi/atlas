@@ -1,3 +1,4 @@
+import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from atlas.dcp.backtest.approval import (  # noqa: E402
     evaluate_approval,
     record_and_transition,
     require_signed_validation_artifact,
+    strategy_identity,
     transition_to_paper,
 )
 from atlas.dcp.backtest.registry import register_trial  # noqa: E402
@@ -238,12 +240,81 @@ def test_p0_stale_pre_downgrade_approval_cannot_re_promote(pg_session):
     with pytest.raises(ValueError, match="predates the research_shadow"):
         require_signed_validation_artifact(s, str(sid))
     # A NEW approve report created after the downgrade satisfies the gate.
+    ident = strategy_identity(s, str(sid))
     s.execute(text(
         "INSERT INTO quant.validation_reports "
         "(strategy_id, backtest_id, checklist, verdict, reasons, created_at) "
-        "VALUES (:sid, NULL, '{}', 'approve', '', :ca)"),
-        {"sid": sid, "ca": shadowed_at + timedelta(days=1)})
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '', :ca)"),
+        {"sid": sid, "c": json.dumps({"_identity": ident}),
+         "ca": shadowed_at + timedelta(days=1)})
     require_signed_validation_artifact(s, str(sid))  # no raise
+
+
+# ---------------------------------------------------------------------------
+# P0.1 (ADR-0018) validation-artifact IDENTITY compatibility — an artifact for
+# the wrong version / code hash / config(spec) hash / strategy id cannot promote
+# ---------------------------------------------------------------------------
+
+def _shadowed(s, *, family="momentum", code_sha="REAL-SHA", version="1.0.0",
+              spec="{}") -> tuple[str, object]:
+    shadowed_at = CLOCK.now()
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, code_sha, "
+        " state, shadowed_at) VALUES (:f,'trend_rs_vol',:v,CAST(:sp AS jsonb),"
+        " :cs,'validated',:sh) RETURNING id"),
+        {"f": family, "v": version, "sp": spec, "cs": code_sha,
+         "sh": shadowed_at}).scalar_one()
+    return str(sid), shadowed_at
+
+
+def _identity_report(s, sid, shadowed_at, identity) -> None:
+    ck = {"_identity": identity} if identity is not None else {}
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons, created_at) "
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '', :ca)"),
+        {"sid": sid, "c": json.dumps(ck), "ca": shadowed_at + timedelta(days=1)})
+
+
+@pytest.mark.parametrize("field", ["code_sha", "version", "spec_hash"])
+def test_p0_1_wrong_identity_field_cannot_promote(pg_session, field):
+    s = pg_session
+    _clean(s)
+    sid, sh = _shadowed(s, code_sha="REAL-SHA", version="1.0.0", spec='{"k": 1}')
+    wrong = {**strategy_identity(s, sid), field: "TAMPERED"}
+    _identity_report(s, sid, sh, wrong)
+    with pytest.raises(ValueError, match="different code/version/config"):
+        require_signed_validation_artifact(s, sid)
+
+
+def test_p0_1_research_shadow_requires_identity_stamped_artifact(pg_session):
+    s = pg_session
+    _clean(s)
+    sid, sh = _shadowed(s)
+    _identity_report(s, sid, sh, None)          # fresh approve, but NO identity
+    with pytest.raises(ValueError, match="identity-stamped"):
+        require_signed_validation_artifact(s, sid)
+
+
+def test_p0_1_matching_identity_artifact_promotes(pg_session):
+    s = pg_session
+    _clean(s)
+    sid, sh = _shadowed(s, spec='{"k": 1}')
+    _identity_report(s, sid, sh, strategy_identity(s, sid))
+    require_signed_validation_artifact(s, sid)  # no raise
+
+
+def test_p0_1_report_for_another_strategy_cannot_cross_promote(pg_session):
+    """Wrong strategy id: a valid, identity-matched report for strategy B does
+    not lift strategy A — the gate joins reports by strategy_id, so A (with no
+    report of its own) fails closed."""
+    s = pg_session
+    _clean(s)
+    a_sid, _ = _shadowed(s, family="momentum")
+    b_sid, b_sh = _shadowed(s, family="pead")
+    _identity_report(s, b_sid, b_sh, strategy_identity(s, b_sid))  # B is fine
+    with pytest.raises(ValueError, match="no validation report"):
+        require_signed_validation_artifact(s, a_sid)
 
 
 # ---------------------------------------------------------------------------
