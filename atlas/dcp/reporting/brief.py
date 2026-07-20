@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import date
 from typing import Any
 
@@ -54,6 +55,15 @@ from sqlalchemy.orm import Session
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
 from atlas.core.config import get_settings
+from atlas.dcp.reporting.attribution import (
+    satellite_sleeve_meta,
+    scoped_performance,
+)
+from atlas.dcp.strategy_lifecycle import (
+    AUTHORITATIVE_PORTFOLIO,
+    RESEARCH_SHADOW,
+    classify,
+)
 from atlas.ops.alerts import EXPIRING_SOON, URGENT_EVENT
 
 BRIEF_EVENT = "reporting.brief.assembled"
@@ -173,7 +183,21 @@ def _attribution_block(session: Session) -> dict[str, Any] | None:
     line = (f"attribution {last.isoformat()}: "
             + " · ".join(f"{n} {_cell(n)}"
                          for n in ("core", "xsmom", "pead", "cash", "total")))
-    return {"session_date": last.isoformat(), "sleeves": sleeves, "line": line}
+    # ADR-0018: the brief's performance number is the AUTHORITATIVE composite
+    # (shadow sleeves excluded); the raw per-sleeve values above stay for
+    # transparency, and any shadow sleeve is named so the console can label it.
+    perf = scoped_performance(session, AUTHORITATIVE_PORTFOLIO)
+    meta = satellite_sleeve_meta(session)
+    shadow_sleeves = sorted(sv for sv, m in meta.items()
+                            if classify(m["state"]) == RESEARCH_SHADOW)
+    alpha = perf["satellite_alpha_pp"]
+    return {"session_date": last.isoformat(), "sleeves": sleeves, "line": line,
+            "performance_scope": perf["performance_scope"],
+            "authoritative": perf["authoritative"],
+            "satellite_alpha_pp": float(alpha) if isinstance(alpha, Decimal) else None,
+            "contains_shadow_results": perf["contains_shadow_results"],
+            "caveat": perf["caveat"],
+            "shadow_sleeves": shadow_sleeves}
 
 
 def _strategy_block(session: Session, on: date) -> list[dict[str, Any]]:

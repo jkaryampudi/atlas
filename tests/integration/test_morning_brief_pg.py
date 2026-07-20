@@ -215,6 +215,12 @@ def test_brief_golden_payload(constructed):
             },
             "line": ("attribution 2026-07-15: core A$14930.00 · xsmom n/a · "
                      "pead n/a · cash n/a · total A$100000.00"),
+            "performance_scope": "authoritative_portfolio",
+            "authoritative": True,
+            "satellite_alpha_pp": None,
+            "contains_shadow_results": False,
+            "caveat": "",
+            "shadow_sleeves": [],
         },
         "strategies": [
             {"family": "xsmom-pit-tr", "state": "paper",

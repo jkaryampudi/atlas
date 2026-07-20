@@ -54,7 +54,6 @@ def _seed(s, *, xsmom_d2="1100") -> str:
             " value_aud, ret_1d, benchmark_ret_1d, created_at) "
             "VALUES (:d,:sl,:v,:r,:b,:ca)"),
             {"d": d, "sl": sleeve, "v": val, "r": ret, "b": bench, "ca": AS1})
-    s.commit()
     return xid
 
 
