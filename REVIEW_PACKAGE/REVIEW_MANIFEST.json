@@ -1,0 +1,108 @@
+{
+  "schema_version": "1.0",
+  "manifest_type": "atlas_independent_review_evidence_pass",
+  "purpose": "Machine-readable index of the evidence/reproducibility/quantitative-validity pass layered on the existing REVIEW_PACKAGE (docs 00-20). This pass adds classified, command-level evidence; it does not regenerate the package and renders no investment or production-readiness verdict.",
+  "repository": {
+    "remote": "github.com/jkaryampudi/atlas",
+    "branch": "main",
+    "commit": "2ba38c0d0a94cb8d518cc604766157f45a9ac6da",
+    "commit_short": "2ba38c0",
+    "commit_subject": "REVIEW_PACKAGE: second-pass Citadel/Two-Sigma-PE hardening — the damning catches",
+    "working_tree": "clean",
+    "origin_sync": "0 ahead / 0 behind",
+    "review_datetime_utc": "2026-07-20T08:41:38Z"
+  },
+  "runtime": {
+    "python": "3.14.4",
+    "os": "Darwin 24.6.0 arm64",
+    "postgres": "16.14",
+    "anthropic_sdk_installed": false,
+    "llm_transport": "raw httpx (atlas/agents/runtime/llm.py:53 AnthropicClient)"
+  },
+  "constraints_observed": {
+    "files_modified_outside_review_package": 0,
+    "application_code_tests_config_data_modified": false,
+    "state_mutating_commands_run": false,
+    "performance_numbers_invented": false,
+    "remediation_implemented": false,
+    "investment_or_production_verdict_rendered": false,
+    "secrets_or_licensed_data_recommended_for_upload": false
+  },
+  "classification_taxonomy": [
+    "VERIFIED", "INFERRED", "CLAIMED", "NOT TESTED", "NOT FOUND", "PLANNED", "UNKNOWN"
+  ],
+  "governing_rule": "Code existence is not verified behaviour. VERIFIED is reserved for a command/test executed this pass or an exact source line read.",
+  "files": [
+    {"name": "REPOSITORY_SNAPSHOT.md", "role": "baseline", "stage": "triage"},
+    {"name": "EVIDENCE_BASE.md", "role": "classified evidence base (taxonomy + EV-## facts)", "stage": "triage"},
+    {"name": "EVIDENCE_INDEX.md", "role": "flat claim -> evidence table", "stage": "source-verification"},
+    {"name": "STRATEGY_IMPLEMENTATION_TRACEABILITY.md", "role": "universe->execution traceability", "stage": "quant"},
+    {"name": "POINT_IN_TIME_AND_BIAS_ANALYSIS.md", "role": "PIT + bias analysis", "stage": "quant"},
+    {"name": "BACKTEST_REPRODUCIBILITY.md", "role": "per-backtest reproducibility", "stage": "quant"},
+    {"name": "PERFORMANCE_EVIDENCE.md", "role": "metrics by validation stage", "stage": "quant"},
+    {"name": "STATISTICAL_VALIDATION_GAPS.md", "role": "validation coverage + gaps", "stage": "quant"},
+    {"name": "QUANTITATIVE_ASSUMPTION_REGISTER.md", "role": "parameters + assumptions register", "stage": "quant"},
+    {"name": "BASELINE_COMPARISON_REQUIREMENTS.md", "role": "baseline comparisons", "stage": "quant"},
+    {"name": "EXECUTION_SAFETY_REVIEW.md", "role": "signal->order safety + 8 questions", "stage": "engineering-ops"},
+    {"name": "AI_AGENT_CONTROL_MODEL.md", "role": "per-agent governance", "stage": "engineering-ops"},
+    {"name": "DOCUMENTATION_CODE_DISCREPANCIES.md", "role": "doc vs code discrepancies", "stage": "engineering-ops"},
+    {"name": "REMEDIATION_BACKLOG.md", "role": "prioritized findings", "stage": "engineering-ops"},
+    {"name": "REVIEW_MANIFEST.json", "role": "machine-readable manifest", "stage": "index"},
+    {"name": "GPT_REVIEW_INPUT_GUIDE.md", "role": "4-stage reading order", "stage": "index"},
+    {"name": "FINAL_INDEPENDENT_REVIEW_READINESS.md", "role": "counts + readiness scorecard", "stage": "triage"}
+  ],
+  "evidence_summary": {
+    "evidence_ids_total": 27,
+    "verified_executed_or_exact_line": 18,
+    "inferred": 3,
+    "claimed": 2,
+    "not_tested": 1,
+    "not_found_or_planned": 3,
+    "executed_commands": [
+      {"id": "EV-03", "cmd": "pytest tests/unit/test_boundaries.py", "result": "2 passed"},
+      {"id": "EV-04", "cmd": "python -m atlas.tools.verify_chain", "result": "audit chain OK: 1885 event(s) verified"},
+      {"id": "EV-05", "cmd": "pytest tests/unit/test_redteam_v1.py", "result": "9 passed"},
+      {"id": "EV-06", "cmd": "deflated_sharpe(0.82,3400,{1,23}) and (-1.0,3400,1)", "result": "0.9987 / 0.8532 / 0.0001 (probability; reproduces 0.999 approval and 0.85 lineage)"},
+      {"id": "EV-07", "cmd": "pytest --cov=atlas.dcp.risk --cov-branch --cov-fail-under=100", "result": "100.00% (483 stmt / 118 branch / 0 miss)"},
+      {"id": "EV-08", "cmd": "python -m atlas.dcp.factory.recipe_run --spec <spec>.json --dry-run", "result": "deterministic spec_hash 99d193f1, seed 7, 1000 paths, no DB"},
+      {"id": "EV-09", "cmd": "pytest tests/unit/test_approval_recheck.py", "result": "5 passed (fresh risk re-check voids approval on FAIL)"}
+    ],
+    "not_executed": [
+      {"item": "make replay", "reason": "UNSAFE SIDE EFFECT (writes dev DB)"},
+      {"item": "full historical gauntlet (+737% run)", "reason": "MISSING DATA + EXCESSIVE RUNTIME + not connectable to original run"},
+      {"item": "live-model / desk LLM", "reason": "MISSING CREDENTIALS (anthropic SDK + key absent)"}
+    ]
+  },
+  "findings_summary": {
+    "documentation_code_discrepancies_real": 7,
+    "documentation_candidates_verified_accurate": 6,
+    "remediation_items_total": 20,
+    "remediation_high": 8,
+    "remediation_medium": 9,
+    "remediation_low": 3,
+    "headline_findings": [
+      "EV-21: deployed signal (price return) != validated signal (total return), same family xsmom-pit-tr",
+      "EV-06: DSR ~0.85 at honest lineage trial count, below the 0.90 gate; grandfathered (ADR-0016)",
+      "EV-19/EV-27: no run-level reproducibility (no commit pin, optional/NULL data snapshot, mutable single-vendor store)",
+      "POINT_IN_TIME: historical investable universe cannot be reconstructed (static current-membership manifest)",
+      "EV-23: dividend ingest manual-only -> SPY-TR demotion benchmark decays, biasing the safety trigger against firing",
+      "EV-17/D-02: no API authentication/authorization (design docs describe one that does not exist)",
+      "EV-22: dead risk code (MUTANT_no_such_state) disables the momentum-factor overlay (fails safe)"
+    ]
+  },
+  "strengths_verified": [
+    "EV-03 two-plane wall (dcp/agents) enforced by a passing test",
+    "EV-04 append-only audit hash-chain intact over 1885 events",
+    "EV-05 no-agent-numbers wall (LLM cannot emit sizing/pricing) — 9-test red-team passes",
+    "EV-07 risk engine 100% branch coverage (scope: atlas/dcp/risk)",
+    "EV-09 deterministic risk re-check after AI, before fill, voids approval on FAIL",
+    "EV-08 content-addressed, seed-pinned, lineage-scoped gauntlet; overfit canary passes; 6-of-9 lineages killed"
+  ],
+  "reviewer_boundaries": {
+    "do_not_expect": ["investment approval", "production-readiness sign-off", "licensed data or secrets"],
+    "reproduce_yourself": [
+      "the 7 executed commands above (local, deterministic, no licensed data)",
+      "exact-line findings: EV-21 (generate.py:218-222 vs approve_xsmom_paper.py:105), EV-22 (proposals.py:586-589), EV-23 (no fetch_dividends in daily.py)"
+    ]
+  }
+}
