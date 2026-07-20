@@ -5,12 +5,18 @@ services:
       POSTGRES_DB: atlas
       POSTGRES_USER: atlas
       POSTGRES_PASSWORD: atlas_local_only
-    ports: ["5432:5432"]
+    # loopback-only publish (ADR-0018): the host dev workflow (alembic, tests)
+    # connects on localhost:5432, but the DB must never be reachable on all
+    # interfaces. The password is a documented throwaway local-only credential.
+    ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U atlas"], interval: 5s, retries: 10}
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    # loopback-only publish (ADR-0018). Redis is declared but currently unused
+    # by any code (no `import redis` in atlas/); the host publication could be
+    # removed entirely — it is kept, loopback-bound, for the compose api service.
+    ports: ["127.0.0.1:6379:6379"]
   api:
     build: .
     # uvicorn stays --host 0.0.0.0 INSIDE the container: Docker's published-port
