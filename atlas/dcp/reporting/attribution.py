@@ -551,11 +551,11 @@ def cumulative_alpha_pp(session: Session, *, snaps: list[_Snap] | None = None,
 # per-sleeve numbers are byte-identical across scopes. research_shadow sleeves
 # are EXCLUDED from the authoritative composite by construction.
 
-def satellite_sleeve_meta(session: Session) -> dict[str, dict[str, object]]:
+def satellite_sleeve_meta(session: Session) -> dict[str, dict[str, str | None]]:
     """Per satellite sleeve, the latest backing strategy's {id, state, code_sha}
     (read-only; never touches values). The classification + identity source for
     the scoped views."""
-    out: dict[str, dict[str, object]] = {}
+    out: dict[str, dict[str, str | None]] = {}
     for sleeve, family in SATELLITE_FAMILIES.items():
         row = session.execute(text(
             "SELECT id, state, code_sha FROM quant.strategies "
@@ -568,14 +568,14 @@ def satellite_sleeve_meta(session: Session) -> dict[str, dict[str, object]]:
 
 
 def included_satellite_sleeves(session: Session, scope: str, *,
-                               meta: dict[str, dict[str, object]] | None = None,
+                               meta: dict[str, dict[str, str | None]] | None = None,
                                ) -> frozenset[str]:
     """The satellite sleeves that belong in `scope`, chosen by the canonical
     classify (fail-closed: an unknown/None state is never authoritative). This
     is the ONLY place the include-set is decided."""
     scope = normalize_scope(scope)
     meta = meta if meta is not None else satellite_sleeve_meta(session)
-    cats = {s: classify(m["state"]) for s, m in meta.items()}  # type: ignore[arg-type]
+    cats = {s: classify(m["state"]) for s, m in meta.items()}
     if scope == AUTHORITATIVE_PORTFOLIO:
         return frozenset(s for s, c in cats.items() if c == AUTHORITATIVE)
     if scope == RESEARCH_SHADOW_SCOPE:
@@ -596,7 +596,7 @@ def scoped_performance(session: Session, scope: str | None = None,
     meta = satellite_sleeve_meta(session)
     included = included_satellite_sleeves(session, scope, meta=meta)
     shadow_sleeves = frozenset(
-        s for s, m in meta.items() if classify(m["state"]) == RESEARCH_SHADOW)  # type: ignore[arg-type]
+        s for s, m in meta.items() if classify(m["state"]) == RESEARCH_SHADOW)
     included_ids = sorted(str(meta[s]["id"]) for s in included if meta[s]["id"])
     excluded_ids = sorted(str(meta[s]["id"]) for s in SATELLITE_FAMILIES
                           if meta[s]["id"] and s not in included)
