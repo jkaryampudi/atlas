@@ -404,7 +404,7 @@ def ticker_dossier(symbol: str) -> Any:
     with session_scope() as s:
         iid = s.execute(text(
             "SELECT id FROM market.instruments WHERE symbol = :s "
-            "ORDER BY is_active DESC LIMIT 1"), {"s": sym}).scalar()
+            "ORDER BY is_active DESC, id LIMIT 1"), {"s": sym}).scalar()
         if iid is None:
             return JSONResponse(status_code=404, content={"error": {
                 "code": "NOT_FOUND", "message": f"unknown symbol {sym}",

@@ -58,22 +58,77 @@ requires_pg = pytest.mark.skipif(not _reachable(), reason="postgres not reachabl
 
 
 def _ensure_test_db() -> None:
-    """Create atlas_test if missing and migrate it to head. Runs once per session."""
+    """Create atlas_test if missing and migrate it to head. Runs once per
+    session. SELF-HEALING: the migration-cycle tests burn Postgres's per-table
+    lifetime column budget a little every run (each downgrade/upgrade re-adds
+    columns, and dropped-column slots are never reclaimed — the 1600 limit
+    counts them forever), so after enough full-suite runs an upgrade dies with
+    TooManyColumns mid-flight. The test DB is disposable by design: on ANY
+    upgrade failure, drop it, recreate it, and migrate once from scratch —
+    a corrupted bootstrap must never require a human to remember the DROP."""
     global _prepared
     if _prepared:
         return
-    admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
-    with admin.connect() as c:
-        exists = c.execute(text("SELECT 1 FROM pg_database WHERE datname = :n"),
-                           {"n": TEST_DB_NAME}).scalar()
-        if not exists:
-            c.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
-    env = {**os.environ, "ATLAS_DATABASE_URL": URL}
-    r = subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
-                       capture_output=True, text=True)
+
+    def _create_if_missing() -> None:
+        admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
+        try:
+            with admin.connect() as c:
+                exists = c.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :n"),
+                    {"n": TEST_DB_NAME}).scalar()
+                if not exists:
+                    c.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
+        finally:
+            admin.dispose()
+
+    def _upgrade() -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "ATLAS_DATABASE_URL": URL}
+        return subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
+                              capture_output=True, text=True)
+
+    _create_if_missing()
+    r = _upgrade()
     if r.returncode != 0:
-        raise RuntimeError(f"alembic upgrade on {TEST_DB_NAME} failed:\n{r.stderr}")
+        admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
+        try:
+            with admin.connect() as c:
+                c.execute(text(f'DROP DATABASE IF EXISTS "{TEST_DB_NAME}" '
+                               f"WITH (FORCE)"))
+        finally:
+            admin.dispose()
+        _create_if_missing()
+        r = _upgrade()
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"alembic upgrade on {TEST_DB_NAME} failed even on a freshly "
+                f"created database:\n{r.stderr}")
+    _scrub_committed_market_world()
     _prepared = True
+
+
+def _scrub_committed_market_world() -> None:
+    """Session-START hygiene: several test files legitimately COMMIT the seed
+    world (ingest replay, the daily cycle — their assertions need committed
+    gates/chains), and whatever the LAST file of a run committed greets the
+    FIRST file of the next run. Two ghosts came from exactly this: a leftover
+    ACTIVE 'SPY' made compute_models' relative-strength pick a coin-flip, and
+    leftover bar-less seed instruments turned the backfill-inception gates all
+    red. Every run therefore starts from a clean market world; within a run,
+    committing files still scrub after themselves where later files are
+    sensitive. Registry/audit hygiene stays per-file (delta-based tests own
+    their families)."""
+    engine = create_engine(URL)
+    try:
+        with engine.begin() as c:
+            c.execute(text(
+                "TRUNCATE market.price_bars_daily, market.corporate_actions, "
+                "market.fx_rates_daily, market.data_quality_gates, "
+                "market.fundamentals, market.earnings_calendar, "
+                "market.earnings_surprises, market.estimate_snapshots, "
+                "market.instruments RESTART IDENTITY CASCADE"))
+    finally:
+        engine.dispose()
 
 
 def _assert_test_db(session) -> None:

@@ -1,7 +1,9 @@
+import csv
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from sqlalchemy import text
+import pytest
+from sqlalchemy import create_engine, text
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
@@ -10,10 +12,48 @@ from atlas.dcp.market_data.ingest import ingest_day, seed_instruments, write_gat
 from atlas.dcp.market_data.models import GateStatus
 from atlas.dcp.market_data.quality import GateResult
 from atlas.dcp.risk.seed_limits import seed_limit_set
-from tests.conftest import requires_pg
+from tests.conftest import URL, requires_pg
 
 pytestmark = requires_pg
 ROOT = Path(__file__).parents[2]
+
+_SEED_SYMBOLS = sorted({r["symbol"] for r in csv.DictReader(
+    open(ROOT / "seeds" / "instruments_seed.csv"))})
+
+
+def _scrub_committed_seed_world() -> None:
+    """These tests COMMIT the seed world (s.commit() — ingest_day's gates and
+    the audit chain are asserted through the same session). Committed ACTIVE
+    instruments leak into every later test that resolves by symbol: a second
+    active 'SPY' made compute_models' relative-strength pick a coin-flip (the
+    intermittent test_rising_stock_reads_bullish failure), exactly the ATLZ
+    lesson. This module therefore scrubs its own committed world — the seed
+    CSV's symbols and their bars/actions/gates — before and after."""
+    engine = create_engine(URL)
+    try:
+        with engine.begin() as c:
+            c.execute(text(
+                "DELETE FROM market.price_bars_daily WHERE instrument_id IN "
+                "(SELECT id FROM market.instruments WHERE symbol = ANY(:s))"),
+                {"s": _SEED_SYMBOLS})
+            c.execute(text(
+                "DELETE FROM market.corporate_actions WHERE instrument_id IN "
+                "(SELECT id FROM market.instruments WHERE symbol = ANY(:s))"),
+                {"s": _SEED_SYMBOLS})
+            c.execute(text("DELETE FROM market.fx_rates_daily"))
+            c.execute(text("DELETE FROM market.data_quality_gates"))
+            c.execute(text("DELETE FROM market.instruments WHERE symbol = ANY(:s)"),
+                      {"s": _SEED_SYMBOLS})
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _committed_world_isolation(pg_session):
+    # depends on pg_session so the test database exists before the scrub
+    _scrub_committed_seed_world()
+    yield
+    _scrub_committed_seed_world()
 
 
 def test_full_ingestion_day_from_fixtures(clean_audit):

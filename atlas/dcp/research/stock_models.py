@@ -170,7 +170,7 @@ def compute_models(session: Session, instrument_id: str, symbol: str,
     # ---- momentum / relative strength (vs SPY) ----
     spy_iid = session.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = 'SPY' "
-        "ORDER BY is_active DESC LIMIT 1")).scalar()
+        "ORDER BY is_active DESC, id LIMIT 1")).scalar()
     spy_closes = [c for _, _, _, _, c in _adjusted_bars(session, spy_iid, as_of)] \
         if spy_iid is not None else []
     rs_252: float | None = None

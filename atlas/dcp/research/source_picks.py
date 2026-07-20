@@ -268,7 +268,7 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
     on = clock.now().date()
     spy_iid = session.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = 'SPY' "
-        "ORDER BY is_active DESC LIMIT 1")).scalar()
+        "ORDER BY is_active DESC, id LIMIT 1")).scalar()
     spy = _adjusted_closes(session, spy_iid, on) if spy_iid is not None else []
     spy_dates = [d for d, _ in spy]
     graded = immature = 0
