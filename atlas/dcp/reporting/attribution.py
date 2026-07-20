@@ -601,7 +601,11 @@ def scoped_performance(session: Session, scope: str | None = None,
     included_ids = sorted(str(meta[s]["id"]) for s in included if meta[s]["id"])
     excluded_ids = sorted(str(meta[s]["id"]) for s in SATELLITE_FAMILIES
                           if meta[s]["id"] and s not in included)
-    digest = {s: meta[s]["code_sha"] for s in included if meta[s]["code_sha"]}
+    # The raw code SHA(s) of the included strategies — NOT a complete artifact
+    # digest. A real StrategyArtifact digest (P1) will bind code + config + data
+    # identity + risk/execution rules + prompts + model versions + validation
+    # lineage; until then artifact_digest is null and honestly LEGACY_UNBOUND.
+    code_shas = {s: meta[s]["code_sha"] for s in included if meta[s]["code_sha"]}
     authoritative = scope_is_authoritative(scope)
     return {
         "performance_scope": scope,
@@ -615,7 +619,12 @@ def scoped_performance(session: Session, scope: str | None = None,
         # are the non-authoritative views that may carry shadow results.
         "contains_shadow_results": (not authoritative) and (
             bool(included & shadow_sleeves) or scope == RESEARCH_SHADOW_SCOPE),
-        "artifact_digest": digest or None,
+        # interim identity contract (ADR-0018): no complete StrategyArtifact
+        # digest exists yet, so artifact_digest is null and marked LEGACY_UNBOUND;
+        # the raw code SHA(s) travel under their honest name.
+        "artifact_digest": None,
+        "artifact_status": "LEGACY_UNBOUND",
+        "strategy_code_sha": code_shas or None,
         "caveat": scope_caveat(scope),
         "satellite_alpha_pp": cumulative_alpha_pp(session, included=included),
     }

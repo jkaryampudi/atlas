@@ -125,7 +125,12 @@ def attribution_daily(scope: str | None = None) -> object:
         "included_strategy_ids": perf["included_strategy_ids"],
         "excluded_strategy_ids": perf["excluded_strategy_ids"],
         "contains_shadow_results": perf["contains_shadow_results"],
+        # interim identity contract (ADR-0018): artifact_digest is null +
+        # LEGACY_UNBOUND until the P1 StrategyArtifact digest exists; the raw
+        # code SHA(s) travel under strategy_code_sha (not a full artifact digest).
         "artifact_digest": perf["artifact_digest"],
+        "artifact_status": perf["artifact_status"],
+        "strategy_code_sha": perf["strategy_code_sha"],
         "caveat": perf["caveat"],
         "satellite_alpha_pp": _dec(perf["satellite_alpha_pp"]),
         # backward-compatible composite flags (mirror the scope authoritativeness)

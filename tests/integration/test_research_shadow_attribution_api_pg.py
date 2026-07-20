@@ -97,6 +97,18 @@ def test_unknown_scope_is_refused(lab):
     assert r.json()["error"]["code"] == "INVALID_SCOPE"
 
 
+def test_artifact_identity_uses_the_interim_legacy_unbound_contract(lab):
+    """ADR-0018: artifact_digest is NOT the code SHA. It is null + LEGACY_UNBOUND
+    until the P1 StrategyArtifact digest exists; the raw code SHA travels under
+    strategy_code_sha, honestly labelled."""
+    _seed(lab, "research_shadow")
+    body = TestClient(app).get(
+        "/v1/portfolio/attribution/daily?scope=research_shadow").json()
+    assert body["artifact_digest"] is None
+    assert body["artifact_status"] == "LEGACY_UNBOUND"
+    assert body["strategy_code_sha"] == {"xsmom": "sha"}   # the raw code SHA
+
+
 def test_paper_xsmom_sleeve_labelled_validated(lab):
     _seed(lab, "paper")
     body = TestClient(app).get("/v1/portfolio/attribution/daily").json()

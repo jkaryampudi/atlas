@@ -123,7 +123,8 @@ def test_scope_metadata_fields_present_and_correct(clean_audit):
     m = scoped_performance(s, sl.RESEARCH_SHADOW_SCOPE)
     assert set(m) >= {"performance_scope", "authoritative", "validation_status",
                       "included_strategy_ids", "excluded_strategy_ids",
-                      "contains_shadow_results", "artifact_digest", "caveat",
+                      "contains_shadow_results", "artifact_digest",
+                      "artifact_status", "strategy_code_sha", "caveat",
                       "satellite_alpha_pp"}
     assert m["performance_scope"] == "research_shadow"
     assert m["authoritative"] is False
@@ -131,7 +132,11 @@ def test_scope_metadata_fields_present_and_correct(clean_audit):
     assert m["caveat"] == "RESEARCH SHADOW — NOT VALIDATED"
     assert m["included_strategy_ids"] == [xid]       # the shadow strategy
     assert m["excluded_strategy_ids"] == [pid]       # the paper one
-    assert m["artifact_digest"] == {"xsmom": "xsha"}
+    # interim identity contract: NO complete digest yet; the raw code SHA is
+    # surfaced honestly, never mislabelled as an artifact_digest
+    assert m["artifact_digest"] is None
+    assert m["artifact_status"] == "LEGACY_UNBOUND"
+    assert m["strategy_code_sha"] == {"xsmom": "xsha"}
 
 
 def test_unknown_state_is_excluded_from_the_authoritative_composite(clean_audit):
