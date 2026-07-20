@@ -111,6 +111,16 @@ from atlas.dcp.market_data.total_return import (
 )
 from atlas.dcp.portfolio.attribution import Attribution, compute_attribution
 from atlas.dcp.trading.bands import BENCHMARK, SLEEVE_LOTS_JOIN
+from atlas.dcp.strategy_lifecycle import (
+    AUTHORITATIVE,
+    AUTHORITATIVE_PORTFOLIO,
+    RESEARCH_SHADOW,
+    RESEARCH_SHADOW_SCOPE,
+    classify,
+    normalize_scope,
+    scope_caveat,
+    scope_is_authoritative,
+)
 from atlas.dcp.trading.core_allocation import CORE_TARGETS
 from atlas.dcp.trading.proposals import _latest_close
 
@@ -479,38 +489,51 @@ def _stored_series(session: Session) -> list[tuple[date, dict[str, Any]]]:
 
 def cumulative_alpha_pp(session: Session, *, snaps: list[_Snap] | None = None,
                         ledger: dict[str, list[_Lot]] | None = None,
+                        included: frozenset[str] | None = None,
                         ) -> Decimal | None:
     """Compounded satellite return minus compounded SPY TR, in percentage
-    points, over every stored session where BOTH legs exist (module
+    points, over every stored session where all INCLUDED legs exist (module
     docstring). Satellite values and the SPY leg come from STORED rows; the
     flow adjustment is recomputed from the immutable lot ledger over the same
-    snapshot windows that produced the rows. None with no measurable day."""
+    snapshot windows that produced the rows. None with no measurable day.
+
+    `included` (ADR-0018 scoping): which satellite sleeves are fused into the
+    composite. Defaults to the FULL SATELLITE_FAMILIES set — byte-identical to
+    the historical unscoped composite. A performance scope chooses this set
+    (authoritative = only paper/live-backed sleeves) so a research_shadow sleeve
+    is EXCLUDED from the authoritative composite by construction, never merely
+    labelled. Choosing a subset only changes WHICH stored values are summed — no
+    stored value or benchmark is re-derived. An empty set yields None."""
+    inc = frozenset(included) if included is not None else frozenset(SATELLITE_FAMILIES)
+    if not inc:
+        return None
     series = _stored_series(session)
     if len(series) < 2:
         return None
     snaps = snaps if snaps is not None else _session_snapshots(session)
     ledger = ledger if ledger is not None else _ledger(session)
     as_of_by_session = {s.session: s.as_of for s in snaps}
+    # all satellite sleeves share the identical SPY-TR benchmark leg; prefer
+    # XSMOM when present so the default (full-set) result is byte-identical.
+    bench_sleeve = XSMOM if XSMOM in inc else min(inc)
     acc_r = acc_b = Decimal(1)
     measured = 0
     for i in range(1, len(series)):
         prev_d, prev_rows = series[i - 1]
         d, rows = series[i]
-        if XSMOM not in rows or PEAD not in rows \
-                or XSMOM not in prev_rows or PEAD not in prev_rows:
+        if not (inc <= rows.keys() and inc <= prev_rows.keys()):
             continue
         w0, w1 = as_of_by_session.get(prev_d), as_of_by_session.get(d)
         if w0 is None or w1 is None:
             continue
         f_in = f_out = Decimal(0)
-        for s in (XSMOM, PEAD):
-            i_s, o_s = _flows(ledger[s], w0, w1)
+        for s in inc:
+            i_s, o_s = _flows(ledger.get(s, []), w0, w1)
             f_in, f_out = f_in + i_s, f_out + o_s
-        prev_v = Decimal(prev_rows[XSMOM].value_aud) \
-            + Decimal(prev_rows[PEAD].value_aud)
-        v = Decimal(rows[XSMOM].value_aud) + Decimal(rows[PEAD].value_aud)
+        prev_v = sum((Decimal(prev_rows[s].value_aud) for s in inc), Decimal(0))
+        v = sum((Decimal(rows[s].value_aud) for s in inc), Decimal(0))
         r = flow_adjusted_return(v, prev_v, f_in, f_out)
-        bench = rows[XSMOM].benchmark_ret_1d      # the shared SPY TR leg
+        bench = rows[bench_sleeve].benchmark_ret_1d      # the shared SPY TR leg
         if r is None or bench is None:
             continue
         acc_r *= 1 + r
@@ -519,6 +542,82 @@ def cumulative_alpha_pp(session: Session, *, snaps: list[_Snap] | None = None,
     if measured == 0:
         return None
     return ((acc_r - acc_b) * 100).quantize(_PP2, rounding=ROUND_HALF_EVEN)
+
+
+# --------------------------------------------------------- scoped performance
+# ADR-0018: three explicit views over the SAME stored rows. Scoping SELECTS
+# which satellite sleeves feed the composite (via the canonical classify), never
+# re-derives a stored value — the value identity stays intact and the raw
+# per-sleeve numbers are byte-identical across scopes. research_shadow sleeves
+# are EXCLUDED from the authoritative composite by construction.
+
+def satellite_sleeve_meta(session: Session) -> dict[str, dict[str, object]]:
+    """Per satellite sleeve, the latest backing strategy's {id, state, code_sha}
+    (read-only; never touches values). The classification + identity source for
+    the scoped views."""
+    out: dict[str, dict[str, object]] = {}
+    for sleeve, family in SATELLITE_FAMILIES.items():
+        row = session.execute(text(
+            "SELECT id, state, code_sha FROM quant.strategies "
+            "WHERE family = :f ORDER BY created_at DESC, id DESC LIMIT 1"),
+            {"f": family}).mappings().first()
+        out[sleeve] = ({"id": str(row["id"]), "state": row["state"],
+                        "code_sha": row["code_sha"]} if row is not None
+                       else {"id": None, "state": None, "code_sha": None})
+    return out
+
+
+def included_satellite_sleeves(session: Session, scope: str, *,
+                               meta: dict[str, dict[str, object]] | None = None,
+                               ) -> frozenset[str]:
+    """The satellite sleeves that belong in `scope`, chosen by the canonical
+    classify (fail-closed: an unknown/None state is never authoritative). This
+    is the ONLY place the include-set is decided."""
+    scope = normalize_scope(scope)
+    meta = meta if meta is not None else satellite_sleeve_meta(session)
+    cats = {s: classify(m["state"]) for s, m in meta.items()}  # type: ignore[arg-type]
+    if scope == AUTHORITATIVE_PORTFOLIO:
+        return frozenset(s for s, c in cats.items() if c == AUTHORITATIVE)
+    if scope == RESEARCH_SHADOW_SCOPE:
+        return frozenset(s for s, c in cats.items() if c == RESEARCH_SHADOW)
+    # all_simulated: authoritative + research_shadow (known, present) sleeves
+    return frozenset(s for s, c in cats.items()
+                     if c in (AUTHORITATIVE, RESEARCH_SHADOW))
+
+
+def scoped_performance(session: Session, scope: str | None = None,
+                       ) -> dict[str, object]:
+    """The ADR-0018 scoped-performance envelope for `scope` (default =
+    authoritative_portfolio). Carries the mandatory scope metadata and the
+    scoped satellite_alpha_pp — the composite fused over ONLY the scope's
+    sleeves. A shadow return can never enter the authoritative composite because
+    the shadow sleeve is not in the include-set."""
+    scope = normalize_scope(scope)
+    meta = satellite_sleeve_meta(session)
+    included = included_satellite_sleeves(session, scope, meta=meta)
+    shadow_sleeves = frozenset(
+        s for s, m in meta.items() if classify(m["state"]) == RESEARCH_SHADOW)  # type: ignore[arg-type]
+    included_ids = sorted(str(meta[s]["id"]) for s in included if meta[s]["id"])
+    excluded_ids = sorted(str(meta[s]["id"]) for s in SATELLITE_FAMILIES
+                          if meta[s]["id"] and s not in included)
+    digest = {s: meta[s]["code_sha"] for s in included if meta[s]["code_sha"]}
+    authoritative = scope_is_authoritative(scope)
+    return {
+        "performance_scope": scope,
+        "authoritative": authoritative,
+        "validation_status": ("validated" if authoritative else
+                              (RESEARCH_SHADOW if scope == RESEARCH_SHADOW_SCOPE
+                               else "non_authoritative")),
+        "included_strategy_ids": included_ids,
+        "excluded_strategy_ids": excluded_ids,
+        # authoritative excludes shadow by construction; the other two scopes
+        # are the non-authoritative views that may carry shadow results.
+        "contains_shadow_results": (not authoritative) and (
+            bool(included & shadow_sleeves) or scope == RESEARCH_SHADOW_SCOPE),
+        "artifact_digest": digest or None,
+        "caveat": scope_caveat(scope),
+        "satellite_alpha_pp": cumulative_alpha_pp(session, included=included),
+    }
 
 
 @dataclass(frozen=True)
