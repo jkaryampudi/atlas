@@ -1378,7 +1378,15 @@ def _record_fill(session: Session, clock: Clock, order: Any, fill: Fill) -> Fill
 
 def snapshot(session: Session, clock: Clock) -> SnapshotResult:
     """Mark the book: positions at latest vendor closes, FX-translated, through
-    compute_snapshot (Doc 03) into a trading.portfolio_snapshots row."""
+    compute_snapshot (Doc 03) into a trading.portfolio_snapshots row.
+
+    Fail-closed (ADR-0018): an AUTHORITATIVE NAV snapshot is written ONLY if the
+    book passes the integrity guard — no open/disposed lot or fill attributable to
+    a non-authoritative strategy. The snapshot's audit event is stamped
+    integrity_status='VERIFIED'; a breach raises before any row is written (the
+    snapshot is never silently created over corrupt data)."""
+    from atlas.dcp.portfolio.attribution import assert_authoritative_book
+    assert_authoritative_book(session)
     now = clock.now()
     on = now.date()
     positions = session.execute(text(
@@ -1438,7 +1446,10 @@ def snapshot(session: Session, clock: Clock) -> SnapshotResult:
         entity_id=str(snapshot_id), actor_type="dcp", actor_id="trading_lifecycle",
         payload={"snapshot_id": str(snapshot_id), "nav_aud": str(snap.nav_aud),
                  "cash_aud": str(snap.cash_aud),
-                 "open_risk_pct": str(open_risk_pct)})
+                 "open_risk_pct": str(open_risk_pct),
+                 # ADR-0018 integrity stamp: this authoritative snapshot passed
+                 # the whole-book integrity guard at write time.
+                 "integrity_status": "VERIFIED"})
     if breaker_after is not breaker_before:
         audit.append(
             event_type="drawdown.breaker.changed", entity_type="portfolio",

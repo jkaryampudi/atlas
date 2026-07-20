@@ -22,7 +22,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from atlas.core.db import session_scope
-from atlas.dcp.portfolio.attribution import compute_attribution
+from atlas.dcp.portfolio.attribution import (
+    PortfolioIntegrityError,
+    assert_authoritative_book,
+    compute_attribution,
+)
 from atlas.dcp.reporting.attribution import (
     cumulative_by_sleeve,
     satellite_sleeve_meta,
@@ -35,6 +39,7 @@ from atlas.dcp.strategy_lifecycle import (
     classify,
     is_authoritative,
     normalize_scope,
+    scope_is_authoritative,
     validation_label,
 )
 
@@ -51,15 +56,26 @@ def _dec(v: object) -> str | None:
 
 
 @router.get("/snapshot")
-def snapshot() -> dict[str, object]:
+def snapshot() -> object:
+    """Latest authoritative NAV snapshot. Fail-closed (ADR-0018): re-verifies book
+    integrity at serve time — a snapshot is NEVER served as authoritative if the
+    book holds non-authoritative lots/fills (it is not silently recalculated or
+    repaired; the caller gets an explicit integrity error)."""
     with session_scope() as s:
+        try:
+            assert_authoritative_book(s)
+        except PortfolioIntegrityError as e:
+            return _envelope(409, "INTEGRITY_FAILED",
+                             f"snapshot withheld — {e.reason_code}")
         r = s.execute(text(
             "SELECT as_of, nav_aud, cash_aud, holdings, exposures, open_risk_pct "
             "FROM trading.portfolio_snapshots ORDER BY as_of DESC LIMIT 1")).mappings().first()
     if not r:
         raise HTTPException(404, "no snapshot yet")
     return {**dict(r), "as_of": r["as_of"].isoformat(),
-            "nav_aud": str(r["nav_aud"]), "cash_aud": str(r["cash_aud"])}
+            "nav_aud": str(r["nav_aud"]), "cash_aud": str(r["cash_aud"]),
+            "performance_scope": "authoritative_portfolio", "authoritative": True,
+            "integrity_status": "VERIFIED"}
 
 
 def _envelope(status: int, code: str, message: str) -> JSONResponse:
@@ -103,6 +119,15 @@ def attribution_daily(scope: str | None = None) -> object:
     except ValueError as e:
         return _envelope(400, "INVALID_SCOPE", str(e))
     with session_scope() as s:
+        # ADR-0018: the authoritative view re-verifies book integrity before
+        # serving; a breach is refused, never silently served. The explicitly
+        # non-authoritative scopes (research_shadow / all_simulated) are exempt.
+        if scope_is_authoritative(scope):
+            try:
+                assert_authoritative_book(s)
+            except PortfolioIntegrityError as e:
+                return _envelope(409, "INTEGRITY_FAILED",
+                                 f"authoritative attribution withheld — {e.reason_code}")
         rows = s.execute(text(
             "SELECT session_date, sleeve, value_aud, ret_1d, benchmark_ret_1d "
             "FROM reporting.attribution_daily "

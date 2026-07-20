@@ -109,7 +109,11 @@ from atlas.dcp.market_data.total_return import (
     load_adjusted_dividends,
     total_return_series,
 )
-from atlas.dcp.portfolio.attribution import Attribution, compute_attribution
+from atlas.dcp.portfolio.attribution import (
+    Attribution,
+    assert_authoritative_book,
+    compute_attribution,
+)
 from atlas.dcp.trading.bands import BENCHMARK, SLEEVE_LOTS_JOIN
 from atlas.dcp.strategy_lifecycle import (
     AUTHORITATIVE,
@@ -458,10 +462,15 @@ def compute_attribution_day(session: Session,
                             clock: Clock) -> AttributionDayReport | None:
     """The daily-cycle entry point: attribute the latest snapshot at or before
     the injected now. None when no snapshot exists yet (nothing to decompose).
-    Safe to re-run — the upsert writes identical rows (module docstring)."""
+    Safe to re-run — the upsert writes identical rows (module docstring).
+
+    Fail-closed (ADR-0018): the authoritative attribution snapshot is written only
+    if the book passes the integrity guard — a non-authoritative lot/fill raises
+    before any row is upserted."""
     snaps = [s for s in _session_snapshots(session) if s.as_of <= clock.now()]
     if not snaps:
         return None
+    assert_authoritative_book(session)
     return _compute_for(session, clock, snaps, len(snaps) - 1, _ledger(session))
 
 
