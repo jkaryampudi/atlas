@@ -58,6 +58,43 @@ from typing import Any, Sequence
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from atlas.dcp.strategy_lifecycle import classify, is_authoritative
+
+
+class NonAuthoritativeBookError(RuntimeError):
+    """Fail-closed invariant breach (ADR-0018): the authoritative whole-book
+    report would include capital attributable to a non-authoritative strategy."""
+
+
+def assert_authoritative_book(session: Session) -> None:
+    """Fail-closed invariant protecting AUTHORITATIVE whole-book reporting (NAV,
+    realised P&L, shortfall): no OPEN tax lot may be attributable to a
+    non-authoritative strategy (ADR-0018). A lot is attributed to a strategy iff
+    its proposal's signal_ids reference that strategy's quant.signals; is_core
+    (passive) lots carry no signal id and are authoritative by construction.
+    research_shadow deploys no capital (the bridge guard), so this holds today —
+    if a lot ever maps to a research_shadow / non-authoritative strategy, this
+    RAISES rather than silently reporting shadow capital as authoritative book
+    performance. Classification is the canonical strategy_lifecycle.is_authoritative
+    (fail-closed: unknown/None is never authoritative)."""
+    rows = session.execute(text(
+        "SELECT DISTINCT st.family, st.state FROM trading.tax_lots tl "
+        "JOIN trading.executions e ON e.id = tl.execution_id "
+        "JOIN trading.orders o ON o.id = e.order_id "
+        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        "JOIN quant.signals sig ON sig.id = ANY(tp.signal_ids) "
+        "JOIN quant.strategies st ON st.id = sig.strategy_id "
+        "WHERE tl.disposed_at IS NULL")).mappings().all()
+    offenders = [(r["family"], r["state"]) for r in rows
+                 if not is_authoritative(r["state"])]
+    if offenders:
+        detail = ", ".join(f"{f} ({classify(st)}: {st})" for f, st in offenders)
+        raise NonAuthoritativeBookError(
+            "authoritative whole-book report refused: open lots are attributable "
+            f"to non-authoritative strategies — {detail}. A non-authoritative "
+            "strategy must deploy no capital (ADR-0018); resolve the position "
+            "before reporting it as authoritative book performance.")
+
 _CENT = Decimal("0.01")
 _BPS = Decimal("0.0001")
 _USD4 = Decimal("0.0001")   # research.agent_runs.cost_usd is numeric(10,4)
@@ -123,7 +160,12 @@ def _shortfall_line(fills: Sequence[Any]) -> ShortfallLine:
 
 def compute_attribution(session: Session, *, year: int, month: int) -> Attribution:
     """The Doc 04 §14 monthly attribution over committed tables. Read-only:
-    safe to call from the API surface at any time, including mid-cycle."""
+    safe to call from the API surface at any time, including mid-cycle.
+
+    Fail-closed (ADR-0018): refuses if the authoritative book holds any open lot
+    attributable to a non-authoritative strategy — a whole-book number must never
+    silently include research_shadow / non-authoritative capital."""
+    assert_authoritative_book(session)
     start, end = _month_bounds(year, month)
     bounds = {"s": start, "e": end}
 
