@@ -31,7 +31,8 @@ import pytest
 from sqlalchemy import text
 
 from atlas.core.clock import FrozenClock
-from atlas.dcp.factory.features import RANKABLE_FEATURES, _make_compute
+from atlas.dcp.factory.families.momentum import _make_compute
+from atlas.dcp.factory.features import RANKABLE_FEATURES
 from atlas.dcp.features.definitions import MOMENTUM_12_1
 from atlas.dcp.features.momentum import compute_momentum
 from atlas.dcp.features.store import dataset_version_for, feature_at, materialize

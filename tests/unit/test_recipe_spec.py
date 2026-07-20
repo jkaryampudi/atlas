@@ -173,7 +173,8 @@ def test_replace_revalidates():
 def test_momentum_grid_pinned_and_closed():
     assert MOMENTUM_GRID == ((252, 21), (126, 21), (63, 21), (252, 0))
     assert sorted(RANKABLE_FEATURES) == [
-        "momentum_12_0", "momentum_12_1", "momentum_3_1", "momentum_6_1"]
+        "low_vol_252", "momentum_12_0", "momentum_12_1", "momentum_3_1",
+        "momentum_6_1"]
 
 
 def test_feature_lineage_binding_golden():
@@ -187,6 +188,7 @@ def test_feature_lineage_binding_golden():
         "momentum_6_1": "momentum",
         "momentum_3_1": "momentum",
         "momentum_12_0": "momentum",
+        "low_vol_252": "low-vol",
     }
     assert set(FEATURE_LINEAGE) == set(RANKABLE_FEATURES)
 
@@ -198,16 +200,17 @@ def test_momentum_12_1_is_the_phase1_definition_by_identity():
 
 
 def test_family_members_pin_their_parameters_and_code():
-    import atlas.dcp.factory.features as factory_features
+    import atlas.dcp.factory.families.momentum as momentum_family
     for (lookback, skip) in MOMENTUM_GRID:
         name = family_member_name(lookback, skip)
         fd = RANKABLE_FEATURES[name]
         assert fd.spec["lookback_sessions"] == lookback
         assert fd.spec["skip_sessions"] == skip
         if name != "momentum_12_1":
-            # the factory module's own bytes are part of the pin: widening
-            # the grid re-hashes every member (reviewed change)
-            assert str(factory_features.__file__) in [
+            # the FAMILY module's own bytes are part of the pin (families/
+            # restructure): widening the momentum grid re-hashes the momentum
+            # members — and ONLY them; other families' pins are untouched
+            assert str(momentum_family.__file__) in [
                 str(p) for p in fd.code_paths]
     with pytest.raises(KeyError, match="reviewed change"):
         get_rank_feature("momentum_1_0")

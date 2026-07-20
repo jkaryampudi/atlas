@@ -76,10 +76,13 @@ def _test_session(s):
 def test_catalog_serves_the_closed_vocabulary(client):
     c, _s = client
     d = c.get("/v1/factory/recipes/catalog").json()
-    names = {f["name"] for f in d["features"]}
-    assert names == {"momentum_12_1", "momentum_6_1", "momentum_3_1",
-                     "momentum_12_0"}
-    assert all(f["lineage"] == "momentum" for f in d["features"])
+    by_name = {f["name"]: f for f in d["features"]}
+    assert set(by_name) == {"momentum_12_1", "momentum_6_1", "momentum_3_1",
+                            "momentum_12_0", "low_vol_252"}
+    for n in ("momentum_12_1", "momentum_6_1", "momentum_3_1", "momentum_12_0"):
+        assert by_name[n]["lineage"] == "momentum"
+    assert by_name["low_vol_252"]["lineage"] == "low-vol"
+    assert isinstance(by_name["low_vol_252"]["lineage_count"], int)
     g = d["grammar"]
     assert g["direction"] == ["desc"] and g["rebalance"] == ["monthly"]
     assert g["cost_bps_per_side"] == 10
