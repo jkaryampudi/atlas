@@ -22,7 +22,7 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 1354 passing (isolated to the atlas_test database)
+pytest             # currently 1498 passing (isolated to the atlas_test database; bootstrap self-heals a corrupted test DB)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
