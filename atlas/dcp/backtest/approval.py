@@ -90,14 +90,53 @@ def record_and_transition(session: Session, *, strategy_id: str, backtest_id: st
             "WHERE id=:sid AND state='backtested'"), {"sid": strategy_id})
 
 
+def require_signed_validation_artifact(session: Session, strategy_id: str) -> None:
+    """Fail-closed promotion gate (ADR-0018). Promotion to 'paper' requires a
+    SIGNED validation artifact: the strategy's LATEST quant.validation_reports
+    row must have verdict='approve'. A missing report or a 'reject' refuses —
+    there is deliberately NO override/convenience parameter on this call path.
+
+    Freshness: if the strategy was ever downgraded to research_shadow
+    (quant.strategies.shadowed_at is set), the 'approve' report must have been
+    created STRICTLY AFTER the downgrade. The stale pre-downgrade approval that
+    the independent review rejected (deployed price-return signal != validated
+    total-return signal; DSR ~0.85 at lineage count) can never re-promote the
+    executable — a NEW signed validation artifact is mandatory.
+    """
+    row = session.execute(text(
+        "SELECT shadowed_at FROM quant.strategies WHERE id = :sid"),
+        {"sid": strategy_id}).mappings().first()
+    if row is None:
+        raise ValueError(f"strategy {strategy_id} does not exist")
+    report = session.execute(text(
+        "SELECT verdict, created_at FROM quant.validation_reports "
+        "WHERE strategy_id = :sid ORDER BY created_at DESC LIMIT 1"),
+        {"sid": strategy_id}).mappings().first()
+    if report is None:
+        raise ValueError(
+            "no validation report on record — promotion requires a signed "
+            "validation artifact (ADR-0018 fail-closed)")
+    if report["verdict"] != "approve":
+        raise ValueError(
+            f"latest validation report verdict is {report['verdict']!r}, not "
+            "'approve' — refusing paper transition")
+    if row["shadowed_at"] is not None and report["created_at"] <= row["shadowed_at"]:
+        raise ValueError(
+            "the latest 'approve' validation report predates the research_shadow "
+            "downgrade — a NEW signed validation artifact is required after the "
+            "ADR-0018 downgrade; the stale approval cannot be reused")
+
+
 def transition_to_paper(session: Session, audit: PostgresAuditLog, *,
                         strategy_id: str, approved_by: str,
                         decision_ref: str, clock: Clock) -> None:
     """'validated' -> 'paper': the Principal's signature, never automatic.
 
-    Guards fail closed: the row must be exactly 'validated' and its LATEST
-    validation report must be an 'approve' — a rejected or missing report
-    cannot be ridden over by this call. approved_by names the human;
+    Guards fail closed: the row must be exactly 'validated' (a research_shadow /
+    suspended / backtested strategy cannot jump the queue) and it must carry a
+    fresh signed validation artifact (require_signed_validation_artifact) — a
+    rejected, missing, or stale-pre-downgrade report cannot be ridden over by
+    this call, and there is no override flag. approved_by names the human;
     decision_ref points at the durable record of the decision (ADR). The
     transition is a material action and lands on the audit chain.
     """
@@ -110,13 +149,7 @@ def transition_to_paper(session: Session, audit: PostgresAuditLog, *,
         raise ValueError(f"strategy {strategy_id} is '{state}', not 'validated' "
                          "— paper approval requires the artifact-gated "
                          "validation transition first")
-    verdict = session.execute(text(
-        "SELECT verdict FROM quant.validation_reports "
-        "WHERE strategy_id = :sid ORDER BY created_at DESC LIMIT 1"),
-        {"sid": strategy_id}).scalar()
-    if verdict != "approve":
-        raise ValueError(f"latest validation report verdict is {verdict!r}, "
-                         "not 'approve' — refusing paper transition")
+    require_signed_validation_artifact(session, strategy_id)
     session.execute(text(
         "UPDATE quant.strategies SET state='paper', approved_by=:by, "
         "approved_at=:ts WHERE id=:sid AND state='validated'"),

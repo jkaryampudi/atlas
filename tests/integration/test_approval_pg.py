@@ -1,5 +1,5 @@
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -13,6 +13,7 @@ from atlas.core.clock import FrozenClock  # noqa: E402
 from atlas.dcp.backtest.approval import (  # noqa: E402
     evaluate_approval,
     record_and_transition,
+    require_signed_validation_artifact,
     transition_to_paper,
 )
 from atlas.dcp.backtest.registry import register_trial  # noqa: E402
@@ -125,7 +126,7 @@ def test_paper_transition_requires_approve_report(pg_session):
         "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
     )).scalar_one()  # state forged by hand: no validation report exists
     audit = PostgresAuditLog(s, CLOCK)
-    with pytest.raises(ValueError, match="refusing paper transition"):
+    with pytest.raises(ValueError, match="signed validation artifact"):
         transition_to_paper(s, audit, strategy_id=str(sid),
                             approved_by="test principal",
                             decision_ref="ADR-test", clock=CLOCK)
@@ -171,6 +172,78 @@ def test_paper_transition_refuses_rejected_strategy(pg_session):
         transition_to_paper(s, audit, strategy_id=str(sid),
                             approved_by="test principal",
                             decision_ref="ADR-test", clock=CLOCK)
+
+
+# ---------------------------------------------------------------------------
+# P0 (ADR-0018) fail-closed promotion gate — objectives 7b / 7c + freshness
+# ---------------------------------------------------------------------------
+
+def test_p0_missing_validation_artifact_fails_closed(pg_session):
+    """Objective 7b: with no validation report at all, the signed-artifact gate
+    refuses — promotion cannot proceed on a missing artifact."""
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    with pytest.raises(ValueError, match="signed validation artifact"):
+        require_signed_validation_artifact(s, str(sid))
+
+
+def test_p0_failed_gate_cannot_be_overridden_by_convenience_flag(pg_session):
+    """Objective 7c: a strategy whose latest gate is a 'reject' cannot be
+    promoted, AND there is no convenience/override parameter that bypasses the
+    artifact requirement (an unexpected kwarg raises TypeError — no such flag
+    exists in the API)."""
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, '{}', 'reject', 'gate failed')"), {"sid": sid})
+    audit = PostgresAuditLog(s, CLOCK)
+    with pytest.raises(ValueError, match="refusing paper transition"):
+        transition_to_paper(s, audit, strategy_id=str(sid),
+                            approved_by="test principal",
+                            decision_ref="ADR-test", clock=CLOCK)
+    # No override/force/skip flag exists on the promotion path.
+    with pytest.raises(TypeError):
+        transition_to_paper(s, audit, strategy_id=str(sid),  # type: ignore[call-arg]
+                            approved_by="test principal",
+                            decision_ref="ADR-test", clock=CLOCK, force=True)
+
+
+def test_p0_stale_pre_downgrade_approval_cannot_re_promote(pg_session):
+    """ADR-0018 freshness: a strategy downgraded to research_shadow (shadowed_at
+    set) cannot be re-promoted on the STALE approve report that predates the
+    downgrade — a NEW signed artifact created after shadowed_at is mandatory."""
+    s = pg_session
+    _clean(s)
+    shadowed_at = CLOCK.now()
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state, "
+        " shadowed_at) VALUES ('momentum','trend_rs_vol','1.0.0','{}',"
+        " 'validated', :sh) RETURNING id"), {"sh": shadowed_at}).scalar_one()
+    # Stale approve report: created BEFORE the downgrade.
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons, created_at) "
+        "VALUES (:sid, NULL, '{}', 'approve', '', :ca)"),
+        {"sid": sid, "ca": shadowed_at - timedelta(days=7)})
+    with pytest.raises(ValueError, match="predates the research_shadow"):
+        require_signed_validation_artifact(s, str(sid))
+    # A NEW approve report created after the downgrade satisfies the gate.
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons, created_at) "
+        "VALUES (:sid, NULL, '{}', 'approve', '', :ca)"),
+        {"sid": sid, "ca": shadowed_at + timedelta(days=1)})
+    require_signed_validation_artifact(s, str(sid))  # no raise
 
 
 # ---------------------------------------------------------------------------
