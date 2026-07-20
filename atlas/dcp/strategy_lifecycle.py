@@ -46,3 +46,13 @@ def is_research_shadow(state: str | None) -> bool:
     """True iff the strategy has been downgraded to non-authoritative shadow
     status by the independent-review process (ADR-0018)."""
     return state == RESEARCH_SHADOW
+
+
+def validation_label(state: str | None) -> dict[str, object]:
+    """The single non-authoritative label surface (ADR-0018): every read surface
+    that presents a strategy or its sleeve derives {authoritative,
+    validation_status} from state, so a research_shadow strategy is shown but
+    never rendered/exported as validated performance."""
+    return {"authoritative": is_authoritative(state),
+            "validation_status": ("validated" if is_authoritative(state)
+                                  else (state or "unknown"))}

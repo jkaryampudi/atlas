@@ -123,6 +123,19 @@ INVESTED = (CORE, XSMOM, PEAD)
 SATELLITE_FAMILIES: dict[str, str] = {XSMOM: "xsmom-pit-tr", PEAD: "pead-sue-tr"}
 INDIA_LEG = "INDA"                      # ADR-0012 core India leg
 
+
+def satellite_sleeve_states(session: Session) -> dict[str, str | None]:
+    """The current quant.strategies.state of each satellite sleeve's backing
+    strategy (ADR-0018 label source). Read-only, returns state strings only —
+    the sleeve VALUES/returns/benchmarks are never read or changed here, so the
+    value identity (core+xsmom+pead+cash==total) is untouched. A downgraded
+    (research_shadow) family surfaces as a non-authoritative label, never an
+    excluded or zeroed sleeve."""
+    return {sleeve: session.execute(text(
+        "SELECT state FROM quant.strategies WHERE family = :f "
+        "ORDER BY created_at DESC, id DESC LIMIT 1"), {"f": family}).scalar()
+        for sleeve, family in SATELLITE_FAMILIES.items()}
+
 _CENT = Decimal("0.01")
 _RET8 = Decimal("0.00000001")           # stored return precision (8dp fraction)
 _PP2 = Decimal("0.01")                  # percentage points, 2dp
@@ -653,9 +666,19 @@ _BENCH_LABEL = {CORE: "55:15 SPY/INDA TR blend", XSMOM: "SPY TR",
                 PEAD: "SPY TR", CASH: "0", TOTAL: "SPY TR"}
 
 
-def render_monthly(m: MonthlyAttribution, shortfall: Attribution) -> str:
+def render_monthly(m: MonthlyAttribution, shortfall: Attribution,
+                   non_authoritative_sleeves: set[str] | None = None) -> str:
     """The docs/reports/attribution/YYYY-MM.md body. Every figure is a
-    quantized Decimal formatted here for reading, never re-derived."""
+    quantized Decimal formatted here for reading, never re-derived.
+
+    `non_authoritative_sleeves` (ADR-0018): satellite sleeves whose backing
+    strategy is research_shadow. When non-empty, the report carries a prominent
+    NOT-VALIDATED caveat and tags those rows — the figures are unchanged; only
+    their status is labelled so an export can never present shadow results as
+    validated. Defaults to none (unlabelled), so historical renders are
+    byte-identical."""
+    shadow = set(non_authoritative_sleeves or ())
+
     def pct(v: Decimal | None) -> str:
         return "n/a" if v is None else f"{v:+.2f}%"
 
@@ -665,9 +688,17 @@ def render_monthly(m: MonthlyAttribution, shortfall: Attribution) -> str:
     def money(v: Decimal | None) -> str:
         return "n/a" if v is None else f"A${v:,.2f}"
 
-    lines = [
-        f"# Attribution — {m.period}",
-        "",
+    lines = [f"# Attribution — {m.period}", ""]
+    if shadow:
+        lines += [
+            f"> **RESEARCH SHADOW — NOT VALIDATED (ADR-0018).** The "
+            f"{', '.join(sorted(shadow))} sleeve(s) are non-authoritative: their "
+            "returns, excess, and the satellite-alpha figure below are shown for "
+            "observation only and must NOT be read or exported as validated "
+            "performance. No figure is changed by this label.",
+            "",
+        ]
+    lines += [
         "Deterministic DCP computation (atlas/dcp/reporting/attribution.py; "
         "conventions in its module docstring). Core (beta) is graded against "
         "the signed ADR-0012 55:15 SPY/INDA total-return blend; the satellite "
@@ -686,8 +717,9 @@ def render_monthly(m: MonthlyAttribution, shortfall: Attribution) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for s in m.sleeves:
+        tag = " — RESEARCH SHADOW / NOT VALIDATED" if s.sleeve in shadow else ""
         lines.append(
-            f"| {s.sleeve} ({_BENCH_LABEL[s.sleeve]}) | {s.sessions} "
+            f"| {s.sleeve} ({_BENCH_LABEL[s.sleeve]}){tag} | {s.sessions} "
             f"| {pct(s.ret_pct)} | {pct(s.benchmark_pct)} "
             f"| {pp(s.excess_pp)} | {money(s.contribution_aud)} "
             f"| {money(s.end_value_aud)} |")
@@ -722,7 +754,14 @@ def generate_monthly_report(session: Session, clock: Clock, *, year: int,
     (append-only chain — every material action emits an event)."""
     m = compute_monthly(session, year=year, month=month)
     shortfall = compute_attribution(session, year=year, month=month)
-    body = render_monthly(m, shortfall)
+    # ADR-0018: which satellite sleeves are non-authoritative (research_shadow)?
+    from atlas.dcp.strategy_lifecycle import is_authoritative
+    states = satellite_sleeve_states(session)
+    # a sleeve with no backing strategy (state None) is unallocated, not shadow;
+    # only a PRESENT non-authoritative (research_shadow) strategy earns the caveat.
+    non_auth = {sleeve for sleeve, st in states.items()
+                if st is not None and not is_authoritative(st)}
+    body = render_monthly(m, shortfall, non_authoritative_sleeves=non_auth)
     out_dir = reports_root / "attribution"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{m.period}.md"
@@ -732,6 +771,7 @@ def generate_monthly_report(session: Session, clock: Clock, *, year: int,
         entity_id=m.period, actor_type="dcp", actor_id="attribution",
         payload={"period": m.period, "path": str(path),
                  "headline": m.headline,
+                 "non_authoritative_sleeves": sorted(non_auth),
                  "nav_change_aud": str(m.nav_change_aud),
                  "satellite_alpha_pp": (str(m.satellite_alpha_pp)
                                         if m.satellite_alpha_pp is not None

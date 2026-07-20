@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.signals.xsmom.generate import next_rebalance_session
-from atlas.dcp.strategy_lifecycle import is_authoritative
+from atlas.dcp.strategy_lifecycle import validation_label as _validation_label
 
 router = APIRouter()
 
@@ -26,17 +26,6 @@ _LIVE_STATES = ("paper", "live", "suspended")
 # Display surface (ADR-0018): research_shadow is SHOWN but never as validated —
 # so a downgraded strategy is visibly labelled, never silently hidden.
 _DISPLAY_STATES = ("paper", "live", "suspended", "research_shadow")
-
-
-def _validation_label(state: str | None) -> dict[str, object]:
-    """ADR-0018 non-authoritative label: a research_shadow (or otherwise
-    non-paper/live) strategy is presented but never counted as validated
-    performance — the console renders `authoritative=false` distinctly."""
-    return {
-        "authoritative": is_authoritative(state),
-        "validation_status": ("validated" if is_authoritative(state)
-                              else (state or "unknown")),
-    }
 
 
 def _f(pattern: str, text_: str) -> float | None:

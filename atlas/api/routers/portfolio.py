@@ -23,7 +23,12 @@ from sqlalchemy import text
 
 from atlas.core.db import session_scope
 from atlas.dcp.portfolio.attribution import compute_attribution
-from atlas.dcp.reporting.attribution import cumulative_alpha_pp, cumulative_by_sleeve
+from atlas.dcp.reporting.attribution import (
+    cumulative_alpha_pp,
+    cumulative_by_sleeve,
+    satellite_sleeve_states,
+)
+from atlas.dcp.strategy_lifecycle import is_authoritative, validation_label
 
 router = APIRouter()
 
@@ -68,19 +73,39 @@ def attribution_daily() -> dict[str, object]:
             "ORDER BY session_date, sleeve")).all()
         cumulative = cumulative_by_sleeve(s)
         alpha = cumulative_alpha_pp(s)
+        # ADR-0018 label source: the backing strategy state per satellite sleeve.
+        # Values/returns/benchmarks are untouched — this only tags the rows so a
+        # research_shadow sleeve is never presented/exported as validated.
+        states = satellite_sleeve_states(s)
+
+    def _label(sleeve: str) -> dict[str, object]:
+        # only a satellite sleeve WITH a backing strategy carries a verdict;
+        # core/cash/total and an unallocated sleeve (no strategy row -> None) are
+        # structural and get no authoritative/validation_status field.
+        st = states.get(sleeve)
+        return validation_label(st) if st is not None else {}
+
+    # the satellite composite is non-authoritative iff ANY PRESENT satellite
+    # strategy is non-authoritative (an absent sleeve does not drag it down).
+    satellite_authoritative = not any(
+        st is not None and not is_authoritative(st) for st in states.values())
     return {
         "rows": [{"session_date": r.session_date.isoformat(),
                   "sleeve": r.sleeve,
                   "value_aud": _dec(r.value_aud),
                   "ret_1d": _dec(r.ret_1d),
-                  "benchmark_ret_1d": _dec(r.benchmark_ret_1d)}
+                  "benchmark_ret_1d": _dec(r.benchmark_ret_1d),
+                  **_label(r.sleeve)}
                  for r in rows],
         "cumulative": {c.sleeve: {"sessions": c.sessions,
                                   "ret_pct": _dec(c.ret_pct),
                                   "benchmark_pct": _dec(c.benchmark_pct),
                                   "excess_pp": _dec(c.excess_pp)}
                        for c in cumulative},
-        "satellite_alpha_pp": _dec(alpha)}
+        "satellite_alpha_pp": _dec(alpha),
+        "satellite_alpha_authoritative": satellite_authoritative,
+        "satellite_alpha_validation_status": (
+            "validated" if satellite_authoritative else "research_shadow")}
 
 
 @router.get("/attribution/{period}")

@@ -1725,8 +1725,14 @@ async function renderStrategy(){
     const pill = s.state === "suspended"
       ? `<span class="pill r">SUSPENDED — LATCHED</span>`
       : `<span class="pill ${s.state==="live"?"g":"bl"}">${esc(s.state).toUpperCase()}</span>`;
+    /* ADR-0018: a non-authoritative (research_shadow) strategy is shown but must
+       carry a prominent NOT-VALIDATED badge so its band reading is never read as
+       a validated result. */
+    const shadowBadge = s.authoritative===false
+      ? `<span class="pill r" title="Independent review returned REJECT STRATEGY EVIDENCE (ADR-0018). Non-authoritative: deploys no capital and is not validated performance.">RESEARCH SHADOW — NOT VALIDATED</span>`
+      : "";
     return `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-family:var(--mono);font-size:11.5px;line-height:2">
-      <span style="color:var(--txt)">${esc(s.family)} v${esc(s.version)}</span> ${pill}
+      <span style="color:var(--txt)">${esc(s.family)} v${esc(s.version)}</span> ${pill} ${shadowBadge}
       <span style="color:var(--dim)">approved by ${esc(s.approved_by||"—")} · ${esc((s.approved_at||"").slice(0,10)||"—")}</span>
       <span style="color:var(--dim)">signals active <span style="color:var(--txt)">${esc(s.active_signals)}</span> · next rebalance ${esc(s.next_rebalance||"—")}</span>
       <span style="color:var(--dim)">band DD <span class="${ddBad?"num-neg":""}">${esc(dd)}</span> vs ${ddLim!=null?(ddLim*100).toFixed(0)+"%":"—"}
@@ -2083,20 +2089,26 @@ async function renderSleeveAttribution(){
   const rows = ["core","xsmom","pead","cash","total"].map(s=>{
     const c = d.cumulative[s] || {};
     const v = latest[s];
+    /* ADR-0018: a satellite sleeve whose backing strategy is non-authoritative
+       (research_shadow) must never present its return/excess as validated. The
+       per-row `authoritative` field is set by the daily attribution endpoint. */
+    const shadow = !!(v && v.authoritative===false);
     return `<tr${s==="total"?' style="border-top:1px solid var(--line-strong)"':""}>
-      <td>${esc(s.toUpperCase())}<span style="color:var(--faint)"> vs ${esc(BENCH[s])}</span></td>
+      <td>${esc(s.toUpperCase())}<span style="color:var(--faint)"> vs ${esc(BENCH[s])}</span>${shadow?` <span class="pill r" title="research_shadow — non-authoritative (ADR-0018); not validated performance">SHADOW · NOT VALIDATED</span>`:""}</td>
       <td>${esc(money(v && v.value_aud))}</td>
       <td>${pctS(c.ret_pct)}</td><td>${pctS(c.benchmark_pct)}</td>
       <td>${ppS(c.excess_pp)}</td>
       <td style="color:var(--faint)">${esc(c.sessions ?? 0)} session(s)</td></tr>`;
   }).join("");
   const alpha = d.satellite_alpha_pp;
+  const alphaShadow = d.satellite_alpha_authoritative===false;
   el.innerHTML = `<table>
     <tr><th>SLEEVE</th><th>VALUE (${esc(lastDate)})</th><th>CUM RETURN</th>
       <th>BENCHMARK</th><th>EXCESS</th><th></th></tr>
     ${rows}
   </table>
   <div style="margin-top:10px;font-family:var(--mono);font-size:11.5px;letter-spacing:0.06em">
+    ${alphaShadow?`<div class="pill r" style="display:inline-block;margin-bottom:6px;letter-spacing:0.04em">RESEARCH SHADOW — NOT VALIDATED · the satellite alpha below is non-authoritative (ADR-0018)</div><br>`:""}
     SATELLITE ALPHA vs HOLDING THE INDEX: ${alpha==null ? na
       : `<span class="${+alpha<0?"num-neg":"num-pos"}">${esc((+alpha>0?"+":"")+(+alpha).toFixed(2))} pp</span>`}
     <span style="color:var(--faint)"> — compounded satellite minus compounded SPY TR, cumulative since inception</span>
