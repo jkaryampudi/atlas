@@ -20,12 +20,13 @@ by a DIFFERENT docs/specs/<name>.json on disk, is refused — one name, one
 experiment. Re-clicking RUN must never silently burn a second pair of lineage
 trials for the same hypothesis; a genuinely new hypothesis gets a new name
 (and its own burn). The check is re-run after the lock is acquired, closing
-the in-process submit race. DOCUMENTED RESIDUAL: a concurrent CLI run of the
-same fresh name registers only late (after its panel load), takes no lock and
-does no family check, and quant.trial_registry has no uniqueness on
-strategy_family — a console submit inside that window double-burns. The
-structural fix (a uniqueness backstop at the registration chokepoint) is a
-dcp/migration change, tracked for review — never papered over here.
+the in-process submit race — and the STRUCTURAL guarantee now lives at the
+registration chokepoint itself (recipe_run.run_recipe: pg_advisory_xact_lock
+on the family + a count under that lock refuse a duplicate family across ALL
+processes unless rerun=True is passed explicitly; the console never passes
+it). The guards here remain the friendly early refusal; the chokepoint is
+the backstop. The former documented residual (CLI+console race double-burn)
+is CLOSED.
 
 Every accepted spec is persisted to docs/specs/<name>.json BEFORE the run
 starts (the pre-registration record convention the first-light runs
@@ -197,8 +198,19 @@ def start_recipe(raw: Mapping[str, Any]) -> dict[str, object]:
                    result=None)
 
     def _target() -> None:
+        from atlas.dcp.factory.recipe_run import DuplicateFamilyError
         try:
             _run(spec)
+        except DuplicateFamilyError as e:
+            # a chokepoint refusal is NOT a crash: THIS run burned nothing;
+            # any counted rows for the name belong to the surface that won
+            # the race (or an earlier run) — never attribute them to us
+            _status.update(phase="failed",
+                           finished_at=datetime.now(UTC).isoformat(),
+                           detail=(f"refused at the registration chokepoint: "
+                                   f"{e} Rows already counted under this name "
+                                   f"belong to whichever run registered them — "
+                                   f"the board is the durable record."[:340]))
         except Exception as e:  # noqa: BLE001 — the ops layer survives anything
             # HONESTY on failure: registration-before-run means trials may
             # already be durably counted — say exactly how many, never let a

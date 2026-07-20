@@ -302,12 +302,29 @@ def _record_final_metrics(session: Session, trial_id: str,
         upd.close()
 
 
+class DuplicateFamilyError(RuntimeError):
+    """The family already has a registered trial and rerun was not requested —
+    the accidental double-burn (two surfaces racing one hypothesis) is refused
+    at the write chokepoint itself, never merely at an advisory pre-check."""
+
+
 def run_recipe(session: Session, audit: PostgresAuditLog, spec: RecipeSpec, *,
                clock: Clock, paths: int = 1000, seed: int = 7,
                window_start: date | None = None,
-               window_end: date | None = None) -> RecipeRun:
+               window_end: date | None = None,
+               rerun: bool = False) -> RecipeRun:
     """One full gauntlet for `spec`. window_start may ONLY be the spec's own
-    pre-committed kill_start (bounded grammar: no ad-hoc windows)."""
+    pre-committed kill_start (bounded grammar: no ad-hoc windows).
+
+    rerun=False (the default) enforces ONE NAME, ONE EXPERIMENT at the
+    registration chokepoint: inside the registration transaction, a
+    pg_advisory_xact_lock on the family serializes concurrent registration
+    attempts across ALL processes (console, CLI, anything), and a count taken
+    under that lock refuses a family that already holds a registered trial —
+    the race that could burn two trial pairs for one hypothesis is impossible,
+    not merely unlikely. A DELIBERATE repeat (e.g. exact reproduction with
+    --window-end; --rerun on the CLI) sets rerun=True and registers honestly
+    as a new counted trial in the same family."""
     if window_start is not None and window_start != spec.kill_start:
         raise ValueError(
             f"window_start {window_start} is not the spec's pre-committed "
@@ -381,6 +398,26 @@ def run_recipe(session: Session, audit: PostgresAuditLog, spec: RecipeSpec, *,
             "refusing to register (forged spec object?)")
     reg = _registry_session(session)
     try:
+        # THE DOUBLE-BURN BACKSTOP (chassis review 2026-07, residual closed):
+        # a transaction-scoped advisory lock on the family serializes every
+        # concurrent registration attempt across all processes; the count
+        # taken UNDER the lock is authoritative. Two surfaces racing the same
+        # fresh name can no longer both register — the loser waits here, then
+        # sees the winner's committed row and refuses. Held only for this
+        # short registration transaction, released at commit/rollback.
+        reg.execute(text(
+            "SELECT pg_advisory_xact_lock(hashtextextended(:f, 0))"),
+            {"f": family})
+        prior = reg.execute(text(
+            "SELECT count(*) FROM quant.trial_registry "
+            "WHERE strategy_family = :f"), {"f": family}).scalar() or 0
+        if prior and not rerun:
+            raise DuplicateFamilyError(
+                f"family {family!r} already holds {prior} registered "
+                f"trial(s) — one name, one experiment. THIS attempt registers "
+                f"nothing further; any legs this gauntlet already completed "
+                f"remain honestly counted. A deliberate repeat must say so "
+                f"(rerun=True / --rerun) and burns a new counted trial.")
         trial_id = register_trial(
             reg, family=family, lineage=bound_lineage, spec=reg_spec,
             metrics={}, hypothesis=spec.rationale,
@@ -469,17 +506,41 @@ def run_recipe(session: Session, audit: PostgresAuditLog, spec: RecipeSpec, *,
 def run_recipe_gauntlet(session: Session, audit: PostgresAuditLog,
                         spec: RecipeSpec, *, clock: Clock, paths: int = 1000,
                         seed: int = 7, window_end: date | None = None,
-                        ) -> tuple[RecipeRun, RecipeRun]:
+                        rerun: bool = False) -> tuple[RecipeRun, RecipeRun]:
     """The full pre-committed pair: the main trial, then the kill trial
     (spec.kill_start; demote-only). Each registers durably (its own
     committed transaction) BEFORE it runs, and the main trial's metrics are
     committed before the kill leg starts — a kill-leg crash cannot erase the
-    completed main trial (module docstring)."""
+    completed main trial (module docstring). Both legs carry the double-burn
+    backstop (run_recipe docstring); rerun=True is the explicit, counted
+    repeat for both."""
+    if not rerun:
+        # EARLY check of BOTH families before any leg runs: a gauntlet that
+        # would be refused at the kill chokepoint AFTER a fully-executed main
+        # leg (a half-run pair) is refused HERE instead, burning nothing.
+        # Advisory only — the locked per-leg chokepoint stays authoritative;
+        # the residual window (a concurrent rerun=True overtaking mid-flight)
+        # still refuses at the kill chokepoint with the main leg's burn
+        # standing honestly counted (run_recipe docstring).
+        reg = _registry_session(session)
+        try:
+            for fam in (spec.family(), spec.kill_family()):
+                prior = reg.execute(text(
+                    "SELECT count(*) FROM quant.trial_registry "
+                    "WHERE strategy_family = :f"), {"f": fam}).scalar() or 0
+                if prior:
+                    raise DuplicateFamilyError(
+                        f"family {fam!r} already holds {prior} registered "
+                        f"trial(s) — one name, one experiment; refused before "
+                        f"any leg ran (nothing burned). A deliberate repeat "
+                        f"must say rerun=True / --rerun.")
+        finally:
+            reg.close()
     main = run_recipe(session, audit, spec, clock=clock, paths=paths,
-                      seed=seed, window_end=window_end)
+                      seed=seed, window_end=window_end, rerun=rerun)
     kill = run_recipe(session, audit, spec, clock=clock, paths=paths,
                       seed=seed, window_start=spec.kill_start,
-                      window_end=window_end)
+                      window_end=window_end, rerun=rerun)
     return main, kill
 
 
@@ -695,7 +756,7 @@ def dry_run_plan(spec: RecipeSpec, *, paths: int, seed: int) -> str:
     ])
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Spec-driven recipe gauntlet on the point-in-time "
                     "feature store (Research Factory v1)")
@@ -711,7 +772,17 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true",
                    help="validate the spec and print the plan; registers "
                         "nothing, runs nothing, touches no database")
-    a = p.parse_args()
+    p.add_argument("--rerun", action="store_true",
+                   help="deliberately repeat a family that already holds a "
+                        "registered trial (e.g. exact reproduction with "
+                        "--window-end); burns a NEW counted trial pair — "
+                        "without this flag a duplicate family is refused at "
+                        "the registration chokepoint")
+    return p
+
+
+def main() -> None:
+    a = _build_parser().parse_args()
     spec = spec_from_mapping(json.loads(a.spec.read_text()))
     if a.dry_run:
         print(dry_run_plan(spec, paths=a.paths, seed=a.seed))
@@ -733,7 +804,7 @@ def main() -> None:
         audit = PostgresAuditLog(s, clock)
         main_run, kill_run = run_recipe_gauntlet(
             s, audit, spec, clock=clock, paths=a.paths, seed=a.seed,
-            window_end=a.window_end)
+            window_end=a.window_end, rerun=a.rerun)
 
     report = render_recipe_report(main_run, kill_run, paths=a.paths)
     report_path.parent.mkdir(parents=True, exist_ok=True)
