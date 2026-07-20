@@ -684,8 +684,11 @@ class MonthlyAttribution:
     period: str
     sleeves: tuple[SleeveMonth, ...]
     nav_change_aud: Decimal             # sum of total contributions = exact
-    satellite_alpha_pp: Decimal | None  # since inception (module docstring)
-    headline: str
+    satellite_alpha_pp: Decimal | None  # AUTHORITATIVE composite (ADR-0018): the
+    headline: str                       # active PAPER satellites only
+    # the research_shadow composite, reported SEPARATELY (NOT VALIDATED); None
+    # when no sleeve is in research_shadow. Never fused into satellite_alpha_pp.
+    research_shadow_alpha_pp: Decimal | None = None
 
 
 def _month_contributions(session: Session,
@@ -746,7 +749,13 @@ def compute_monthly(session: Session, *, year: int,
         excess_pp=cumulative[s].excess_pp,
         contribution_aud=contribs[s].quantize(_CENT),
         end_value_aud=end_values.get(s)) for s in SLEEVES)
-    alpha = cumulative_alpha_pp(session)
+    # ADR-0018: the headline satellite alpha is the AUTHORITATIVE composite —
+    # only paper/live-backed sleeves. A research_shadow sleeve is reported in a
+    # SEPARATE, NOT-VALIDATED section, never fused into the headline.
+    alpha = cumulative_alpha_pp(
+        session, included=included_satellite_sleeves(session, AUTHORITATIVE_PORTFOLIO))
+    shadow_alpha = cumulative_alpha_pp(
+        session, included=included_satellite_sleeves(session, RESEARCH_SHADOW_SCOPE))
     if alpha is None:
         headline = ("The active satellite has no measurable history yet — "
                     "no session with both a satellite return and a SPY TR "
@@ -758,7 +767,8 @@ def compute_monthly(session: Session, *, year: int,
                     "cumulative since inception.")
     return MonthlyAttribution(period=period, sleeves=sleeves,
                               nav_change_aud=nav_change.quantize(_CENT),
-                              satellite_alpha_pp=alpha, headline=headline)
+                              satellite_alpha_pp=alpha, headline=headline,
+                              research_shadow_alpha_pp=shadow_alpha)
 
 
 _BENCH_LABEL = {CORE: "55:15 SPY/INDA TR blend", XSMOM: "SPY TR",
@@ -830,6 +840,23 @@ def render_monthly(m: MonthlyAttribution, shortfall: Attribution,
         f"{money(total_contrib.quantize(_CENT))} = NAV change "
         f"{money(m.nav_change_aud)}.",
         "",
+    ]
+    # ADR-0018: the research-shadow composite is reported in its OWN section,
+    # never mixed into the authoritative satellite alpha above. It is always
+    # explicitly NOT VALIDATED so an export can never present it as validated.
+    if m.research_shadow_alpha_pp is not None or shadow:
+        lines += [
+            "## Research shadow — NOT VALIDATED (ADR-0018)",
+            "",
+            "Non-authoritative. These figures are shown for observation only and "
+            "must NOT be read or exported as validated performance.",
+            "",
+            (f"Research-shadow satellite alpha: {pp(m.research_shadow_alpha_pp)} "
+             "vs SPY total return (separate composite; excluded from the "
+             "authoritative satellite alpha above)."),
+            "",
+        ]
+    lines += [
         "## Doc 04 §14 standing line — implementation shortfall",
         "",
         f"- entry: {shortfall.entry_shortfall.fills} fill(s), "

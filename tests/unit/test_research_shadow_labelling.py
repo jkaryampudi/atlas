@@ -64,6 +64,49 @@ def test_render_monthly_caveats_research_shadow_without_changing_figures():
     assert "+2.84%" in body and "234.74" in body         # figures unchanged
 
 
+def test_monthly_report_separates_authoritative_and_shadow_sections():
+    """Test 12: the report shows the AUTHORITATIVE satellite alpha (headline) and
+    a SEPARATE 'Research shadow — NOT VALIDATED' section — never fused."""
+    m = MonthlyAttribution(
+        period="2026-07",
+        sleeves=(SleeveMonth("xsmom", 2, Decimal("2.84"), Decimal("0.00"),
+                             Decimal("2.84"), Decimal("234.74"), Decimal("8505.00")),
+                 SleeveMonth("total", 2, Decimal("0.23"), Decimal("0.00"),
+                             Decimal("0.23"), Decimal("234.74"), Decimal("101734.74"))),
+        nav_change_aud=Decimal("234.74"), satellite_alpha_pp=Decimal("2.84"),
+        headline="The active satellite added 2.84 pp vs simply holding the index.",
+        research_shadow_alpha_pp=Decimal("-5.00"))
+    body = render_monthly(m, _shortfall(), non_authoritative_sleeves={"xsmom"})
+    # the authoritative headline is present as its own section
+    assert "## The active satellite added 2.84 pp" in body
+    # the shadow section is a DISTINCT, labelled block carrying the shadow number
+    assert "## Research shadow — NOT VALIDATED (ADR-0018)" in body
+    assert "Research-shadow satellite alpha: -5.00 pp" in body
+    # the authoritative headline number is not the shadow number
+    assert "2.84" in body.split("## Research shadow")[0]
+
+
+def test_exported_report_never_labels_shadow_as_validated():
+    """Test 13: an exported report must never present a shadow figure as
+    validated — the shadow section is explicitly NON-authoritative and the row
+    is tagged NOT VALIDATED."""
+    m = MonthlyAttribution(
+        period="2026-07",
+        sleeves=(SleeveMonth("xsmom", 2, Decimal("9.99"), Decimal("0.00"),
+                             Decimal("9.99"), Decimal("100.00"), Decimal("500.00")),
+                 SleeveMonth("total", 2, Decimal("0.10"), Decimal("0.00"),
+                             Decimal("0.10"), Decimal("100.00"), Decimal("1000.00"))),
+        nav_change_aud=Decimal("100.00"), satellite_alpha_pp=None,   # no authoritative
+        headline="The active satellite has no measurable history yet.",
+        research_shadow_alpha_pp=Decimal("9.99"))
+    body = render_monthly(m, _shortfall(), non_authoritative_sleeves={"xsmom"})
+    # the shadow sleeve's strong return is tagged, never presented as validated
+    assert "| xsmom (SPY TR) — RESEARCH SHADOW / NOT VALIDATED |" in body
+    assert "must NOT be read or exported as validated" in body
+    # the authoritative headline claims NO measurable history (shadow excluded)
+    assert "no measurable history" in body
+
+
 def test_console_html_renders_not_validated_badges():
     html = (ROOT / "atlas" / "dashboard" / "console.html").read_text()
     # STRATEGY card per-row badge, keyed on the API authoritative field
