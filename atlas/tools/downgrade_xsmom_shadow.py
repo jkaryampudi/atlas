@@ -17,12 +17,20 @@ results, or any historical file. It flips the row's state and stamps shadowed_at
 created after this moment before the strategy could ever return to paper). The
 transition is a material action and lands on the append-only audit chain.
 
+Idempotent + concurrency-safe: a re-run against an already-downgraded row is a
+NO-OP that never re-stamps shadowed_at nor emits a second audit event; the
+UPDATE ... WHERE state IN ('paper','live') RETURNING guard means a concurrent
+duplicate loses the race and refuses before appending. --expect-state makes the
+operator assert the current state, refusing on any mismatch.
+
 Usage (deliberate, spelled-out flags — no silent defaults):
 
     python -m atlas.tools.downgrade_xsmom_shadow \
-        --downgraded-by "Jay Karyampudi (Principal)" \
+        --actor "Jay Karyampudi (Principal)" \
+        --reason "independent review REJECT STRATEGY EVIDENCE (ADR-0018)" \
+        --review-reference REVIEW_PACKAGE/FINAL_INDEPENDENT_REVIEW_READINESS.md \
         --decision-ref ADR-0018 \
-        --review-ref REVIEW_PACKAGE/FINAL_INDEPENDENT_REVIEW_READINESS.md
+        --expect-state paper
 """
 from __future__ import annotations
 
@@ -40,12 +48,17 @@ FAMILY = "xsmom-pit-tr"
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--downgraded-by", required=True,
+    ap.add_argument("--actor", required=True,
                     help="the human (Principal) recording the downgrade")
+    ap.add_argument("--reason", required=True,
+                    help="the operator's human-readable reason for the downgrade")
+    ap.add_argument("--review-reference", required=True,
+                    help="the independent-review verdict this acts on")
     ap.add_argument("--decision-ref", required=True,
                     help="the durable decision record, e.g. ADR-0018")
-    ap.add_argument("--review-ref", required=True,
-                    help="the independent-review verdict this acts on")
+    ap.add_argument("--expect-state", required=True,
+                    help="the state the operator asserts the row is in NOW "
+                         "(e.g. 'paper'); the downgrade refuses on a mismatch")
     ap.add_argument("--family", default=FAMILY)
     a = ap.parse_args(argv)
 
@@ -58,14 +71,26 @@ def main(argv: list[str] | None = None) -> int:
         if row is None:
             print(f"REFUSED: no quant.strategies row for family '{a.family}'")
             return 1
+        # Idempotency FIRST (before --expect-state): a re-run against an
+        # already-downgraded row is a NO-OP that never re-stamps shadowed_at and
+        # emits no second audit event — even if --expect-state names the old state.
         if row["state"] == RESEARCH_SHADOW:
-            print(f"NO-OP: {a.family} is already 'research_shadow'")
+            print(f"NO-OP: {a.family} is already 'research_shadow' "
+                  "(shadowed_at preserved, no new event)")
             return 0
+        if row["state"] != a.expect_state:
+            print(f"REFUSED: expected state '{a.expect_state}' but {a.family} "
+                  f"is '{row['state']}' — no write")
+            return 1
         if row["state"] not in AUTHORITATIVE_STATES:
             print(f"REFUSED: {a.family} is '{row['state']}', not paper/live — "
                   "this tool only downgrades an authoritative sleeve")
             return 1
 
+        # Concurrency guard: the WHERE state IN ('paper','live') RETURNING
+        # row-locks; a concurrent downgrade that won the race leaves this UPDATE
+        # matching nothing -> updated is None -> refuse BEFORE the audit append,
+        # so no duplicate event and no second shadowed_at stamp are ever written.
         updated = s.execute(text(
             "UPDATE quant.strategies SET state = :new, shadowed_at = :ts "
             "WHERE id = :sid AND state IN ('paper','live') RETURNING id"),
@@ -78,15 +103,13 @@ def main(argv: list[str] | None = None) -> int:
         audit.append(
             event_type="quant.strategy.research_shadow", entity_type="strategy",
             entity_id=str(row["id"]), actor_type="human",
-            actor_id=a.downgraded_by,
+            actor_id=a.actor,
             payload={"family": a.family, "name": row["name"],
                      "version": row["version"], "old_state": row["state"],
                      "new_state": RESEARCH_SHADOW,
                      "decision_ref": a.decision_ref,
-                     "review_ref": a.review_ref,
-                     "reason": "independent review REJECT STRATEGY EVIDENCE — "
-                               "deployed signal != validated signal; DSR ~0.85 "
-                               "at lineage count; not reproducible (ADR-0018)"})
+                     "review_reference": a.review_reference,
+                     "reason": a.reason})
         print(f"DOWNGRADED: {a.family}/{row['name']} v{row['version']} "
               f"'{row['state']}' -> '{RESEARCH_SHADOW}' (non-authoritative). "
               "Deploys no capital; re-promotion requires a NEW signed "
