@@ -118,6 +118,7 @@ from atlas.dcp.strategy_lifecycle import (
     RESEARCH_SHADOW_SCOPE,
     classify,
     normalize_scope,
+    require_authoritative_scope,
     scope_caveat,
     scope_is_authoritative,
 )
@@ -618,6 +619,21 @@ def scoped_performance(session: Session, scope: str | None = None,
         "caveat": scope_caveat(scope),
         "satellite_alpha_pp": cumulative_alpha_pp(session, included=included),
     }
+
+
+def authoritative_composite_for_governance(
+        session: Session, scope: str = AUTHORITATIVE_PORTFOLIO) -> Decimal | None:
+    """The ONLY performance composite a governance path (promotion / demotion /
+    benchmark / drawdown gate) may consume — fail-closed (ADR-0018): a
+    research_shadow, all_simulated, mixed, or unknown scope raises before any
+    number is computed, so a non-authoritative composite can never reach a
+    governance decision. Returns the authoritative satellite alpha (shadow
+    sleeves excluded by construction). Governance today reads per-strategy
+    validated results directly and does NOT call this; it exists as the enforced
+    boundary should any composite ever be wired into a governance calculation."""
+    require_authoritative_scope(scope)
+    return cumulative_alpha_pp(
+        session, included=included_satellite_sleeves(session, scope))
 
 
 @dataclass(frozen=True)
