@@ -1,0 +1,13 @@
+{
+  "grammar": "v1",
+  "name": "lowvol-252-top5",
+  "rank_feature": "low_vol_252",
+  "direction": "desc",
+  "top_n": 5,
+  "rebalance": "monthly",
+  "universe": "pit-sp500",
+  "cost_bps_per_side": 10,
+  "lineage": "low-vol",
+  "rationale": "Low-volatility anomaly: leverage- and benchmark-constrained investors overpay for lottery-like high-volatility names, so defensive stocks have earned more than their risk due (Ang et al. 2006; Baker-Bradley-Wurgler 2011; Frazzini-Pedersen 2014). Hypothesis: ranking the point-in-time S&P 500 defensive-first (lowest realized 252-day vol) at top-5/monthly survives costs, the null model, deflated Sharpe and walk-forward \u2014 and clears Atlas's absolute beat-SPY-TR bar. The literature's claim is risk-adjusted, so failing the absolute bar is a live possibility; either verdict is worth the counted burn.",
+  "kill_start": "2016-01-01"
+}
