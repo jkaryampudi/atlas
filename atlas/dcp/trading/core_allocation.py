@@ -347,19 +347,33 @@ def build_core_proposals(
 
 MAINTENANCE_EVENT = "core.maintenance.regenerated"
 
+# ADR-0017 (signed 2026-07-20): the ETF core is RETIRED — the Principal
+# directed "no ETFs; individual stocks", and chose the satellite-heavy book
+# (momentum sleeve 40%, remainder cash). maintain_core_proposals therefore
+# refuses to propose BY POLICY, reporting the decision ref every night. The
+# band/regeneration machinery below stays intact and tested (retired=None in
+# tests) — it is the reference implementation should a future signed ADR
+# revive a standing core; reviving it means editing THIS constant in review,
+# never a runtime flag.
+CORE_RETIRED: str | None = "ADR-0017"
+
 
 @dataclass(frozen=True)
 class CoreMaintenanceReport:
     """One maintenance pass, per target symbol: absent from the universe,
     inside the band, drifted-but-covered (live proposal standing), or
-    regenerated this run."""
+    regenerated this run — or retired outright by signed policy."""
     session_date: date
     missing: tuple[str, ...]                     # not in the active universe
     in_band: tuple[str, ...]                     # no drift: nothing to do
     live: tuple[str, ...]                        # drifted, live proposal exists
     regenerated: tuple[CoreProposalResult, ...]  # drifted, no live -> rebuilt
+    retired: str | None = None                   # the signed decision ref
 
     def summary(self) -> str:
+        if self.retired:
+            return (f"core retired ({self.retired}) — no ETF proposals by "
+                    f"signed policy")
         parts: list[str] = []
         if self.regenerated:
             legs = ", ".join(f"{r.symbol}:{r.action} {r.qty} -> {r.state}"
@@ -401,10 +415,13 @@ def maintain_core_proposals(
     session: Session, clock: Clock, *,
     targets: dict[str, Decimal] = CORE_TARGETS,
     drift_band_pp: Decimal = DEFAULT_DRIFT_BAND_PP,
+    retired: str | None = CORE_RETIRED,
 ) -> CoreMaintenanceReport:
-    """Keep the standing core one click away (section comment above).
+    """Keep the standing core one click away (section comment above) — unless
+    a signed ADR has RETIRED the core (CORE_RETIRED), in which case this
+    reports the decision ref and proposes nothing, every night, honestly.
 
-    Per target symbol, in sorted order:
+    Per target symbol, in sorted order (when not retired):
       * not an active instrument      -> reported 'missing' (a fixture/dev DB
         without SPY/INDA idles honestly; in production this line on the brief
         IS the alarm that the core universe broke);
@@ -415,8 +432,12 @@ def maintain_core_proposals(
     Deterministic and idempotent: a second run in the same state is all
     live/in_band and writes nothing.
     """
-    _lifecycle_lock(session)
     now = clock.now()
+    if retired:
+        return CoreMaintenanceReport(session_date=now.date(), missing=(),
+                                     in_band=(), live=(), regenerated=(),
+                                     retired=retired)
+    _lifecycle_lock(session)
     on: date = now.date()
     missing = tuple(sym for sym in sorted(targets)
                     if not _active_symbol_exists(session, sym))

@@ -213,20 +213,22 @@ _SIGNAL_REF = re.compile(
     r"^dcp:signal:(?:xsmom|pead):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
     r"[0-9a-f]{4}-[0-9a-f]{12}):\d{4}-\d{2}-\d{2}$")
 
-# ADR-0014 (option B, signed 2026-07-16) as amended by ADR-0015 (2026-07-18):
-# the active satellite is momentum 10% of NAV; the PEAD sleeve is SUSPENDED at
-# 0.00 (its implementable form failed the null model — random top-5 draws did
-# as well, p=0.132 — so its BUY memos size to an honest zero/skip while its
-# signals, memos and scorecard record keep accruing as a forward experiment).
-# Core 70%, cash 20%. SLEEVE_BUDGET_FRACTION keys each signed strategy FAMILY
-# (quant.strategies.family) to its fraction of NAV — the same
-# documented-constant pattern core_allocation.CORE_TARGETS uses for the passive
-# core. A family absent here has no sleeve cap (sized by risk alone); a family
-# at 0.00 is a capital-suspended sleeve whose membership still records for
-# attribution but never allocates. Editing these numbers is an ADR change,
-# exactly like editing CORE_TARGETS.
+# ADR-0017 (signed 2026-07-20, superseding the ADR-0012/0014/0015 split):
+# SATELLITE-HEAVY book — the ETF core is RETIRED (Principal directive: no
+# ETFs); the momentum sleeve carries 40% of NAV (top-5 -> 8%/name, exactly
+# the L1 single-stock cap: sizing §4 may shave entries to fit, and the L3
+# sector cap will often hold clustered momentum picks under target — the
+# cage working, never a defect). The PEAD sleeve stays SUSPENDED at 0.00
+# (ADR-0015: its implementable form failed the null model, p=0.132 — BUY
+# memos size to an honest zero/skip while its record keeps accruing as a
+# forward experiment). Remainder in cash (~60% nominal, >=10% per L5).
+# SLEEVE_BUDGET_FRACTION keys each signed strategy FAMILY
+# (quant.strategies.family) to its fraction of NAV. A family absent here has
+# no sleeve cap (sized by risk alone); a family at 0.00 is a
+# capital-suspended sleeve whose membership still records for attribution but
+# never allocates. Editing these numbers is an ADR change.
 SLEEVE_BUDGET_FRACTION: dict[str, Decimal] = {
-    "xsmom-pit-tr": Decimal("0.10"),   # momentum sleeve (ADR-0014)
+    "xsmom-pit-tr": Decimal("0.40"),   # momentum sleeve (ADR-0017)
     "pead-sue-tr": Decimal("0.00"),    # PEAD sleeve SUSPENDED (ADR-0015)
 }
 

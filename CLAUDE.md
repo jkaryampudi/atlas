@@ -6,7 +6,7 @@ and gated behind human arming. Nothing here is investment advice.
 
 ## Read first
 - `docs/architecture/` — 9 design docs. 01 (system), 02 (Agent Constitution), 04 (risk), 05 (DB), 08 (roadmap) matter most.
-- `docs/adr/` — 10 signed decisions. Load-bearing: 0006 (stop derivation), 0007 (universe), 0009 (approval bar = beat SPY total return, absolute), 0010 (first paper approval: xsmom, with demotion bands).
+- `docs/adr/` — 17 signed decisions. Load-bearing: 0006 (stop derivation), 0007 (universe), 0009 (approval bar = beat SPY total return, absolute), 0010 (first paper approval: xsmom, with demotion bands), **0017 (satellite-heavy book, signed 2026-07-20: ETF core RETIRED — no ETFs, Principal directive; momentum sleeve 40% of NAV at the L1 cap edge; PEAD 0; remainder cash; costs signed in ink: ~−16pp crash exposure, structural cash drag vs SPY, L3 sector shaving)**.
 - `README.md` — phase-by-phase status checklists.
 
 ## Hard invariants — tests enforce these; NEVER violate

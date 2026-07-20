@@ -136,7 +136,10 @@ def _proposals(s):
 #     ~80%), while a non-sleeve memo is still sized by risk alone.
 # --------------------------------------------------------------------------
 
-def test_ten_name_sleeve_caps_aggregate_at_ten_percent_not_risk_sum(clean_audit):
+def test_ten_name_sleeve_caps_aggregate_at_ten_percent_not_risk_sum(clean_audit, monkeypatch):
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.00")})
     # The non-sleeve control bridges the NEXT day: since the risk-wiring
     # bundle (2026-07-18) the §11 day-step gate caps ONE day's committed gross
     # at 10pp of NAV, so a full 10% sleeve deployment (legal, exactly at the
@@ -177,7 +180,10 @@ def test_ten_name_sleeve_caps_aggregate_at_ten_percent_not_risk_sum(clean_audit)
 # B — a partly-committed sleeve sizes only the REMAINING budget.
 # --------------------------------------------------------------------------
 
-def test_partly_committed_sleeve_sizes_only_the_remaining_budget(clean_audit):
+def test_partly_committed_sleeve_sizes_only_the_remaining_budget(clean_audit, monkeypatch):
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.00")})
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
@@ -250,7 +256,10 @@ def test_risk_engine_can_shrink_below_the_sleeve_envelope(clean_audit):
 # D — whole-share flooring leaves a residual (never over-allocates).
 # --------------------------------------------------------------------------
 
-def test_whole_share_flooring(clean_audit):
+def test_whole_share_flooring(clean_audit, monkeypatch):
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.00")})
     s = clean_audit
     _seed(s)
     mom = _strategy(s, "xsmom-pit-tr")
@@ -308,8 +317,9 @@ def test_per_strategy_attribution_caps_each_sleeve_independently(clean_audit, mo
     pead_names = [props[f"ZSLVP{i}"] for i in range(2)]
     assert all(int(p.position_size) == 25 for p in pead_names)
     assert sum(Decimal(p.position_value_aud) for p in pead_names) == SLEEVE_AUD
-    # production constants pinned per ADR-0014 as amended by ADR-0015:
-    assert SLEEVE_BUDGET_FRACTION["xsmom-pit-tr"] == Decimal("0.10")
+    # production constants pinned per ADR-0017 (satellite-heavy, 2026-07-20)
+    # as amended from ADR-0014/0015:
+    assert SLEEVE_BUDGET_FRACTION["xsmom-pit-tr"] == Decimal("0.40")
     assert SLEEVE_BUDGET_FRACTION["pead-sue-tr"] == Decimal("0.00")  # suspended
 
 
@@ -365,7 +375,10 @@ def test_dual_winner_name_cannot_push_either_sleeve_past_its_envelope(clean_audi
 
 
 def test_suspended_pead_sleeve_sizes_to_zero_and_dual_deploys_under_momentum(
-        clean_audit):
+        clean_audit, monkeypatch):
+    monkeypatch.setattr(bridge, "SLEEVE_BUDGET_FRACTION",
+                        {"xsmom-pit-tr": Decimal("0.10"),
+                         "pead-sue-tr": Decimal("0.00")})
     """ADR-0015 (production constants): PEAD's budget is 0.00 — a pure PEAD BUY
     memo is an honest recorded skip ("suspended at zero budget"), and a dual
     momentum+PEAD winner deploys under the MOMENTUM slice alone (a zero-budget

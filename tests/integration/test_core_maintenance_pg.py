@@ -107,7 +107,7 @@ def test_regenerated_core_proposal_expires_exactly_72h_out(clean_audit):
     s = clean_audit
     _seed(s)
     clock = FrozenClock(T0)
-    report = maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    report = maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     assert len(report.regenerated) == 1
     rows = _proposals(s)
     assert len(rows) == 1
@@ -127,7 +127,7 @@ def test_drift_with_no_live_proposal_regenerates(clean_audit):
     event."""
     s = clean_audit
     _seed(s)
-    report = maintain_core_proposals(s, FrozenClock(T0), targets=INDA_ONLY)
+    report = maintain_core_proposals(s, FrozenClock(T0), targets=INDA_ONLY, retired=None)
     assert [r.symbol for r in report.regenerated] == ["INDA"]
     r = report.regenerated[0]
     assert (r.action, r.qty, r.verdict, r.state) == (
@@ -145,9 +145,9 @@ def test_live_pending_proposal_is_a_noop(clean_audit):
     s = clean_audit
     _seed(s)
     clock = FrozenClock(T0)
-    maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     clock.advance_to(T0 + timedelta(hours=20))              # well inside 72h
-    again = maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    again = maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     assert again.regenerated == () and again.live == ("INDA",)
     assert again.summary() == "core live INDA"
     assert len(_proposals(s)) == 1                          # still exactly one
@@ -160,11 +160,11 @@ def test_approved_in_flight_proposal_is_live_too(clean_audit):
     s = clean_audit
     _seed(s)
     clock = FrozenClock(T0)
-    maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     s.execute(text("UPDATE trading.trade_proposals SET state = 'approved' "
                    "WHERE origin = 'core_allocation'"))
     clock.advance_to(T0 + timedelta(hours=100))             # past even the 72h TTL
-    again = maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    again = maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     assert again.regenerated == () and again.live == ("INDA",)
     assert len(_proposals(s)) == 1
 
@@ -195,7 +195,7 @@ def test_within_band_is_a_noop(clean_audit):
         " opened_at, is_core) VALUES (:i, 212, :p, 'USD', :t, true)"),
         {"i": iid, "p": INDA_PX, "t": datetime(2026, 7, 9, 15, 0, tzinfo=UTC)})
 
-    report = maintain_core_proposals(s, FrozenClock(T0), targets=INDA_ONLY)
+    report = maintain_core_proposals(s, FrozenClock(T0), targets=INDA_ONLY, retired=None)
     assert report.regenerated == () and report.live == ()
     assert report.in_band == ("INDA",)
     assert report.summary() == "core in band INDA"
@@ -210,11 +210,11 @@ def test_expired_yesterday_regenerates_fresh_and_leaves_history(clean_audit):
     s = clean_audit
     _seed(s)
     clock = FrozenClock(T0)
-    maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     clock.advance_to(T0 + timedelta(hours=73))              # past the 72h TTL
     expired = expire_stale(s, clock)                        # t2's own funeral
     assert len(expired) == 1
-    report = maintain_core_proposals(s, clock, targets=INDA_ONLY)
+    report = maintain_core_proposals(s, clock, targets=INDA_ONLY, retired=None)
     assert [r.symbol for r in report.regenerated] == ["INDA"]
     assert report.regenerated[0].state == "pending_approval"
     rows = _proposals(s)
@@ -231,8 +231,23 @@ def test_missing_universe_is_reported_never_raised(clean_audit):
     s = clean_audit
     _clean(s)
     report = maintain_core_proposals(
-        s, FrozenClock(T0),
+        s, FrozenClock(T0), retired=None,
         targets={"ZCMX": Decimal("0.15"), "ZCMY": Decimal("0.55")})
     assert report.missing == ("ZCMX", "ZCMY")
     assert report.summary() == "core not in universe ZCMX, ZCMY"
     assert len(_proposals(s)) == 0
+
+
+def test_retired_core_reports_the_decision_and_writes_nothing(clean_audit):
+    """ADR-0017: at DEFAULTS the core is retired — the nightly pass names the
+    signed decision, proposes nothing, touches nothing (no lifecycle lock, no
+    proposals, no audit events)."""
+    s = clean_audit
+    before = s.execute(text("SELECT count(*) FROM trading.trade_proposals")).scalar()
+    report = maintain_core_proposals(s, FrozenClock(T0))
+    assert report.retired == "ADR-0017"
+    assert report.summary() == ("core retired (ADR-0017) — no ETF proposals "
+                                "by signed policy")
+    assert report.missing == () and report.regenerated == ()
+    after = s.execute(text("SELECT count(*) FROM trading.trade_proposals")).scalar()
+    assert after == before

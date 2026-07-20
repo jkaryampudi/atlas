@@ -132,7 +132,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
         "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
         "t8c_core", "t9_report", "t9b_brief"]
     # standing-core maintenance idles honestly in a fixture without SPY/INDA
-    assert results["t8c_core"] == "core not in universe INDA, SPY"
+    assert results["t8c_core"] == ("core retired (ADR-0017) — no ETF proposals by signed policy")
     # the brief landed: one persisted row for the session, honest counts
     assert results["t9b_brief"].startswith("brief 2026-07-15: queue 0")
     # first stored session: values land, returns honestly n/a (two
