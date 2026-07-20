@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from atlas.core.clock import SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.signals.xsmom.generate import next_rebalance_session
+from atlas.dcp.strategy_lifecycle import is_authoritative
 
 router = APIRouter()
 
@@ -22,6 +23,20 @@ _NULL_P_MAX = 0.05
 _DSR_MIN = 0.90
 _WF_TOTAL = 4
 _LIVE_STATES = ("paper", "live", "suspended")
+# Display surface (ADR-0018): research_shadow is SHOWN but never as validated —
+# so a downgraded strategy is visibly labelled, never silently hidden.
+_DISPLAY_STATES = ("paper", "live", "suspended", "research_shadow")
+
+
+def _validation_label(state: str | None) -> dict[str, object]:
+    """ADR-0018 non-authoritative label: a research_shadow (or otherwise
+    non-paper/live) strategy is presented but never counted as validated
+    performance — the console renders `authoritative=false` distinctly."""
+    return {
+        "authoritative": is_authoritative(state),
+        "validation_status": ("validated" if is_authoritative(state)
+                              else (state or "unknown")),
+    }
 
 
 def _f(pattern: str, text_: str) -> float | None:
@@ -70,7 +85,7 @@ def _live_gate_verdicts(s: Session) -> list[dict[str, object]]:
         "       st.approved_at, vr.verdict, vr.checklist "
         "FROM quant.strategies st "
         "JOIN quant.validation_reports vr ON vr.strategy_id = st.id "
-        "WHERE st.state IN ('paper','live','suspended') "
+        "WHERE st.state IN ('paper','live','suspended','research_shadow') "
         "ORDER BY st.id, vr.created_at DESC")).mappings().all()
     out: list[dict[str, object]] = []
     for r in rows:
@@ -78,6 +93,7 @@ def _live_gate_verdicts(s: Session) -> list[dict[str, object]]:
         passed = bool(ck.get("gate_passed")) or r["verdict"] == "approve"
         out.append({
             "strategy": r["family"], "name": r["name"], "state": r["state"],
+            **_validation_label(r["state"]),
             "approved_by": r["approved_by"],
             "approved_at": r["approved_at"].isoformat() if r["approved_at"] else None,
             "verdict": "PASS" if passed else "FAIL",
@@ -115,7 +131,7 @@ def strategies() -> list[dict[str, object]]:
             "SELECT id, family, name, version, state, approved_by, approved_at, "
             "       tolerance_bands "
             "FROM quant.strategies "
-            "WHERE state IN ('paper','live','suspended') "
+            "WHERE state IN ('paper','live','suspended','research_shadow') "
             "ORDER BY family, created_at")).mappings().all()
         for r in rows:
             n_signals = s.execute(text(
@@ -130,6 +146,7 @@ def strategies() -> list[dict[str, object]]:
             out.append({
                 "id": str(r["id"]), "family": r["family"], "name": r["name"],
                 "version": r["version"], "state": r["state"],
+                **_validation_label(r["state"]),
                 "approved_by": r["approved_by"],
                 "approved_at": (r["approved_at"].isoformat()
                                 if r["approved_at"] else None),
@@ -189,6 +206,7 @@ def verdicts(limit: int = 50) -> list[dict[str, object]]:
                 "created_at": r["created_at"].isoformat(),
                 "strategy_name": r["strategy_name"],
                 "strategy_state": r["strategy_state"],
+                **_validation_label(r["strategy_state"]),
                 "approved_by": r["approved_by"],
                 "decision_ref": ck.get("decision_ref"),
                 "real_signed": (r["strategy_state"] in _LIVE_STATES

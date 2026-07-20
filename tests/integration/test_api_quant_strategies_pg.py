@@ -65,6 +65,45 @@ def client(monkeypatch, pg_session):
     reset_app_engine()
 
 
+def test_research_shadow_labelled_separately_from_validated(monkeypatch, pg_session):
+    """Objective 7e (ADR-0018): a downgraded research_shadow strategy is still
+    listed on the STRATEGY card (not silently hidden) but labelled
+    authoritative=false / validation_status='research_shadow', while a paper
+    strategy reads authoritative=true / 'validated'. Shadow performance can
+    never be mistaken for validated performance."""
+    monkeypatch.setenv("ATLAS_DATABASE_URL", URL)
+    reset_app_engine()
+    s = pg_session
+    fams = ("zz-paper-test", "zz-shadow-test")
+    s.execute(text("DELETE FROM quant.strategies WHERE family = ANY(:f)"),
+              {"f": list(fams)})
+    s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, code_sha, "
+        " tolerance_bands, state, approved_by, approved_at) "
+        "VALUES ('zz-paper-test','p','1.0.0','{}','sha','{}','paper',"
+        " 'Principal (test)', '2026-07-13T00:00:00+00:00')"))
+    s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, code_sha, "
+        " tolerance_bands, state, shadowed_at) "
+        "VALUES ('zz-shadow-test','sh','1.0.0','{}','sha','{}',"
+        " 'research_shadow', '2026-07-20T00:00:00+00:00')"))
+    s.commit()
+    try:
+        rows = {x["family"]: x for x in
+                TestClient(app).get("/v1/quant/strategies").json()}
+        assert rows["zz-paper-test"]["authoritative"] is True
+        assert rows["zz-paper-test"]["validation_status"] == "validated"
+        # shown (not hidden) AND clearly non-validated
+        assert "zz-shadow-test" in rows
+        assert rows["zz-shadow-test"]["authoritative"] is False
+        assert rows["zz-shadow-test"]["validation_status"] == "research_shadow"
+    finally:
+        s.execute(text("DELETE FROM quant.strategies WHERE family = ANY(:f)"),
+                  {"f": list(fams)})
+        s.commit()
+        reset_app_engine()
+
+
 def test_strategies_endpoint_renders_the_card_facts(client):
     r = client.get("/v1/quant/strategies")
     assert r.status_code == 200
