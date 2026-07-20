@@ -56,3 +56,85 @@ def validation_label(state: str | None) -> dict[str, object]:
     return {"authoritative": is_authoritative(state),
             "validation_status": ("validated" if is_authoritative(state)
                                   else (state or "unknown"))}
+
+
+# ---------------------------------------------------------------------------
+# Canonical 3-way classification (ADR-0018) — the single source of truth for
+# whether a strategy's performance is authoritative, research-shadow, or neither.
+# Composes the predicates above; introduces NO new state list. Fail-closed by
+# construction: any unknown / None / validated / suspended / backtested / draft /
+# retired state falls through to NON_AUTHORITATIVE and is NEVER authoritative.
+# ---------------------------------------------------------------------------
+
+AUTHORITATIVE: str = "authoritative"
+NON_AUTHORITATIVE: str = "non_authoritative"
+
+
+def classify(state: str | None) -> str:
+    """Canonical category of a strategy state: AUTHORITATIVE (paper/live),
+    RESEARCH_SHADOW, or NON_AUTHORITATIVE (everything else, incl. unknown/None).
+    Every aggregation path must use THIS — never a re-listed state set."""
+    if is_authoritative(state):
+        return AUTHORITATIVE
+    if is_research_shadow(state):
+        return RESEARCH_SHADOW
+    return NON_AUTHORITATIVE
+
+
+# ---------------------------------------------------------------------------
+# Performance-scope vocabulary (ADR-0018) — three explicit views separating
+# authoritative from research-shadow performance. authoritative_portfolio is the
+# ONLY scope permitted for governance (promotion/demotion/gates) and the only
+# default for any performance response.
+# ---------------------------------------------------------------------------
+
+AUTHORITATIVE_PORTFOLIO: str = "authoritative_portfolio"
+RESEARCH_SHADOW_SCOPE: str = RESEARCH_SHADOW          # scope name == the state string
+ALL_SIMULATED: str = "all_simulated"
+PERFORMANCE_SCOPES: frozenset[str] = frozenset(
+    {AUTHORITATIVE_PORTFOLIO, RESEARCH_SHADOW_SCOPE, ALL_SIMULATED})
+
+_SCOPE_CAVEATS: dict[str, str] = {
+    AUTHORITATIVE_PORTFOLIO: "",
+    RESEARCH_SHADOW_SCOPE: "RESEARCH SHADOW — NOT VALIDATED",
+    ALL_SIMULATED: "COMBINED SIMULATION — NON-AUTHORITATIVE",
+}
+
+
+def normalize_scope(scope: str | None) -> str:
+    """Resolve a requested scope, defaulting to authoritative_portfolio. An
+    unrecognised scope is refused (fail closed) rather than silently widened."""
+    if scope is None:
+        return AUTHORITATIVE_PORTFOLIO
+    if scope not in PERFORMANCE_SCOPES:
+        raise ValueError(
+            f"unknown performance_scope {scope!r} — must be one of "
+            f"{sorted(PERFORMANCE_SCOPES)} (ADR-0018)")
+    return scope
+
+
+def scope_caveat(scope: str) -> str:
+    """The mandatory caveat text for a scope. all_simulated and research_shadow
+    are always non-authoritative and labelled as such."""
+    return _SCOPE_CAVEATS[normalize_scope(scope)]
+
+
+def scope_is_authoritative(scope: str) -> bool:
+    """Only the authoritative_portfolio view is authoritative. research_shadow
+    and all_simulated are never authoritative."""
+    return normalize_scope(scope) == AUTHORITATIVE_PORTFOLIO
+
+
+def require_authoritative_scope(scope: str) -> None:
+    """Governance fail-closed guard (ADR-0018): promotion, demotion, benchmark /
+    drawdown gates, validation, approval and automated suspension may consume
+    ONLY the authoritative_portfolio view. Given research_shadow, all_simulated,
+    a mixed composite, or an unknown scope, raise — a non-authoritative scope can
+    never drive a governance decision."""
+    if not scope_is_authoritative(scope):
+        raise ValueError(
+            f"governance calculations require scope "
+            f"'{AUTHORITATIVE_PORTFOLIO}', got {scope!r} — research_shadow / "
+            "all_simulated / mixed composites are never authoritative and must "
+            "not drive promotion, demotion, or gate decisions (ADR-0018 "
+            "fail-closed)")
