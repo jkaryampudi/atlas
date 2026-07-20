@@ -22,14 +22,17 @@ and gated behind human arming. Nothing here is investment advice.
 ## Quality gates — all must pass before any commit
 ```bash
 make doctor        # environment diagnosis
-pytest             # currently 1498 passing (isolated to the atlas_test database; bootstrap self-heals a corrupted test DB)
+pytest             # currently 1515 passing (isolated to the atlas_test database; bootstrap self-heals a corrupted test DB)
 ruff check atlas tests
 mypy               # strict on atlas/core + atlas/dcp
 ```
 Local stack: `docker compose up -d db redis`, then
 `export ATLAS_DATABASE_URL="postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas"`,
 `alembic upgrade head`. API on **port 8001** on this machine (8000 is taken by
-another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=green.
+another project). The API process IS the scheduler (`ATLAS_INPROC_SCHEDULER=1`
+in `.env`): 23:30 UTC cycle + 00:30 UTC backup — a manual API restart without
+`.env` sourced disarms BOTH (and drops the model key). launchd agents are dead
+on this Mac (TCC blocks `~/Documents`; exit 127 since install). Deterministic replay: `make replay DATE=2024-07-15` → gate=green.
 
 ## Status (as of handoff)
 - **P0 Architecture**: signed. **P1 Foundation**: near-exit — see remaining below.
@@ -61,7 +64,8 @@ another project). Deterministic replay: `make replay DATE=2024-07-15` → gate=g
 9. ~~**Memo→proposal bridge**~~ DONE (ADR-0006 stop derivation + ADR-0010 signal wiring; earnings calendar + regime + scanner context + SIGNALS in the evidence corpus; scorecard with dartboard baseline + source slices).
 10. ~~**Post-ADR-0010 hardening bundle**~~ DONE — implementable variants (xsmom PASS; PEAD FAIL → ADR-0015 sleeve to 0), derived tighten-only bands + CUSUM, index-core 70/10/20 (ADR-0012/0014/0015), specialists + fundamentals in evidence, DD2/DD3 dual-confirm clearing (`risk/clearance.py`), attribution (0027), feature store p1 (0024), learning loop measured-only (0030), reliability layer (0031), **S&P 500 expansion + lineage-scoped DSR counting (ADR-0016 executed 2026-07-18: 511 US active, migration 0032, `activate_universe --reconcile` for semi-annual drift)**.
 11. ~~**Research Factory phase 1** (= feature-store phase 2)~~ SHIPPED (91bcd72, 2026-07-18: `atlas/dcp/factory/` — frozen RecipeSpec v1 grammar, closed 4-member momentum catalog, gauntlet runner with registration-before-run + pre-committed kill leg, byte-identity equivalence pins vs production math; hardened by a 20-finding adversarial review). First real recipe runs 2026-07-20: specs in `docs/specs/`, reports in `docs/reports/recipe-*.md`, every trial counted against the momentum lineage.
-12. **Next**: Factory **phase 2** — hypothesis engine + console surface for submitting/viewing recipe runs (runner is CLI-only; console is the sole control surface), then phase 3 adoption pipeline (survivors → impl-variant + draft ADR into the Principal's queue); opportunity-screen edge trial matures ~mid-Aug (monthly cohort automated in T9); learning-loop Tier-1 activation (Principal decision; needs ~60 sessions of matured labels); Linux-box migration (board #1 — deferred by Principal 2026-07-18); NIFTY 50 direct (blocked: EODHD has zero NSE coverage; vendor procurement is a Principal decision).
+12. ~~Factory **phase 2 chassis** + low-vol family + double-burn backstop~~ DONE 2026-07-20 (console recipe gauntlet `/v1/factory/*` + QUANT page; families/ per-module catalog + `low_vol_252` + audited `repin_features`; advisory-locked registration chokepoint, `--rerun` explicit). **ADR-0017 signed 2026-07-20**: satellite-heavy book (sleeve 0.40, core retired).
+13. **Next (the measuring era)**: PIT-fundamentals **vendor decision** (Principal; case file in preparation — unblocks value/quality families = sleeve #2); first scorecard grades + investing.com edge ~2026-08-07; first 40%-sized momentum cohort at the 2026-07-31 rebalance; learning-loop Tier-1 activation (~Sept, Principal signature); Linux-box migration (deferred by Principal — case strengthened: launchd/TCC dead, backups single-pathed); NIFTY 50 direct (blocked: EODHD has zero NSE coverage; vendor procurement is a Principal decision).
 
 ## Working style
 - Tests first; golden pins for anything with numeric outputs.

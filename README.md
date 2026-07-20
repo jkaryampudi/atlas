@@ -2,9 +2,40 @@
 
 AI investment operating system — hypothetical A$100k, US + India equities, long-only,
 **paper mode**, capital preservation first. Architecture in `docs/architecture/`;
-signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
+signed decisions in `docs/adr/` (17 ADRs). Nothing here is investment advice.
 
-## Status (2026-07-13): Phases 1–5 built; first strategy approved to PAPER
+## Status (2026-07-20): the measuring era — one validated sleeve, satellite-heavy book
+
+- **Book (ADR-0017, signed 2026-07-20)**: SATELLITE-HEAVY, **no ETFs** by
+  Principal directive — momentum sleeve `xsmom-pit-tr` at **40% of NAV**
+  (top-5 individual stocks, 8%/name = the L1 cap; L3 sector clustering shaves
+  honestly), remainder cash (≥10% L5); the former 70% SPY/INDA core is
+  RETIRED (`core_allocation.CORE_RETIRED`, T8c reports it nightly); PEAD
+  sleeve stays 0 (ADR-0015); India deferred until an NSE vendor decision.
+  Costs signed in ink: ≈−16pp crash exposure before the −40% band demotes
+  (no fallback sleeve), structural cash drag vs SPY printed by attribution.
+- **Research Factory (phases 1+2)**: console-driven recipe gauntlet — author
+  a pre-registered hypothesis on the QUANT page (bounded grammar, rationale
+  required, lineage-bound, kill-start pre-committed), run the full five-gate
+  gauntlet, browse every verdict. Registration chokepoint enforces one-name-
+  one-experiment under a cross-process advisory lock (`--rerun` is the
+  explicit counted repeat). Catalog: momentum family (4, fully mined —
+  first-light verdicts 2026-07-20: 6-1 STRIKE by its own kill leg, 3-1 and
+  12-0 FAIL) + low-vol family (`low_vol_252`, byte-identity anchored to the
+  production risk panel — first burn, Principal-authored from the console,
+  FAIL both legs: DSR 0.986 but null p=0.79; a monkey trade on raw returns).
+  Audited `repin_features` tool for reviewed spec-identical refactors
+  (stored values must reproduce byte-for-byte before a pin moves).
+- **Research surfaces**: per-name dossier (financials, Atlas's own valuation
+  + health score + fragility markers, committee cross-check) at
+  `/console/dossier`; whole-universe Opportunity Screen (deterministic,
+  measured-never-applied) with monthly cohorts auto-recorded into the
+  source-pick edge trial; investing.com picks graded nightly vs SPY + a
+  dartboard (first 20-session verdicts ~2026-08-07); sonnet-5 shadow
+  comparison complete (debate diversity 5/8 vs 1/8 — switch is a Principal
+  registry decision).
+
+Phases 1–5 as originally built (first strategy approved to PAPER 2026-07-13):
 
 - **P1 data plane**: EODHD All-In-One, deep backfill 2010→2026, 693 instruments,
   exchange calendars, FX, dividends (total-return capable), earnings calendar,
@@ -16,7 +47,7 @@ signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
   cases persisted), grounding cage (token-boundary, fail-closed), budget
   sub-caps, red-team suite; committee memos graded by a scorecard (vs SPY at
   20/60 sessions, dartboard baseline, dissent grading, per-source slices).
-- **P3 quant**: trial registry (28 trials, deflated Sharpe at true count),
+- **P3 quant**: trial registry (51 trials across 9 lineages, deflated Sharpe at the true LINEAGE count per ADR-0016),
   1000-path null gate, purged walk-forward, point-in-time S&P 500 membership,
   total-return scoring. Graveyard on record: momentum v1, trend/meanrev/breakout,
   FX sandbox (ADR-0008) — all failed verbatim; gates never touched.
@@ -36,7 +67,10 @@ signed decisions in `docs/adr/` (10 ADRs). Nothing here is investment advice.
 - **P5 paper trading**: proposals→approval-with-recheck→next-open fills→FIFO
   settlement→stops/exits→reconciliation; T0–T9 daily cycle (checkpointed,
   atomic per day) on an in-process scheduler; console at `/console` (port 8001)
-  is the sole control surface; nightly backups.
+  is the sole control surface; nightly backups via the in-process
+  scheduler (the launchd variants are dead on macOS — TCC blocks
+  `~/Documents` for background agents; first successful backup
+  2026-07-21).
 - **Attribution (ADR-0012 cons. 4 + Doc 04 §14)**: daily core(beta)/satellite
   (alpha)/cash NAV decomposition (`reporting.attribution_daily`, migration
   0027; flow-adjusted returns, SPY-TR / signed 55:15 blend benchmarks), t8b
@@ -79,7 +113,7 @@ Built and tested in this drop:
 ## Quick start
 ```bash
 pip install -e ".[dev]"
-pytest                    # 935 tests (PG tests isolated to atlas_test, auto-created)
+pytest                    # 1515 tests (PG tests isolated to atlas_test, auto-created; bootstrap self-heals)
 docker compose up -d      # postgres + redis + api
 alembic upgrade head
 ```
