@@ -15,7 +15,10 @@ from sqlalchemy import text
 
 from atlas.core.clock import FrozenClock
 from atlas.dcp.portfolio.attribution import (
-    NonAuthoritativeBookError,
+    NON_AUTHORITATIVE_CLOSED_LOT,
+    NON_AUTHORITATIVE_STRATEGY,
+    UNKNOWN_STRATEGY_STATE,
+    PortfolioIntegrityError,
     assert_authoritative_book,
     compute_attribution,
 )
@@ -87,15 +90,122 @@ def test_invariant_holds_for_a_paper_strategy(clean_audit):
     compute_attribution(s, year=2026, month=7)       # no raise
 
 
-def test_invariant_fails_closed_when_the_lot_becomes_non_authoritative(clean_audit):
+def _downgrade(s, state="research_shadow") -> None:
+    s.execute(text("UPDATE quant.strategies SET state=:st "
+                   "WHERE family='xsmom-pit-tr'"), {"st": state})
+
+
+def _dispose_the_lot(s) -> None:
+    """Close the open satellite lot (simulate a full sell) so no OPEN lot remains
+    — the disposed lot + its fill still contribute to realised P&L / shortfall."""
+    s.execute(text("UPDATE trading.tax_lots SET disposed_at = now(), "
+                   "proceeds_aud = 8000 WHERE disposed_at IS NULL "
+                   "AND execution_id IS NOT NULL"))
+
+
+def test_open_research_shadow_lot_fails_authoritative_reporting(clean_audit):
+    """Test 1: an OPEN research-shadow lot fails authoritative reporting."""
     s = clean_audit
     _open_satellite_lot(s, FrozenClock(T0))
-    # the strategy is downgraded AFTER deploying the lot: its open lot is now
-    # attributable to a non-authoritative strategy
-    s.execute(text("UPDATE quant.strategies SET state='research_shadow' "
-                   "WHERE family='xsmom-pit-tr'"))
-    with pytest.raises(NonAuthoritativeBookError, match="non-authoritative"):
+    _downgrade(s)
+    with pytest.raises(PortfolioIntegrityError) as ei:
         assert_authoritative_book(s)
-    # the whole-book report refuses rather than mixing shadow capital in
-    with pytest.raises(NonAuthoritativeBookError):
-        compute_attribution(s, year=2026, month=7)
+    assert ei.value.reason_code == NON_AUTHORITATIVE_STRATEGY
+
+
+def test_disposed_research_shadow_lot_fails_realised_pnl(clean_audit):
+    """Tests 2 + 14: a CLOSED/disposed research-shadow lot fails realised-P&L
+    reporting (a PostgreSQL closed-corrupted-lot case)."""
+    s = clean_audit
+    _open_satellite_lot(s, FrozenClock(T0))
+    _dispose_the_lot(s)
+    _downgrade(s)
+    with pytest.raises(PortfolioIntegrityError) as ei:
+        compute_attribution(s, year=2026, month=7)      # realised P&L path
+    assert ei.value.reason_code == NON_AUTHORITATIVE_CLOSED_LOT
+
+
+def test_research_shadow_fill_fails_even_with_no_open_lot(clean_audit):
+    """Test 3: with the lot fully disposed (no open lot remains), the fill/closed
+    lot still resolves to the shadow strategy and fails closed."""
+    s = clean_audit
+    _open_satellite_lot(s, FrozenClock(T0))
+    _dispose_the_lot(s)
+    _downgrade(s)
+    assert s.execute(text("SELECT count(*) FROM trading.tax_lots "
+                          "WHERE disposed_at IS NULL")).scalar() == 0
+    with pytest.raises(PortfolioIntegrityError):
+        assert_authoritative_book(s)
+
+
+def test_a_lot_with_no_resolvable_strategy_is_authoritative(clean_audit):
+    """Tests 4/5 boundary + 10: a non-core lot that resolves to NO strategy
+    (a manual/discretionary holding — the only 'no-lineage' record a real book
+    can hold, since FK guarantees a real satellite lot's signal resolves to a
+    strategy) is authoritative by default. It makes no non-authoritative claim,
+    so the guard passes — a valid book with a manual holding is unaffected."""
+    s = clean_audit
+    iid = s.execute(text(
+        "INSERT INTO market.instruments (symbol, exchange, market, "
+        "instrument_type, name, currency) VALUES "
+        "('ZORPH','XTEST','US','stock','ZORPH','USD') RETURNING id")).scalar()
+    pos = s.execute(text(
+        "INSERT INTO trading.positions (instrument_id, qty, avg_cost, currency, "
+        " opened_at, is_core, created_at) VALUES (:iid,10,10,'USD',now(),false,"
+        " now()) RETURNING id"), {"iid": iid}).scalar()
+    s.execute(text(
+        "INSERT INTO trading.tax_lots (position_id, execution_id, qty, cost_aud, "
+        " acquired_at, created_at) VALUES (:p, NULL, 10, 150, now(), now())"),
+        {"p": pos})
+    assert_authoritative_book(s)                    # no raise: no shadow claim
+
+
+def test_non_authoritative_lifecycle_state_fails_closed(clean_audit):
+    """Test 6: a lot resolving to a strategy in a non-authoritative, non-shadow
+    lifecycle state (e.g. suspended) is refused — never valid for authoritative
+    reporting."""
+    s = clean_audit
+    _open_satellite_lot(s, FrozenClock(T0))
+    _downgrade(s, state="suspended")
+    with pytest.raises(PortfolioIntegrityError) as ei:
+        assert_authoritative_book(s)
+    assert ei.value.reason_code == UNKNOWN_STRATEGY_STATE
+
+
+def test_a_disposed_shadow_lot_cannot_disappear_from_the_check(clean_audit):
+    """Test 7: an inner-join-style guard that looked only at OPEN lots would
+    silently drop a fully-disposed shadow lot (it 'disappears'); the expanded
+    guard covers disposed lots, so the record cannot vanish unnoticed."""
+    s = clean_audit
+    _open_satellite_lot(s, FrozenClock(T0))
+    _dispose_the_lot(s)
+    _downgrade(s)
+    # an OPEN-only query returns nothing — the record would 'disappear'
+    open_only = s.execute(text(
+        "SELECT count(*) FROM trading.tax_lots tl "
+        "JOIN trading.executions e ON e.id = tl.execution_id "
+        "JOIN trading.orders o ON o.id = e.order_id "
+        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        "JOIN quant.signals sig ON sig.id = ANY(tp.signal_ids) "
+        "JOIN quant.strategies st ON st.id = sig.strategy_id "
+        "WHERE tl.disposed_at IS NULL AND NOT (st.state IN ('paper','live'))")
+    ).scalar()
+    assert open_only == 0                           # open-only guard sees nothing
+    with pytest.raises(PortfolioIntegrityError):    # the expanded guard catches it
+        assert_authoritative_book(s)
+
+
+def test_integrity_error_carries_structured_reason_and_logs(clean_audit, caplog):
+    """Test 13: the exception carries a structured reason_code + safe identifiers,
+    and a structured log line is emitted."""
+    import logging
+    s = clean_audit
+    _open_satellite_lot(s, FrozenClock(T0))
+    _downgrade(s)
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(PortfolioIntegrityError) as ei:
+            assert_authoritative_book(s)
+    assert ei.value.reason_code == NON_AUTHORITATIVE_STRATEGY
+    assert "lot_id" in ei.value.identifiers and "state" in ei.value.identifiers
+    assert any("integrity breach" in r.message and "reason=" in r.message
+               for r in caplog.records)

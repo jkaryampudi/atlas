@@ -55,45 +55,140 @@ from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Sequence
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from atlas.dcp.strategy_lifecycle import classify, is_authoritative
+from atlas.dcp.strategy_lifecycle import (
+    classify,
+    is_authoritative,
+    is_research_shadow,
+)
+
+logger = logging.getLogger(__name__)
+
+# Structured reason codes for an authoritative-book integrity breach (ADR-0018).
+NON_AUTHORITATIVE_STRATEGY = "NON_AUTHORITATIVE_STRATEGY"
+UNKNOWN_STRATEGY_STATE = "UNKNOWN_STRATEGY_STATE"
+MISSING_STRATEGY_LINEAGE = "MISSING_STRATEGY_LINEAGE"
+UNRESOLVED_SIGNAL = "UNRESOLVED_SIGNAL"
+UNRESOLVED_PROPOSAL = "UNRESOLVED_PROPOSAL"
+NON_AUTHORITATIVE_CLOSED_LOT = "NON_AUTHORITATIVE_CLOSED_LOT"
+NON_AUTHORITATIVE_FILL = "NON_AUTHORITATIVE_FILL"
+INVALID_AUTHORITATIVE_SNAPSHOT = "INVALID_AUTHORITATIVE_SNAPSHOT"
 
 
-class NonAuthoritativeBookError(RuntimeError):
-    """Fail-closed invariant breach (ADR-0018): the authoritative whole-book
-    report would include capital attributable to a non-authoritative strategy."""
+class PortfolioIntegrityError(RuntimeError):
+    """Fail-closed authoritative-book integrity breach (ADR-0018). Carries a
+    structured `reason_code` (one of the codes above) and safe `identifiers`
+    (ids/families/states — never PII or account data) for logging and audit."""
+
+    def __init__(self, reason_code: str, message: str, **identifiers: object) -> None:
+        self.reason_code = reason_code
+        self.identifiers = identifiers
+        super().__init__(f"[{reason_code}] {message} — {identifiers}")
+
+
+# Backward-compatible alias: a non-authoritative strategy is one integrity breach.
+NonAuthoritativeBookError = PortfolioIntegrityError
+
+
+def _breach(reason_code: str, message: str, **identifiers: object) -> "PortfolioIntegrityError":
+    """Emit a STRUCTURED log line and return the fail-closed exception (req 13)."""
+    logger.error("authoritative-book integrity breach reason=%s %s ids=%s",
+                 reason_code, message, identifiers)
+    return PortfolioIntegrityError(reason_code, message, **identifiers)
+
+
+def _state_breach(state: str | None, *, disposed: bool, kind: str,
+                  **ids: object) -> "PortfolioIntegrityError | None":
+    """None if `state` is authoritative; otherwise the fail-closed breach with the
+    right reason code. Classification is the canonical strategy_lifecycle."""
+    if is_authoritative(state):
+        return None
+    if state is None:
+        return _breach(MISSING_STRATEGY_LINEAGE,
+                       f"{kind} resolves to a signal with no strategy", **ids)
+    if is_research_shadow(state):
+        code = (NON_AUTHORITATIVE_CLOSED_LOT if kind == "lot" and disposed
+                else NON_AUTHORITATIVE_FILL if kind == "fill"
+                else NON_AUTHORITATIVE_STRATEGY)
+        return _breach(code, f"{kind} attributable to a non-authoritative "
+                       f"(research_shadow) strategy [{state}]", state=state, **ids)
+    # a known-but-non-authoritative or unmapped lifecycle state (suspended /
+    # draft / validated / ... ) — never valid for authoritative reporting
+    return _breach(UNKNOWN_STRATEGY_STATE,
+                   f"{kind} attributable to a strategy in a non-authoritative "
+                   f"state [{state}] (classify={classify(state)})",
+                   state=state, **ids)
+
+
+# The lot/fill -> strategy lineage, resolved with LEFT JOINs so a broken link
+# surfaces as a NULL row (never silently dropped by an inner join). The LATERAL
+# aggregates every DISTINCT strategy state the proposal's REAL signals resolve
+# to; a lot/fill with no real signal (discretionary uuid5 or a core lot) yields
+# n_strats=0 and makes no non-authoritative claim.
+_LINEAGE_LATERAL = (
+    "LEFT JOIN LATERAL (SELECT array_agg(DISTINCT st.state) AS states, "
+    " count(DISTINCT st.id) AS n_strats FROM quant.signals sig "
+    " JOIN quant.strategies st ON st.id = sig.strategy_id "
+    " WHERE tp.signal_ids IS NOT NULL AND sig.id = ANY(tp.signal_ids)) lin ON true")
 
 
 def assert_authoritative_book(session: Session) -> None:
-    """Fail-closed invariant protecting AUTHORITATIVE whole-book reporting (NAV,
-    realised P&L, shortfall): no OPEN tax lot may be attributable to a
-    non-authoritative strategy (ADR-0018). A lot is attributed to a strategy iff
-    its proposal's signal_ids reference that strategy's quant.signals; is_core
-    (passive) lots carry no signal id and are authoritative by construction.
-    research_shadow deploys no capital (the bridge guard), so this holds today —
-    if a lot ever maps to a research_shadow / non-authoritative strategy, this
-    RAISES rather than silently reporting shadow capital as authoritative book
-    performance. Classification is the canonical strategy_lifecycle.is_authoritative
-    (fail-closed: unknown/None is never authoritative)."""
-    rows = session.execute(text(
-        "SELECT DISTINCT st.family, st.state FROM trading.tax_lots tl "
-        "JOIN trading.executions e ON e.id = tl.execution_id "
-        "JOIN trading.orders o ON o.id = e.order_id "
-        "JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
-        "JOIN quant.signals sig ON sig.id = ANY(tp.signal_ids) "
-        "JOIN quant.strategies st ON st.id = sig.strategy_id "
-        "WHERE tl.disposed_at IS NULL")).mappings().all()
-    offenders = [(r["family"], r["state"]) for r in rows
-                 if not is_authoritative(r["state"])]
-    if offenders:
-        detail = ", ".join(f"{f} ({classify(st)}: {st})" for f, st in offenders)
-        raise NonAuthoritativeBookError(
-            "authoritative whole-book report refused: open lots are attributable "
-            f"to non-authoritative strategies — {detail}. A non-authoritative "
-            "strategy must deploy no capital (ADR-0018); resolve the position "
-            "before reporting it as authoritative book performance.")
+    """Fail-closed integrity guard for an AUTHORITATIVE reporting period (ADR-0018):
+    NO economically-contributing record — open OR disposed tax lot, or fill —
+    may be attributable to a non-authoritative strategy, and no required lineage
+    link (execution -> order -> proposal -> signal -> strategy) may be missing,
+    unresolved, or mapped to an unknown/non-authoritative lifecycle state. Raises
+    PortfolioIntegrityError with a structured reason code on the FIRST offender.
+
+    Lineage is resolved with LEFT JOINs so a broken record surfaces (never
+    silently dropped). is_core (passive) lots are authoritative by construction;
+    a lot/fill that resolves to NO strategy (discretionary) makes no
+    non-authoritative claim and is authoritative. research_shadow deploys no
+    capital (the bridge guard), so a valid paper book passes unchanged."""
+    # (1) every non-core tax lot — OPEN and DISPOSED (NAV + realised P&L). The
+    # LEFT JOINs keep a lot even if its lineage is incomplete (never dropped by
+    # an inner join); the LATERAL resolves the DISTINCT strategy states it maps to.
+    lots = session.execute(text(
+        "SELECT tl.id AS lot_id, (tl.disposed_at IS NOT NULL) AS disposed, "
+        "       lin.states "
+        "FROM trading.tax_lots tl "
+        "LEFT JOIN trading.positions pos ON pos.id = tl.position_id "
+        "LEFT JOIN trading.executions e ON e.id = tl.execution_id "
+        "LEFT JOIN trading.orders o ON o.id = e.order_id "
+        "LEFT JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        + _LINEAGE_LATERAL +
+        " WHERE pos.is_core IS NOT TRUE")).mappings().all()
+    for r in lots:
+        # A lot that resolves to NO strategy (n_strats=0) makes no
+        # non-authoritative claim — a manual/in-kind or discretionary holding,
+        # authoritative by default (a real satellite lot ALWAYS carries a signal
+        # whose strategy resolves via FK, so this is never shadow capital).
+        for st in (r["states"] or []):    # each DISTINCT resolved strategy state
+            breach = _state_breach(st, disposed=r["disposed"], kind="lot",
+                                   lot_id=str(r["lot_id"]))
+            if breach is not None:
+                raise breach
+    # (2) every fill/execution (implementation shortfall) — a shadow fill fails
+    #     even after its lot is fully disposed. The LEFT JOIN keeps a fill whose
+    #     lineage is broken (never dropped by an inner join); a fill that resolves
+    #     to no strategy is discretionary, one that resolves to a shadow strategy
+    #     fails closed.
+    fills = session.execute(text(
+        "SELECT e.id AS exec_id, lin.states "
+        "FROM trading.executions e "
+        "LEFT JOIN trading.orders o ON o.id = e.order_id "
+        "LEFT JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        + _LINEAGE_LATERAL)).mappings().all()
+    for r in fills:
+        for st in (r["states"] or []):
+            breach = _state_breach(st, disposed=False, kind="fill",
+                                   execution_id=str(r["exec_id"]))
+            if breach is not None:
+                raise breach
 
 _CENT = Decimal("0.01")
 _BPS = Decimal("0.0001")
