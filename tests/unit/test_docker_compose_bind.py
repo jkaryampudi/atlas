@@ -36,8 +36,7 @@ def _service_block(text: str, name: str) -> str:
     return "\n".join(out)
 
 
-@pytest.mark.parametrize("service, port", [
-    ("api", 8000), ("db", 5432), ("redis", 6379)])
+@pytest.mark.parametrize("service, port", [("api", 8000), ("db", 5432)])
 def test_published_port_is_bound_to_loopback_not_all_interfaces(service, port):
     text = COMPOSE.read_text()
     block = _service_block(text, service)
@@ -50,6 +49,17 @@ def test_published_port_is_bound_to_loopback_not_all_interfaces(service, port):
     # explicit negatives: no all-interfaces form remains in the block
     assert f'"{port}:{port}"' not in block and f"'{port}:{port}'" not in block
     assert f"0.0.0.0:{port}:{port}" not in block
+
+
+def test_redis_has_no_host_published_port():
+    """ADR-0018 req 7: Redis is unused by code and needs no host access — its
+    host publication is removed entirely (compose-network access retained). The
+    redis service block must contain NO `ports:` mapping."""
+    block = _service_block(COMPOSE.read_text(), "redis")
+    assert "6379" not in re.sub(r"#.*", "", block), (
+        "redis must not publish a host port (found a 6379 mapping outside "
+        "comments) — it is reachable only over the compose network")
+    assert "ports:" not in re.sub(r"#.*", "", block)
 
 
 def test_no_service_binds_a_bare_all_interfaces_port():

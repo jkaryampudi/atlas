@@ -17,12 +17,15 @@ sudo apt install -y python3.12 python3.12-venv   # (or 3.13)
 
 # 3. Tailscale — the private path to the console from your Mac and phone.
 #    The API binds to 127.0.0.1 ONLY (it has no auth yet); Tailscale IS the
-#    auth boundary until step-up tokens ship. (ADR-0018: docker-compose now
-#    publishes the api (8000), db (5432) and redis (6379) on 127.0.0.1 only —
-#    previously bare 0.0.0.0, exposing the unauthenticated API and local-only DB
-#    on all interfaces. The bind is asserted by a static config-parse test
-#    (tests/unit/test_docker_compose_bind.py); in a Docker environment, confirm
-#    at runtime that each port answers on loopback but not the host LAN address.)
+#    auth boundary until step-up tokens ship. (ADR-0018: docker-compose publishes
+#    the api (8000) and db (5432) on 127.0.0.1 ONLY — previously bare 0.0.0.0,
+#    exposing the unauthenticated API and local-only DB on all interfaces. Redis
+#    is NOT host-published at all: it is unused by code and no host workflow needs
+#    it; the api still reaches it over the compose network at redis:6379. The
+#    binds are asserted by a static config-parse test
+#    (tests/unit/test_docker_compose_bind.py); in a Docker environment, confirm at
+#    runtime that api/db answer on loopback but not the host LAN address, and that
+#    6379 is not reachable from the host at all.)
 curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
 ```
 

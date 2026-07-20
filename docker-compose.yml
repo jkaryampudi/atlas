@@ -13,10 +13,12 @@ services:
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U atlas"], interval: 5s, retries: 10}
   redis:
     image: redis:7
-    # loopback-only publish (ADR-0018). Redis is declared but currently unused
-    # by any code (no `import redis` in atlas/); the host publication could be
-    # removed entirely — it is kept, loopback-bound, for the compose api service.
-    ports: ["127.0.0.1:6379:6379"]
+    # NO host publication (ADR-0018): Redis is declared but unused by any code
+    # (no `import redis` in atlas/) and no developer workflow connects to it from
+    # the host. The service stays for compose-network access — the api reaches it
+    # at redis:6379 over the bridge (ATLAS_REDIS_URL below) — but the port is not
+    # exposed on the host at all. Re-add a `ports: ["127.0.0.1:6379:6379"]` (and
+    # document the reason) only if a host workflow ever needs it.
   api:
     build: .
     # uvicorn stays --host 0.0.0.0 INSIDE the container: Docker's published-port
