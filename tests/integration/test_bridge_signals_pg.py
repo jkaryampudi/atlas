@@ -67,7 +67,7 @@ def _memo(s, clock, symbol: str, refs: list[str]) -> str:
         {"sym": symbol, "er": json.dumps(refs), "ca": clock.now()}).scalar())
 
 
-def _seed(s, clock):
+def _seed(s, clock, state: str = "paper"):
     _clean(s)
     seed_limit_set(s, ROOT / "seeds" / "limit_set_v1.json")
     s.execute(text(
@@ -81,7 +81,7 @@ def _seed(s, clock):
         "INSERT INTO quant.strategies (family, name, version, spec, code_sha, "
         " tolerance_bands, state) "
         "VALUES ('xsmom-pit-tr', 'xsmom_pit', '1.0.0', '{}', 'test-sha', "
-        "        '{}', 'paper') RETURNING id")).scalar()
+        "        '{}', :state) RETURNING id"), {"state": state}).scalar()
     signal_id = s.execute(text(
         "INSERT INTO quant.signals (strategy_id, instrument_id, signal_date, "
         " direction, rank, formation_return, valid_until, created_at) "
@@ -128,6 +128,26 @@ def test_forged_signal_ref_fails_the_memo_closed(clean_audit):
     assert not report.built and len(report.skipped) == 1
     assert "no such row" in report.skipped[0].reason
     assert str(ghost) in report.skipped[0].reason
+    assert s.execute(text(
+        "SELECT count(*) FROM trading.trade_proposals")).scalar() == 0
+
+
+def test_research_shadow_signal_cannot_enter_the_paper_sleeve(clean_audit):
+    """P0 objective 7a (ADR-0018 fail-closed): a strategy downgraded to
+    'research_shadow' is non-authoritative — a memo citing its signal must NOT
+    become a paper-sleeve proposal (which, without the bridge guard, would size
+    the name by risk alone, UNCAPPED, because _sleeve_families drops it). The
+    memo fails closed and no proposal is created."""
+    s = clean_audit
+    clock = FrozenClock(T0)
+    _, signal_id = _seed(s, clock, state="research_shadow")
+    signal_ref = f"dcp:signal:xsmom:{signal_id}:2026-07-13"
+    _memo(s, clock, "ZBSA", [signal_ref, BARS_REF])
+
+    report = bridge_memos(s, clock)
+    assert not report.built and len(report.skipped) == 1
+    assert "research_shadow" in report.skipped[0].reason
+    assert "no capital" in report.skipped[0].reason
     assert s.execute(text(
         "SELECT count(*) FROM trading.trade_proposals")).scalar() == 0
 

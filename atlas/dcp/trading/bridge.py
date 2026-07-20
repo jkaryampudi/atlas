@@ -125,6 +125,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.clock import Clock
 from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
+from atlas.dcp.strategy_lifecycle import is_authoritative
 from atlas.dcp.indicators.core import wilder_atr
 from atlas.dcp.market_data.calendars import next_trading_day, trading_days_between
 from atlas.dcp.trading.proposals import (
@@ -245,11 +246,23 @@ def _resolve_signal_ids(session: Session, refs: list[str]) -> dict[str, str]:
             out[ref] = str(evidence_signal_id(ref))
             continue
         sid = uuid.UUID(m.group(1))
-        if session.execute(text(
-                "SELECT 1 FROM quant.signals WHERE id = :sid"),
-                {"sid": sid}).first() is None:
+        row = session.execute(text(
+            "SELECT st.state FROM quant.signals s "
+            "JOIN quant.strategies st ON st.id = s.strategy_id "
+            "WHERE s.id = :sid"), {"sid": sid}).first()
+        if row is None:
             raise _SkipMemo(f"memo cites quant signal {sid} but no such row "
                             "exists — refusing to fabricate signal lineage")
+        if not is_authoritative(row.state):
+            # ADR-0018 fail-closed: a non-authoritative strategy (e.g.
+            # research_shadow) deploys NO capital. Without this guard the memo
+            # would still bridge, but _sleeve_families (state IN paper/live)
+            # would drop the family — sizing the name by RISK ALONE, UNCAPPED,
+            # a loosening. Refuse the proposal instead.
+            raise _SkipMemo(
+                f"memo cites quant signal {sid} whose strategy is "
+                f"'{row.state}', not an authoritative (paper/live) sleeve — a "
+                "research_shadow / non-authoritative strategy deploys no capital")
         out[ref] = str(sid)
     return out
 
