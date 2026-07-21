@@ -158,19 +158,23 @@ def require_signed_validation_artifact(session: Session, strategy_id: str) -> No
     # (a legacy unstamped report cannot lift a research_shadow row).
     checklist = report["checklist"] if isinstance(report["checklist"], dict) else {}
     stamped = checklist.get("_identity")
-    if row["shadowed_at"] is not None and not stamped:
+    # F-022: identity verification is UNCONDITIONAL — every promotion (not only a
+    # re-promotion of a previously-shadowed strategy) must carry a stamped
+    # identity that matches the strategy's CURRENT executable. Previously the
+    # stamp requirement was gated on shadowed_at, so a never-shadowed strategy
+    # could be promoted on an UNSTAMPED report whose executable was never checked.
+    if not stamped:
         raise ValueError(
-            "re-promotion of a research_shadow strategy requires an "
-            "identity-stamped validation artifact (ADR-0018) — the report does "
-            "not pin code_sha/version/spec")
-    if stamped is not None:
-        current = strategy_identity(session, strategy_id)
-        if stamped != current:
-            raise ValueError(
-                "validation artifact identity does not match the strategy's "
-                f"current identity (artifact={stamped}, strategy={current}) — the "
-                "artifact validated a different code/version/config; refusing "
-                "promotion")
+            "promotion requires an identity-stamped validation artifact "
+            "(ADR-0018) — the report does not pin code_sha/version/spec; a "
+            "legacy unstamped report cannot promote any strategy")
+    current = strategy_identity(session, strategy_id)
+    if stamped != current:
+        raise ValueError(
+            "validation artifact identity does not match the strategy's "
+            f"current identity (artifact={stamped}, strategy={current}) — the "
+            "artifact validated a different code/version/config; refusing "
+            "promotion")
 
 
 def transition_to_paper(session: Session, audit: PostgresAuditLog, *,

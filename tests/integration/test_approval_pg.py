@@ -357,3 +357,56 @@ def test_approval_refuses_gate_deflated_at_family_count(pg_session):
                           gate=gate, wf=None, oos_untouched_attested=True)
     assert not d.approved
     assert any("lineage 'momentum' has 5" in r for r in d.reasons)
+
+
+def test_f022_unstamped_report_cannot_promote_a_never_shadowed_strategy(pg_session):
+    """F-022: identity verification is UNCONDITIONAL. A 'validated' strategy that
+    was NEVER research_shadow (shadowed_at NULL) with an 'approve' report carrying
+    NO _identity stamp must be REFUSED — previously the stamp requirement was
+    gated on shadowed_at, so such a promotion slipped through unverified."""
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, '{}', 'approve', '')"), {"sid": sid})   # no _identity
+    with pytest.raises(ValueError, match="identity-stamped validation artifact"):
+        require_signed_validation_artifact(s, str(sid))
+
+
+def test_f022_mismatched_stamped_identity_is_refused(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '')"),
+        {"sid": sid, "c": json.dumps({"_identity": {"code_sha": "deadbeef",
+                                                    "version": "0.0.0",
+                                                    "spec_hash": "x"}})})
+    with pytest.raises(ValueError, match="does not match"):
+        require_signed_validation_artifact(s, str(sid))
+
+
+def test_f022_matching_stamped_identity_promotes(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    ident = strategy_identity(s, str(sid))
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '')"),
+        {"sid": sid, "c": json.dumps({"_identity": ident})})
+    require_signed_validation_artifact(s, str(sid))   # no raise
