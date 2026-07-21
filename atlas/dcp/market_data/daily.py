@@ -77,8 +77,8 @@ from atlas.dcp.market_data.estimate_snapshots import (EstimateSnapshotDaily,
                                                        snapshot_estimates,
                                                        universe_symbols)
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
-from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_split,
-                                          upsert_bar, write_gate)
+from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_dividend,
+                                          record_split, upsert_bar, write_gate)
 from atlas.dcp.market_data.models import Bar, GateStatus
 from atlas.dcp.market_data.quality import evaluate_gate, inception_map
 
@@ -98,6 +98,7 @@ class MarketDaily:
     days: tuple[date, ...]               # sessions this run fetched (and is gating)
     gates: tuple[tuple[date, str], ...]  # every gate written, incl. carry-forward days
     needs_backfill: tuple[str, ...]      # active instruments with no stored bars at all
+    dividends: int = 0                   # F-015: cash dividends refreshed this run
 
     @property
     def red(self) -> int:
@@ -244,6 +245,7 @@ def _ingest_market(session: Session, adapter: MarketDataAdapter, market: str,
     needs_backfill: list[str] = []
     covered: set[date] = set()
     n_bars = 0
+    n_dividends = 0
     for inst in instruments:
         if inst["latest"] is None:
             needs_backfill.append(inst["symbol"])
@@ -254,11 +256,20 @@ def _ingest_market(session: Session, adapter: MarketDataAdapter, market: str,
         try:
             splits = adapter.fetch_splits(inst["symbol"], days[0], days[-1])
             bars = adapter.fetch_bars(inst["symbol"], days[0], days[-1])
+            # F-015: dividends are refreshed on the SAME nightly path as bars and
+            # splits — previously they were never fetched by the cycle, so the
+            # total-return series and the PEAD event store silently decayed.
+            dividends = adapter.fetch_dividends(inst["symbol"], days[0], days[-1])
         except Exception as exc:  # vendor failure: report + exit 2, gate the rest
             failures.append(f"{market}:{inst['symbol']}: vendor fetch failed: {exc}")
             continue
         for sp in splits:
             record_split(session, inst["id"], sp, source)
+        for dv in dividends:
+            # append-only ON CONFLICT DO NOTHING (idempotent); only ex-dates
+            # inside the completed window.
+            if days[0] <= dv.ex_date <= days[-1]:
+                n_dividends += record_dividend(session, inst["id"], dv, source)
         for b in bars:
             if not days[0] <= b.bar_date <= days[-1]:
                 continue  # never store a bar outside the completed window
@@ -270,7 +281,8 @@ def _ingest_market(session: Session, adapter: MarketDataAdapter, market: str,
                          frozenset(i["symbol"] for i in instruments),
                          last_completed, now)
     return MarketDaily(market=market, bars=n_bars, days=tuple(sorted(covered)),
-                       gates=tuple(gates), needs_backfill=tuple(needs_backfill))
+                       gates=tuple(gates), needs_backfill=tuple(needs_backfill),
+                       dividends=n_dividends)
 
 
 def _weekdays(start: date, end: date) -> list[date]:

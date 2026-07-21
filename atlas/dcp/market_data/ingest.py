@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import json
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import text
@@ -49,33 +50,59 @@ def upsert_bar(session: Session, instrument_id: object, bar: Bar, source: str) -
          "qf": list(bar.quality_flags)})
 
 
-def record_split(session: Session, instrument_id: object, split: Split, source: str) -> None:
-    # Arbiter columns are required: a bare ON CONFLICT never matches the natural
-    # key (migration 0005), so re-runs would duplicate splits and compound N× on
-    # read-side adjustment (review finding).
+_MIN_SPLIT_RATIO = Decimal("0.001")
+_MAX_SPLIT_RATIO = Decimal("1000")
+
+
+def is_valid_split_ratio(ratio: Decimal) -> bool:
+    """F-014: a genuine split / reverse-split ratio is finite, positive, NOT a
+    1:1 no-op, and within a sane band. Vendor 'split' rows outside this are
+    non-split factors — a mislabeled dividend/return-of-capital, a currency
+    redenomination, or malformed data — and must NEVER drive the split-adjustment
+    path (which would silently corrupt every historical price before the date)."""
+    try:
+        return (ratio.is_finite() and ratio > 0 and ratio != 1
+                and _MIN_SPLIT_RATIO <= ratio <= _MAX_SPLIT_RATIO)
+    except (InvalidOperation, TypeError):
+        return False
+
+
+def record_split(session: Session, instrument_id: object, split: Split, source: str) -> bool:
+    """Record a confirmed split. A ratio that is not a valid split factor is
+    QUARANTINED (skipped, returns False) rather than applied as an adjustment
+    (F-014). Returns True iff a split row was written/eligible.
+
+    Arbiter columns are required: a bare ON CONFLICT never matches the natural
+    key (migration 0005), so re-runs would duplicate splits and compound N× on
+    read-side adjustment (review finding)."""
+    if not is_valid_split_ratio(split.ratio):
+        return False
     session.execute(text(
         "INSERT INTO market.corporate_actions "
         "(instrument_id, action_date, action_type, ratio, source) "
         "VALUES (:iid, :d, 'split', :r, :src) "
         "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
         {"iid": instrument_id, "d": split.action_date, "r": split.ratio, "src": source})
+    return True
 
 
 def record_dividend(session: Session, instrument_id: object, div: Dividend,
-                    source: str) -> None:
+                    source: str) -> int:
     """Cash dividend into market.corporate_actions: action_type='dividend' is
     already permitted by the 0001 CHECK constraint and the table carries
     dedicated `amount`/`currency` columns, so no schema change is needed —
     `ratio` stays NULL (that column is split semantics). Amount is the RAW
     declared cash per share (adjust on read, the bars convention). Same
     natural-key arbiter as record_split, so re-runs never duplicate."""
-    session.execute(text(
+    res = session.execute(text(
         "INSERT INTO market.corporate_actions "
         "(instrument_id, action_date, action_type, amount, currency, source) "
         "VALUES (:iid, :d, 'dividend', :a, :cur, :src) "
-        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
+        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING "
+        "RETURNING id"),
         {"iid": instrument_id, "d": div.ex_date, "a": div.amount,
          "cur": div.currency, "src": source})
+    return 1 if res.first() is not None else 0
 
 
 def write_gate(session: Session, gate: GateResult) -> None:
