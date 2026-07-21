@@ -14,8 +14,13 @@ type:
 	mypy
 migrate:
 	alembic upgrade head
-replay:    ## deterministic daily-cycle replay on fixtures: make replay DATE=2026-07-10
-	python -m atlas.dcp.market_data.replay --date $(DATE)
+# F-017: replay SEEDS fixtures and UPSERTS fixture bars — never against the
+# production DB. It runs against ATLAS_REPLAY_DATABASE_URL (default: the local
+# disposable atlas_test database); the harness also refuses any non-disposable
+# target unless --force.
+ATLAS_REPLAY_DATABASE_URL ?= postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas_test
+replay:    ## deterministic daily-cycle replay on a DISPOSABLE db: make replay DATE=2026-07-10
+	ATLAS_DATABASE_URL="$(ATLAS_REPLAY_DATABASE_URL)" python -m atlas.dcp.market_data.replay --date $(DATE)
 doctor:    ## diagnose local environment
 	python -m atlas.tools.doctor
 verify-chain:  ## nightly audit hash-chain verification (alert on non-zero exit)

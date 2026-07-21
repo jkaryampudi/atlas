@@ -586,7 +586,10 @@ MOMENTUM_FAMILIES: tuple[str, ...] = ("xsmom-pit-tr",)
 _MOMENTUM_SIGNALS = ("ARRAY(SELECT s.id FROM quant.signals s "
                      "JOIN quant.strategies st ON st.id = s.strategy_id "
                      "WHERE st.family = ANY(:fams) "
-                     "  AND st.state IN ('MUTANT_no_such_state'))")
+                     "  AND st.state IN ('paper','live'))")  # F-011: authoritative
+# states only (matches bridge.py momentum-signal join). A surviving mutation-test
+# artifact ('MUTANT_no_such_state') previously made this always-empty, silently
+# disabling the §12 momentum-factor overlay.
 
 
 def _momentum_symbols(session: Session) -> frozenset[str]:
@@ -618,7 +621,7 @@ def _proposal_is_momentum(session: Session, signal_refs: Sequence[str]) -> bool:
         "SELECT 1 FROM quant.signals s "
         "JOIN quant.strategies st ON st.id = s.strategy_id "
         "WHERE s.id = ANY(:ids) AND st.family = ANY(:fams) "
-        "  AND st.state IN ('MUTANT_no_such_state') LIMIT 1"),
+        "  AND st.state IN ('paper','live') LIMIT 1"),  # F-011: authoritative states
         {"ids": [UUID(r) for r in signal_refs],
          "fams": list(MOMENTUM_FAMILIES)}).first() is not None
 
