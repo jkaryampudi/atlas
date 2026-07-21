@@ -77,6 +77,7 @@ from atlas.dcp.market_data.estimate_snapshots import (EstimateSnapshotDaily,
                                                        snapshot_estimates,
                                                        universe_symbols)
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
+from atlas.dcp.market_data.identity import refresh_identity
 from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_dividend,
                                           record_split, upsert_bar, write_gate)
 from atlas.dcp.market_data.models import Bar, GateStatus
@@ -365,6 +366,13 @@ def _refresh_fundamentals(session: Session, adapter: MarketDataAdapter,
             "VALUES (:iid, :d, CAST(:p AS jsonb), :src) "
             "ON CONFLICT (instrument_id, as_of) DO NOTHING"),
             {"iid": inst["id"], "d": today, "p": json.dumps(payload), "src": source})
+        # F-002: keep the OPEN issuer identity in step with each fresh snapshot,
+        # from the same real payload. Fail-soft (parity with the ingest around
+        # it): a per-instrument identity hiccup is counted, never fatal.
+        try:
+            refresh_identity(session, str(inst["id"]), payload, known_from=now)
+        except Exception as exc:
+            failures.append(f"identity {inst['symbol']}: refresh failed: {exc}")
         fetched.append(inst["symbol"])
     return FundamentalsDaily(fetched=tuple(fetched), fresh=tuple(fresh),
                              failed=tuple(failed))

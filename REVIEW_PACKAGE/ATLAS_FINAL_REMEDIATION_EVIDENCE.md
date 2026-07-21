@@ -12,8 +12,8 @@ were deliberately not rushed into capital-adjacent infrastructure.
 
 | ID | Sev | Status | Proof / reason |
 |----|-----|--------|----------------|
-| F-001 | Critical | **PARTIAL** | zero-era / reused-ticker exclusion verified vs live ADT/VAL/MNK (`test_membership_era_guard`); full fix needs F-002 issuer identity |
-| F-002 | High | **OPEN** | bitemporal issuer/instrument/listing identity — schema + data + resolution layer; a multi-day subsystem |
+| F-001 | Critical | **STRENGTHENED (was PARTIAL)** | zero-era / reused-ticker exclusion verified vs live ADT/VAL/MNK; now ALSO identity-corroborated — `reused_ticker_is_identity_unvouched` proves those series are issuer-unvouched, not merely date-misaligned (`test_instrument_identity_pg`). Residual: intra-series bar-splice discrimination is gated on F-007 versioned bars |
+| F-002 | High | **FIXED (core) — residual data-blocked** | issuer identity model (migration 0037) + resolution layer (`atlas/dcp/market_data/identity.py`), populated from REAL ISINs (atlas: 518 resolved / 8 unresolved / 182 no-fundamentals→no row); fail-closed on unresolved/ambiguous/before-series-floor; held-position drift detection; wired into ingest; 10 regression tests. Residual (honest, not fixed): the **dated identifier change-history** (multi-row known_from/known_to across a ticker's life) needs a vendor symbol-change feed we do not ingest — `history_complete=false`, schema shaped to receive it |
 | F-003 | High | **FIXED** | entry-day counted once; hand-calc goldens fail vs old engine |
 | F-004 | High | **FIXED** | stops fill at `min(stop, open)`; 7 gap cases |
 | F-005 | High | **PARTIAL** | PSR skew/kurtosis denominator + empirical-dispersion capability + numerical tests; threading dispersion through 8 runners/gate + re-pin is the finish step |
@@ -103,19 +103,25 @@ guard (verified by full-suite green).
 Migration **0036** (audit hash_version + chain_head + guard trigger) is additive,
 reversible (round-trip tested), and applied to the production chain.
 
-**Running total: 19 High FIXED** + M31; **F-001 (Critical) + F-005 PARTIAL**;
-**5 High OPEN** — F-002 (issuer identity), F-007 (versioned ingestion), F-009
-(split-basis EPS), F-012 (rebalance + revalidation), F-025 (scheduler supervision).
+**Running total (Round-5 update): 20 High FIXED-or-core-fixed** + M31; **F-001
+(Critical) strengthened; F-005 PARTIAL**; **4 High OPEN** — F-007 (versioned
+ingestion), F-009 (split-basis EPS), F-012 (rebalance + revalidation), F-025
+(scheduler supervision). F-002 moved to **FIXED (core), residual data-blocked**
+(see Round-5 section below).
 
-## Why the 5 remaining are OPEN (exact technical blockers)
+## Why the remaining findings are OPEN (exact technical blockers)
 
-- **F-002 / F-001-full** — a bitemporal issuer-identity model is codeable, but it
-  is inert without the *identity history* (ISIN/FIGI ↔ ticker ↔ venue with
-  known_from/known_to). Atlas ingests none of this from EODHD, and the assignment
-  forbids fabricating identifiers or mappings. An honest implementation
-  quarantines nearly every historical row, emptying the definitive S&P-500 panel
-  — breaking the working system rather than fixing it. This is a data-procurement
-  project, not an effort question.
+- **F-002 — CORRECTION (Round 5):** the earlier note below was too pessimistic.
+  An empirical DB check showed ISINs *are* present and unique for the active
+  tradeable set (518/526 fundamentals rows). The issuer-identity model + resolver
+  were therefore built from real data and fail closed on the unresolved
+  delisted/no-fundamentals rows (exactly where reused-ticker danger lives). What
+  is genuinely blocked is ONLY the *dated change-history* (one snapshot per
+  instrument exists, `as_of_count=1`), which needs a vendor symbol-change feed.
+  F-002 is now FIXED-core; the residual is a data-procurement decision, not code.
+  ~~Original note: a bitemporal issuer-identity model is codeable, but inert
+  without the identity history; an honest implementation quarantines nearly every
+  historical row.~~ (retained for history; superseded by the empirical finding.)
 - **F-007** — forward-versioned ingestion is buildable, but the requirement that
   *past* runs remain reproducible is unrecoverable: the prior bars were
   overwritten in place and their receipt/revision timestamps are gone. The
@@ -129,3 +135,43 @@ reversible (round-trip tested), and applied to the production chain.
 - **F-025** — needs a durable cycle-record table (migration) + supervision wired
   into the live scheduler + the ~16 enumerated tests; a self-contained but sizable
   increment.
+
+---
+
+# Round-5 additions (F-002 issuer identity — the root finding)
+
+**What was actually blocking, established empirically (not assumed):** a direct
+query of the live `atlas` DB showed (a) `market.fundamentals.payload->'General'`
+carries an **ISIN for 518/526 instruments** and a CUSIP for 509, **unique per
+instrument** — a permanent identifier IS present for the tradeable set; but
+(b) there is exactly **one `as_of` snapshot per instrument** — no dated history
+of identifier *changes*. So the real blocker is narrow: not "no identifiers" but
+"no dated change-history." That reshaped F-002 into a buildable core + a
+data-blocked residual.
+
+**Delivered (all from real data, zero fabricated identifiers):**
+
+| Piece | Where | Proof |
+|---|---|---|
+| Identity schema (bitemporal-capable; `history_complete` honesty flag; `is_resolved` gate; one-OPEN-row partial unique) | migration **0037** `market.instrument_identity` | round-trip up/down tested on atlas_test; applied to atlas |
+| Resolver — `resolve_identity` (PIT, fail-closed), `resolve_by_symbol`, `same_issuer`, `identity_key` | `atlas/dcp/market_data/identity.py` | AAPL/MSFT resolve to true ISINs; PIT floor at first bar |
+| Population from real ISIN/CUSIP; `valid_from` = first stored bar (the span we can attest) | `populate_identities` | atlas: **518 resolved / 8 unresolved / 182 no-fundamentals → no row** |
+| Fail-closed on unresolved, ambiguous symbol, and before-series-floor as_of | resolver `WHERE is_resolved AND interval-contains` | ADT/VAL/MNK → None (delisted, no ISIN) both currently and in their stale S&P era |
+| Held-position issuer pin + drift detection | `pin_issuer` / `issuer_drifted` / `require_stable_issuer` | ISIN reassigned under a pinned position → drift raises |
+| F-001 corroboration (identity-explicit) | `reused_ticker_is_identity_unvouched` | ADT/VAL/MNK era-unvouched = True |
+| Kept fresh on ingest | `daily.py::_refresh_fundamentals` hook (fail-soft) | identity upserts from each fresh snapshot |
+| 10 regression tests | `tests/integration/test_instrument_identity_pg.py` | all pass |
+
+**Residual, honestly NOT fixed (data-blocked):** the **dated identifier
+change-history** — multiple closed `[valid_from, valid_to)` rows tracing a
+ticker across issuers over its life — cannot be reconstructed from one vendor
+snapshot. `history_complete=false` states this in the data; the schema accepts
+the history later (append closed rows, flip the flag) without rework. Closing it
+needs a vendor symbol-change / delisting feed → **operator/Principal decision**
+(ATLAS_OPERATOR_ACTIONS.md). Nothing here changed any strategy math, params, or
+validated backtest number, so F-012's revalidation is untouched by this work.
+
+**Data-quality surfaced by fail-closed (operator follow-up):** 8 *active*
+instruments (e.g. BNY — Bank of NY Mellon) carry a fundamentals row but no ISIN,
+so they resolve to None. This is a vendor-fetch gap, not a code fault — a
+fundamentals re-fetch should populate them; until then they fail closed (safe).

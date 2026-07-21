@@ -62,11 +62,26 @@ file or any transcript.
   existing alert path (`atlas/ops/alerts.py`) at least surfaces cycle failures.
 - **Restart required:** yes. **Role:** operator. **Status:** interim mitigation.
 
+## 6. Issuer-identity change-history feed + ISIN backfill (F-002 residual)
+- **Reason:** F-002's resolution layer is built and populated from real ISINs
+  (migration 0037 + `identity.py`), but two pieces need non-code decisions:
+  - **(a) Dated change-history — Principal decision.** Reconstructing a ticker's
+    identifier history across issuers (multi-row `known_from/known_to`) needs a
+    vendor **symbol-change / delisting feed** (EODHD current-fundamentals gives
+    one snapshot). Until procured, `history_complete=false` and PIT lookups
+    before an instrument's first stored bar fail closed (safe, not silent).
+  - **(b) ISIN backfill — operator.** 8 *active* instruments (e.g. `BNY`) have a
+    fundamentals row but no ISIN, so they resolve to None (fail closed). A
+    targeted fundamentals re-fetch should populate them.
+- **Verify:** after a re-fetch, `populate_identities` reports fewer `unresolved`;
+  `resolve_by_symbol('BNY')` returns a resolved identity.
+- **Restart required:** no. **Role:** (a) Principal / (b) operator.
+
 ---
 
 ## Still-open findings needing engineering (not operator actions)
-F-002 (issuer identity), F-007 (versioned ingestion), F-009 (split-basis EPS),
-F-010 (ADR currency), F-012 (rebalance-sell + revalidation), F-019/F-020 (audit
-hash epoch + tail anchor), F-025 (scheduler supervision), and finishing F-005
-(DSR dispersion threading) / F-006 (currency-consistent alpha). See
-`ATLAS_FINAL_REMEDIATION_EVIDENCE.md`.
+F-007 (versioned ingestion), F-009 (split-basis EPS), F-012 (rebalance-sell +
+revalidation), F-025 (scheduler supervision), and finishing F-005 (DSR dispersion
+threading). **Now fixed since this list was last written:** F-002 (core; residual
+is the vendor decision in §6 above), F-006, F-010, F-019, F-020. See
+`ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the current per-finding status.

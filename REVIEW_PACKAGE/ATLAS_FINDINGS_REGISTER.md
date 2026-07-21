@@ -121,3 +121,26 @@ data), F-007 (versioned ingestion — past history already overwritten), F-012
 (rebalance + revalidation — gated on F-002/F-007), F-009 (split-basis EPS),
 F-025 (scheduler supervision). Blockers detailed in `ATLAS_FINAL_REMEDIATION_EVIDENCE.md`.
 **Gate still NOT met.**
+
+### Round-5 update (P2.30) — F-002 issuer identity (the root finding)
+
+**F-002 → FIXED (core), residual data-blocked.** An empirical DB check corrected
+the earlier "no identifiers" assumption: `market.fundamentals.payload` carries an
+ISIN for 518/526 instruments, unique per instrument. Built from real data:
+migration **0037** `market.instrument_identity` (bitemporal-capable,
+`history_complete=false`, `is_resolved` gate) + `atlas/dcp/market_data/identity.py`
+(PIT fail-closed resolver, `same_issuer`, held-position drift detection),
+populated (atlas: 518 resolved / 8 unresolved / 182 no-fundamentals → no row),
+wired into the fundamentals ingest, 10 regression tests. **F-001 (Critical)
+strengthened** — the ADT/VAL/MNK exclusions are now identity-corroborated
+(`reused_ticker_is_identity_unvouched`), not merely date-inferred.
+
+**Residual (honestly not fixed):** the *dated identifier change-history* (multi-row
+known_from/known_to) needs a vendor symbol-change feed we do not ingest — a
+Principal/operator decision (`ATLAS_OPERATOR_ACTIONS.md §6`), schema shaped to
+receive it. No strategy math/params/validated numbers changed.
+
+**Running total: 20 High FIXED-or-core-fixed** + M31; F-001 (Critical)
+strengthened; F-005 PARTIAL; **4 High OPEN**: F-007, F-009, F-012, F-025. Gates on
+a fresh atlas_test: **pytest 1700 passed / 0 failed**, ruff clean, mypy clean
+(135 files), verify-chain 1895 OK, cov-risk 100%. **Gate still NOT met.**
