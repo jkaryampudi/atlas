@@ -23,6 +23,16 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
+# F-023: the closed catalog of reviewed research lineages. Every new trial
+# deflates one of these buckets; a fresh arbitrary tag would reset the
+# multiple-testing penalty. Adding a line is a reviewed change (like the
+# factory feature catalog). Matches the lines present in quant.trial_registry.
+KNOWN_LINEAGES: frozenset[str] = frozenset({
+    "momentum", "momentum+pead", "pead", "trend", "meanrev", "breakout",
+    "quality", "low-vol", "fxlab",
+})
+
+
 def register_trial(session: Session, *, family: str, spec: dict[str, object],
                    metrics: dict[str, float], lineage: str,
                    hypothesis: str | None = None,
@@ -40,6 +50,16 @@ def register_trial(session: Session, *, family: str, spec: dict[str, object],
     if not lineage or not lineage.strip():
         raise ValueError("lineage is required (ADR-0016): every new trial "
                          "names the research line it counts against")
+    if lineage not in KNOWN_LINEAGES:
+        # F-023: the lineage is the deflation bucket. Accepting an arbitrary new
+        # tag lets a variant reset its multiple-testing penalty (the exact
+        # ADR-0016 defect, re-opened outside the factory). Bind to a reviewed
+        # catalog: adding a research line is a reviewed change here, mirroring
+        # factory.features.FEATURE_LINEAGE.
+        raise ValueError(
+            f"unknown lineage {lineage!r} (F-023): register only against a "
+            f"reviewed research line. Known: {sorted(KNOWN_LINEAGES)}. Adding a "
+            "line is a reviewed change to registry.KNOWN_LINEAGES.")
     h = (spec_hash if spec_hash is not None else hashlib.sha256(
         json.dumps(spec, sort_keys=True).encode()).hexdigest())
     rid = session.execute(text(

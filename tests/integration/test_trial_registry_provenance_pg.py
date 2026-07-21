@@ -15,7 +15,7 @@ pytestmark = requires_pg
 
 def test_existing_call_shape_unchanged_null_provenance(pg_session):
     s = pg_session
-    rid = register_trial(s, family="prov-test", lineage="prov-test",
+    rid = register_trial(s, family="prov-test", lineage="quality",
                          spec={"v": 1}, metrics={"sharpe": 0.1})
     row = s.execute(text(
         "SELECT strategy_family, hypothesis, dataset_version "
@@ -28,7 +28,7 @@ def test_existing_call_shape_unchanged_null_provenance(pg_session):
 def test_new_kwargs_are_persisted(pg_session):
     s = pg_session
     rid = register_trial(
-        s, family="prov-test", lineage="prov-test",
+        s, family="prov-test", lineage="quality",
         spec={"v": 2}, metrics={"sharpe": 0.2},
         hypothesis="PEAD drift persists 63 sessions in US large caps",
         dataset_version="a" * 64)

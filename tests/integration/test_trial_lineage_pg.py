@@ -114,12 +114,12 @@ def test_backfill_is_idempotent_and_preserves_existing_tags(pg_session):
     that already carries a tag (e.g. one registered by new code mid-deploy)."""
     s = pg_session
     s.execute(text("TRUNCATE quant.trial_registry"))
-    register_trial(s, family="xsmom-custom", lineage="special-tag",
+    register_trial(s, family="xsmom-custom", lineage="momentum",
                    spec={"v": 1}, metrics={})
     s.execute(text(_load_migration_0032().BACKFILL_SQL))
     assert s.execute(text(
         "SELECT lineage FROM quant.trial_registry "
-        "WHERE strategy_family='xsmom-custom'")).scalar_one() == "special-tag"
+        "WHERE strategy_family='xsmom-custom'")).scalar_one() == "momentum"
 
 
 def test_runner_dsr_computes_at_lineage_count_not_family_count(pg_session):
