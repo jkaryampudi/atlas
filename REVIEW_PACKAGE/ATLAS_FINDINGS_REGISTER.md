@@ -95,3 +95,16 @@ Original finding descriptions above are unchanged. Remediation status (proof in 
 | F-002, F-006, F-007, F-012, F-019, F-020, F-021, F-024, F-025, F-026 | **OPEN** — not addressed; each scoped in `ATLAS_REMEDIATION_ROADMAP.md`. F-002 & F-007 are schema/data increments; F-019/F-020 change the audit backbone; F-021 changes the approval gate; each warrants a dedicated branch |
 
 **Completion gate NOT met** (unresolved Critical/High ≠ 0). 9 High + M31 fully remediated; F-001 (Critical) and F-005 partially. The remaining ~10 High are the deep architectural / backbone / approval-gate items, deliberately not rushed. F-013 additionally requires the operator to rotate the exposed EODHD key out-of-band.
+
+### Round-3 update (P2.13–P2.18)
+
+Now **FIXED** (added this round): **F-021** (benchmark-relative walk-forward gate),
+**F-018** (global lock order / ABBA), **F-024** (failed mandatory kill gate is
+terminal — app), **F-026** (settle refuses stale non-authoritative buy — app),
+**F-014** (split-factor validation), **F-015** (nightly dividend refresh).
+
+**Running total: 15 High FIXED** (F-003, F-004, F-008, F-011, F-013, F-014,
+F-015, F-016, F-017, F-018, F-021, F-022, F-023, F-024-app, F-026-app) + M31;
+**F-001 (Critical) + F-005 PARTIAL**; **9 High OPEN** (F-002, F-006, F-007, F-009,
+F-010, F-012, F-019, F-020, F-025). Authoritative status: `ATLAS_FINAL_REMEDIATION_EVIDENCE.md`.
+Operator actions: `ATLAS_OPERATOR_ACTIONS.md`. **Gate still NOT met.**
