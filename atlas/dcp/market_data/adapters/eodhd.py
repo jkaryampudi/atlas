@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 
+from atlas.core.secrets import RedactingError
 from atlas.dcp.market_data.models import (EARNINGS_WHEN_TIMES, Bar, Dividend,
                                            EarningsEvent, Split)
 
@@ -88,9 +89,17 @@ class EodhdAdapter:
                              "refusing bare pass-through") from None
 
     def _get(self, path: str, **params: str) -> list[dict[str, object]]:
-        r = self._client.get(f"{BASE}{path}",
-                             params={"api_token": self._key, "fmt": "json", **params})
-        r.raise_for_status()
+        # F-013: EODHD accepts the token ONLY as a query param, so it is on the
+        # wire — but it must never escape into an exception/log/audit payload.
+        # httpx embeds the full URL (incl. api_token) in HTTPStatusError and
+        # RequestError; catch both and re-raise a message scrubbed of the key,
+        # with `from None` so the token-bearing original is not chained.
+        try:
+            r = self._client.get(f"{BASE}{path}",
+                                 params={"api_token": self._key, "fmt": "json", **params})
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RedactingError(f"EODHD GET {path} failed: {exc}", self._key) from None
         data = r.json()
         return data if isinstance(data, list) else []
 

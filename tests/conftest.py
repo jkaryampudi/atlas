@@ -57,6 +57,25 @@ def _reachable() -> bool:
 requires_pg = pytest.mark.skipif(not _reachable(), reason="postgres not reachable")
 
 
+@pytest.fixture(autouse=True)
+def _api_auth_override():
+    """F-016: state-mutating API endpoints require ATLAS_API_TOKEN in production.
+    Existing endpoint tests call them without a token; override the auth
+    dependency to allow so those tests exercise the endpoint logic unchanged.
+    This is a TEST-scoped override (never shipped in production config). Real
+    enforcement (401/403/503/200) is proven by tests/integration/test_api_auth_pg
+    and tests/unit/test_api_auth, which pop this override."""
+    try:
+        from atlas.api.auth import require_api_auth
+        from atlas.api.main import app
+    except Exception:  # API import optional for pure non-API test runs
+        yield
+        return
+    app.dependency_overrides[require_api_auth] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_api_auth, None)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """M31 no-silent-skip guard. The ~745 Postgres-backed integration/constitution
     tests carry `requires_pg`, which SKIPS when Postgres is unreachable — so a

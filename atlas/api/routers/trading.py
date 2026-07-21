@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from atlas.api.auth import require_api_auth
 from atlas.core.clock import Clock, SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.trading import exits
@@ -141,7 +142,7 @@ class ApproveBody(BaseModel):
     acknowledged_risks: bool = False
 
 
-@router.post("/proposals/{proposal_id}/approve")
+@router.post("/proposals/{proposal_id}/approve", dependencies=[Depends(require_api_auth)])
 def approve_proposal(proposal_id: str, body: ApproveBody) -> Any:
     """Doc 06 §3.2. The void on a now-FAIL COMMITS before the 409 goes out —
     the state change is the deliverable, the status code is the messenger."""
@@ -168,7 +169,7 @@ class RejectBody(BaseModel):
     reason: str
 
 
-@router.post("/proposals/{proposal_id}/reject")
+@router.post("/proposals/{proposal_id}/reject", dependencies=[Depends(require_api_auth)])
 def reject_proposal(proposal_id: str, body: RejectBody) -> Any:
     try:
         with session_scope() as s:
@@ -186,7 +187,7 @@ class CancelBody(BaseModel):
     reason: str
 
 
-@router.post("/orders/{order_id}/cancel")
+@router.post("/orders/{order_id}/cancel", dependencies=[Depends(require_api_auth)])
 def cancel_order(order_id: str, body: CancelBody) -> Any:
     try:
         with session_scope() as s:
@@ -224,7 +225,7 @@ class CloseBody(BaseModel):
     reason: str
 
 
-@router.post("/positions/{position_id}/close")
+@router.post("/positions/{position_id}/close", dependencies=[Depends(require_api_auth)])
 def close_position(position_id: str, body: CloseBody) -> Any:
     """Discretionary exit ahead of the stop: creates an EXIT proposal that
     still needs the human seal on the approval desk — only stops are
@@ -261,7 +262,7 @@ def positions(include_closed: bool = False, limit: int = 50) -> list[dict[str, o
                 for r in s.execute(text(q), {"n": limit}).mappings()]
 
 
-@router.post("/settle")
+@router.post("/settle", dependencies=[Depends(require_api_auth)])
 def settle() -> dict[str, object]:
     """Ops trigger (pipeline precursor): expire stale proposals, then fill
     every pending order whose session data has arrived. A lineage-verification
