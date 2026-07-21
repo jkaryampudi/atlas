@@ -1110,6 +1110,41 @@ def cancel_order(session: Session, clock: Clock, *, order_id: str,
 
 # ------------------------------------------------------------- settlement (§5)
 
+def _buy_lineage_authoritative(session: Session, proposal_id: object) -> bool:
+    """F-026: a BUY's signal lineage must resolve ONLY to authoritative
+    (paper/live) strategies at settle time. A proposal with NO signal lineage is
+    discretionary/core — authoritative by construction. Any signal that resolves
+    to a research_shadow/suspended/other non-authoritative strategy makes the buy
+    stale (its approval predates a downgrade) and it must not deploy capital."""
+    states = session.execute(text(
+        "SELECT DISTINCT st.state FROM trading.trade_proposals tp "
+        "JOIN quant.signals sig ON sig.id = ANY(tp.signal_ids) "
+        "JOIN quant.strategies st ON st.id = sig.strategy_id "
+        "WHERE tp.id = :p AND tp.signal_ids IS NOT NULL"),
+        {"p": proposal_id}).scalars().all()
+    return all(s in ("paper", "live") for s in states)
+
+
+def _void_stale_order(session: Session, clock: Clock, r: Any) -> None:
+    """Cancel a stale non-authoritative buy order and void its proposal, releasing
+    its committed capital; both transitions land on the audit chain (F-026)."""
+    now = clock.now()
+    audit = _audit(session, clock)
+    session.execute(text(
+        "UPDATE trading.orders SET state = 'cancelled', closed_at = :t "
+        "WHERE id = :o AND state = 'pending_submit'"), {"t": now, "o": r.id})
+    session.execute(text(
+        "UPDATE trading.trade_proposals SET state = 'voided' WHERE id = :p"),
+        {"p": r.proposal_id})
+    audit.append(event_type="order.state_changed", entity_type="order",
+                 entity_id=str(r.id), actor_type="dcp", actor_id="settle",
+                 payload={"from": "pending_submit", "to": "cancelled",
+                          "reason": "F-026: signal lineage no longer authoritative at settle"})
+    audit.append(event_type="proposal.voided", entity_type="proposal",
+                 entity_id=str(r.proposal_id), actor_type="dcp", actor_id="settle",
+                 payload={"reason": "F-026: stale pre-downgrade buy refused; no capital deployed"})
+
+
 def settle_orders(session: Session, clock: Clock,
                   broker: Broker | None = None) -> tuple[FillReport, ...]:
     """Fill every 'pending_submit' order whose next-session bar now exists.
@@ -1154,6 +1189,14 @@ def settle_orders(session: Session, clock: Clock,
                 "reference a PASS approval-time check on an approved proposal, "
                 "or a PASS order-time check on an executed entry proposal "
                 "(stop exit) (Doc 04 §2.3)")
+        # F-026: a BUY deploys capital, so its signal lineage must STILL resolve
+        # to an authoritative (paper/live) strategy at settle time. A stale
+        # approval whose strategy was downgraded to research_shadow AFTER approval
+        # must not fill — void it fail-closed and record it, never deploy. (A SELL
+        # / stop-exit closes an existing position and is always allowed.)
+        if r.side == "buy" and not _buy_lineage_authoritative(session, r.proposal_id):
+            _void_stale_order(session, clock, r)
+            continue
         fill = b.submit(session, OrderTicket(
             order_id=str(r.id), instrument_id=r.iid, market=r.market,
             currency=r.currency, side=r.side, qty=int(r.qty),
