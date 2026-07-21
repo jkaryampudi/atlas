@@ -96,13 +96,22 @@ def _currency(value: object) -> str | None:
 
 
 def parse_earnings_history(payload: dict[str, object], symbol: str,
+                           *, known_as_of: date | None = None,
                            ) -> list[EarningsSurprise]:
     """Vendor fundamentals document -> completed-quarter surprise rows.
 
     Reads ONLY Earnings.History; every field passes a typed choke point.
     Returns rows sorted by fiscal_period_end. A payload with no usable
     Earnings.History block yields an empty list (a valid answer — ETFs and
-    never-reporting instruments have none)."""
+    never-reporting instruments have none).
+
+    F-008 point-in-time guards (fail closed — a violating row is EXCLUDED, never
+    stored as a fact):
+      * report_date must be strictly AFTER fiscal_period_end — an actual cannot
+        be announced on or before the quarter it reports has even ended;
+      * when ``known_as_of`` is given (the receipt/ingest date), report_date must
+        be on or before it — a vendor 'actual' dated in the future could not have
+        been known when we received it (a direct look-ahead)."""
     earnings = payload.get("Earnings")
     hist = earnings.get("History") if isinstance(earnings, dict) else None
     if not isinstance(hist, dict):
@@ -122,6 +131,10 @@ def parse_earnings_history(payload: dict[str, object], symbol: str,
             report_date = date.fromisoformat(str(row.get("reportDate")))
         except ValueError:
             continue  # no announcement date -> not point-in-time anchorable
+        if report_date <= fpe:
+            continue  # F-008: an actual cannot be reported on/before its period end
+        if known_as_of is not None and report_date > known_as_of:
+            continue  # F-008: a future-dated 'actual' could not have been known
         actual = _decimal(row.get("epsActual"))
         estimate = _decimal(row.get("epsEstimate"))
         if actual is None or estimate is None:
@@ -144,6 +157,10 @@ def store_surprises(session: Session, instrument_id: object,
     overwritten and re-ingestion is idempotent. Returns rows newly inserted."""
     inserted = 0
     for r in rows:
+        # F-008 belt-and-suspenders: never persist a look-ahead-inconsistent fact
+        # even if a caller bypassed parse_earnings_history's guards.
+        if r.report_date <= r.fiscal_period_end or r.report_date > fetched_at.date():
+            continue
         res = session.execute(text(
             "INSERT INTO market.earnings_surprises "
             "(instrument_id, fiscal_period_end, report_date, eps_actual, "
@@ -193,7 +210,7 @@ def ingest_earnings_history(session: Session, adapter: MarketDataAdapter,
             failures.append(f"earnings_history {symbol}: vendor fetch failed: {exc}")
             failed.append(symbol)
             continue
-        rows = parse_earnings_history(payload, symbol)
+        rows = parse_earnings_history(payload, symbol, known_as_of=now.date())
         if not rows:
             empty.append(symbol)
             continue
