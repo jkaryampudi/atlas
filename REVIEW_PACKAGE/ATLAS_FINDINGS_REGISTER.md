@@ -79,3 +79,18 @@
 ### Cross-reference
 
 This register was produced independently. It **confirms and extends** the fund's own 2026-07-20 `REVIEW_PACKAGE/REMEDIATION_BACKLOG.md` (R-02 below-gate DSR, R-10 `MUTANT_` sentinel) with newly-surfaced, verified defects — most materially: **F-001** (PIT panel wrong-era/wrong-issuer contamination, Critical), **F-003/F-004** (backtest arithmetic errors), **F-005** (DSR 1/T substitution), **F-006** (currency-mismatched alpha), **F-008** (future-dated earnings actuals), **F-020** (audit tail-truncation blind spot, probed).
+
+---
+
+## P2 remediation status (2026-07-21, branch `p2-critical-high-remediation`)
+
+Original finding descriptions above are unchanged. Remediation status (proof in `ATLAS_REMEDIATION_EVIDENCE.md`):
+
+| Finding | Status |
+|---|---|
+| F-003, F-004, F-008, F-011, F-017 | **FIXED** with regression tests that fail against the pre-remediation code |
+| F-001 (Critical) | **PARTIAL** — unambiguous zero-era / reused-ticker contamination excluded fail-closed and verified vs ADT/VAL/MNK; full resolution needs F-002 (issuer identity) |
+| M31 (silent PG skip) | **FIXED** — `ATLAS_REQUIRE_PG` hard-fail + CI wired |
+| F-002, F-005, F-006, F-007, F-012, F-013, F-016, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026 | **OPEN** — not addressed this increment; each scoped as a follow-up in `ATLAS_REMEDIATION_ROADMAP.md` |
+
+**Completion gate NOT met** (unresolved Critical/High ≠ 0). The increment corrects the backtest arithmetic and one PIT contamination but leaves the data-integrity, reproducibility, statistical-honesty and security defects substantially open. F-013 additionally requires the operator to rotate the exposed EODHD key out-of-band.
