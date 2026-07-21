@@ -7,6 +7,9 @@ jobs:
       # job-level so pytest sees it too: integration tests must RUN in CI, not
       # silently skip (conftest auto-creates the isolated atlas_test database)
       ATLAS_DATABASE_URL: "postgresql+psycopg://atlas:atlas@localhost:5432/atlas"
+      # M31: hard-fail the run if Postgres is unreachable, so a broken DB service
+      # cannot produce a green build that silently skipped ~745 integration tests.
+      ATLAS_REQUIRE_PG: "1"
     services:
       postgres:
         image: postgres:16

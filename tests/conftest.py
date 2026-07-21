@@ -57,6 +57,25 @@ def _reachable() -> bool:
 requires_pg = pytest.mark.skipif(not _reachable(), reason="postgres not reachable")
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """M31 no-silent-skip guard. The ~745 Postgres-backed integration/constitution
+    tests carry `requires_pg`, which SKIPS when Postgres is unreachable — so a
+    PG-less CI (or a misconfigured full run) would report green having exercised
+    almost none of the fail-closed / audit / snapshot / PIT machinery.
+
+    When ATLAS_REQUIRE_PG=1 (the complete verification workflow and CI set it),
+    an unreachable Postgres is a hard ERROR, not a silent skip. A developer
+    running a deliberately unit-only subset simply leaves the variable unset, so
+    legitimate unit-only runs are unaffected."""
+    if os.environ.get("ATLAS_REQUIRE_PG") == "1" and not _reachable():
+        raise pytest.UsageError(
+            "ATLAS_REQUIRE_PG=1 but Postgres is not reachable at "
+            f"{ADMIN_URL.rsplit('@', 1)[-1]}: the integration suite would silently "
+            "skip. Refusing to report a green run that tested nothing structural. "
+            "Start the DB (docker compose up -d db) or unset ATLAS_REQUIRE_PG for a "
+            "deliberate unit-only run.")
+
+
 def _ensure_test_db() -> None:
     """Create atlas_test if missing and migrate it to head. Runs once per
     session. SELF-HEALING: the migration-cycle tests burn Postgres's per-table
