@@ -114,6 +114,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
+from atlas.core.locks import acquire_trading_lifecycle_lock
 from atlas.dcp.execution.paper import PRICE_SOURCE, Broker, Fill, OrderTicket, PaperBroker, fx_to_aud
 from atlas.dcp.portfolio.snapshot import Holding, compute_snapshot
 from atlas.dcp.risk.approval_recheck import recheck_at_approval
@@ -214,8 +215,7 @@ def _lifecycle_lock(session: Session) -> None:
     entrypoint: without it, two concurrent approvals each re-check against a
     book that excludes the other's order (a race-shaped L3/L5/L9 bypass), and
     two settle runs can double-fill an order."""
-    session.execute(text(
-        "SELECT pg_advisory_xact_lock(hashtext('atlas.trading.lifecycle'))"))
+    acquire_trading_lifecycle_lock(session)  # F-018: audit lock first (canonical order)
 
 
 def _india_exposed(market: str, economic_exposure: Sequence[str] | None) -> bool:

@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session
 from atlas.core.audit import (GENESIS_HASH, AuditEvent, link_hash, payload_hash,
                               verify_chain)
 from atlas.core.clock import Clock
+from atlas.core.locks import AUDIT_LOCK
 
-_LOCK_KEY = 762001  # advisory lock namespace for the audit chain
+_LOCK_KEY = AUDIT_LOCK  # advisory lock namespace for the audit chain (F-018: canonical rank 1)
 
 
 class PostgresAuditLog:
