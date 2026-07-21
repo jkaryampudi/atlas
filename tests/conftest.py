@@ -197,8 +197,8 @@ def pg_session():
 def clean_audit(pg_session):
     _assert_test_db(pg_session)
     pg_session.execute(text(
-        "TRUNCATE audit.decision_events, research.memos, research.agent_runs "
-        "RESTART IDENTITY CASCADE"))
+        "TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
+        "research.agent_runs RESTART IDENTITY CASCADE"))
     pg_session.commit()
     yield pg_session
 

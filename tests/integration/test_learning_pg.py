@@ -411,7 +411,7 @@ def client(monkeypatch, clean_audit):
     s.commit()
     yield TestClient(app), s, memo_id, clock
     _clean_learning(s)
-    s.execute(text("TRUNCATE audit.decision_events, research.memos, "
+    s.execute(text("TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
                    "research.agent_runs RESTART IDENTITY CASCADE"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol IN "

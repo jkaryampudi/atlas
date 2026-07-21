@@ -412,7 +412,7 @@ def client(monkeypatch, clean_audit):
     # committed seeds -> explicit teardown. Pre-existing SPY rows belong to
     # other suites: their bars were never touched, and their is_active flags
     # are restored verbatim; the private XTEST SPY leaves with its bars.
-    s.execute(text("TRUNCATE audit.decision_events, research.memos, "
+    s.execute(text("TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
                    "research.agent_runs RESTART IDENTITY CASCADE"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol LIKE 'ZSC%')"))
