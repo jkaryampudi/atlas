@@ -14,19 +14,42 @@ _ND = NormalDist()
 _EULER = 0.5772156649
 
 
-def deflated_sharpe(sr_annual: float, n_days: int, n_trials: int) -> float:
-    """Probability the observed Sharpe exceeds the expected max of n_trials noise
-    strategies (simplified Bailey/López de Prado; normal-returns assumption noted)."""
+def deflated_sharpe(sr_annual: float, n_days: int, n_trials: int, *,
+                    sr_dispersion_annual: float | None = None,
+                    skew: float = 0.0, kurtosis: float = 3.0) -> float:
+    """Deflated Sharpe (Bailey/López de Prado): P(true SR > 0) after deflating for
+    the expected maximum Sharpe of ``n_trials`` and for the non-normality of the
+    Sharpe estimator.
+
+    F-005 corrections:
+      * **cross-trial dispersion** — the expected-maximum term scales by the
+        standard deviation of the trial Sharpe ESTIMATES. Pass
+        ``sr_dispersion_annual`` = std of the lineage's annualised trial Sharpes.
+        When omitted we fall back to the null-theoretical minimum
+        ``sqrt(1/n_days)`` (daily), which is a LOWER BOUND on the true dispersion
+        and therefore INFLATES the DSR — callers approving capital must supply the
+        empirical lineage dispersion. (Previously the minimum was ALWAYS used with
+        no way to pass the real value.)
+      * **estimator variance** — the z-denominator now uses the PSR estimator
+        standard deviation with skewness/kurtosis, ``(1 - γ3·SR + (γ4-1)/4·SR²) /
+        (T-1)``. For normal returns (γ3=0, γ4=3) this is ``(1 + 0.5·SR²)/(T-1)`` —
+        the correct form; the previous code omitted the ``0.5·SR²`` term.
+    """
     if n_days < 30:
         return 0.0
     sr_daily = sr_annual / math.sqrt(252)
     if n_trials <= 1:
         e_max = 0.0
     else:
-        e_max = math.sqrt(1.0 / n_days) * (
+        sigma = (sr_dispersion_annual / math.sqrt(252)
+                 if sr_dispersion_annual is not None else math.sqrt(1.0 / n_days))
+        e_max = sigma * (
             (1 - _EULER) * _ND.inv_cdf(1 - 1.0 / n_trials)
             + _EULER * _ND.inv_cdf(1 - 1.0 / (n_trials * math.e)))
-    z = (sr_daily - e_max) * math.sqrt(n_days - 1)
+    est_var = (1.0 - skew * sr_daily + (kurtosis - 1.0) / 4.0 * sr_daily ** 2) / (n_days - 1)
+    if est_var <= 0:
+        return 0.0
+    z = (sr_daily - e_max) / math.sqrt(est_var)
     return _ND.cdf(z)
 
 
