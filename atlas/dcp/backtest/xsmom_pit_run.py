@@ -133,6 +133,7 @@ from atlas.dcp.market_data.index_membership import (
     load_membership,
     member_in_window,
     partition_membership,
+    series_overlaps_membership,
 )
 from atlas.dcp.market_data.total_return import (
     load_adjusted_dividends,
@@ -533,6 +534,18 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
                                          f"(market={stored[sym]})"))
             continue
         obars, ds = load_adjusted_obars(session, sym)
+        mrow = members.get(sym)
+        if mrow is not None and not series_overlaps_membership(mrow, ds):
+            # F-001: a stored series with ZERO bars inside the membership era
+            # cannot belong to this member — wrong-era, or a different company
+            # that reused the ticker after the member left (no issuer identity to
+            # resolve it, F-002). Fail closed: never admit it to the panel.
+            excluded.append(PitExclusion(
+                sym, _delisted(sym),
+                f"F-001: series {ds[0]}..{ds[-1]} has no bar inside the membership "
+                f"era (start {mrow.start_date}, end {mrow.end_date}) — wrong-era / "
+                "reused-ticker splice, excluded fail-closed"))
+            continue
         expected = trading_days_between("US", ds[0], ds[-1])
         have = set(ds)
         gaps = [d for d in expected if d not in have]

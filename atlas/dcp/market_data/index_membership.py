@@ -139,6 +139,24 @@ def member_in_window(row: MembershipRow, window_start: date,
             and (row.end_date is None or row.end_date > window_start))
 
 
+def series_overlaps_membership(row: MembershipRow, dates: Sequence[date]) -> bool:
+    """F-001 fail-closed guard: does a stored price series carry AT LEAST ONE bar
+    inside the ticker's membership era? A series with ZERO member-era bars cannot
+    belong to this membership row — it is either a wrong-era artifact or (with no
+    issuer identity in the system, F-002) a DIFFERENT company that reused the
+    ticker after the member left the index (the reviewed ADT/VAL/MNK cases, whose
+    bars begin after their end_date). Such a series must never enter the
+    point-in-time validation panel. Returns False when the row is unusable.
+
+    This does NOT clip a member's own pre-index price history (legitimately used
+    by the momentum lookback); distinguishing same-issuer pre-index bars from a
+    reused-ticker's bars for a held position requires the F-002 issuer identity
+    and is out of scope here."""
+    if not usable(row):
+        return False
+    return any(is_member_on(row, d) for d in dates)
+
+
 @dataclass(frozen=True)
 class MembershipPartition:
     usable: tuple[MembershipRow, ...]
