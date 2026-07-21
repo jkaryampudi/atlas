@@ -401,27 +401,36 @@ def pit_null_results(panel: PricePanel,
 
 def pit_walk_forward(panel: PricePanel, strategy: PortfolioStrategy, *,
                      k: int, horizon: int, embargo: int, warmup: int,
-                     costs: CostModel) -> PortfolioWalkForwardResult:
+                     costs: CostModel,
+                     benchmark: PortfolioStrategy | None = None,
+                     ) -> PortfolioWalkForwardResult:
     """Purged + embargoed folds on the daily session timeline (constants from
     real_run, leakage_free re-asserted per fold — the ETF-run convention),
     driven through the delisting-aware engine. warmup is the evaluation-window
     start index: it dominates SEASONING and keeps every fold's test window
-    inside the membership-reliable window (>= WINDOW_START)."""
+    inside the membership-reliable window (>= WINDOW_START).
+
+    F-021: when ``benchmark`` is supplied (SPY buy-and-hold), ``benchmark_folds``
+    counts folds where the strategy BEAT it over the same window and costs —
+    both legs on the one panel, so currency-consistent."""
     results: list[PortfolioResult] = []
+    bench: list[float] = []
     for fold in purged_folds(len(panel.dates), k=k, horizon=horizon,
                              embargo=embargo, warmup=warmup):
         assert leakage_free(fold, horizon=horizon, embargo=embargo)
-        results.append(run_pit_backtest(
-            panel, strategy, costs,
-            start=panel.dates[fold.test_start],
-            end=panel.dates[fold.test_end - 1]).result)
+        start, end = panel.dates[fold.test_start], panel.dates[fold.test_end - 1]
+        results.append(run_pit_backtest(panel, strategy, costs, start=start, end=end).result)
+        if benchmark is not None:
+            bench.append(run_pit_backtest(panel, benchmark, costs, start=start, end=end).result.total_return)
     rets = [r.total_return for r in results]
     return PortfolioWalkForwardResult(
         fold_results=results,
         mean_return=statistics.fmean(rets),
         mean_sharpe=statistics.fmean(r.sharpe for r in results),
         worst_fold_return=min(rets),
-        positive_folds=sum(1 for x in rets if x > 0))
+        positive_folds=sum(1 for x in rets if x > 0),
+        benchmark_folds=(sum(1 for r, b in zip(rets, bench) if r > b)
+                         if benchmark is not None else -1))
 
 
 # ---------------------------------------------------------------------------
@@ -733,7 +742,8 @@ def run_xsmom_pit(session: Session, audit: PostgresAuditLog, *,
     gate = portfolio_gate(result=result, null_returns=nulls, spy=spy, ew=ew,
                           n_trials=n_trials)
     wf = pit_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
-                          embargo=EMBARGO, warmup=start_i, costs=COSTS)
+                          embargo=EMBARGO, warmup=start_i, costs=COSTS,
+                          benchmark=buy_and_hold_strategy(BENCHMARK))  # F-021
     wf_spy: PortfolioWalkForwardResult | None = None
     if total_return:
         # the memo's per-fold-vs-SPY exhibit: SPY B&H through the IDENTICAL

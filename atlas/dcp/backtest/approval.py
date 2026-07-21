@@ -38,6 +38,8 @@ class WalkForwardArtifact(Protocol):
     def fold_results(self) -> Sequence[object]: ...
     @property
     def positive_folds(self) -> int: ...
+    @property
+    def benchmark_folds(self) -> int: ...   # F-021: folds beating the benchmark (-1 = absent)
 
 
 @dataclass(frozen=True)
@@ -68,9 +70,20 @@ def evaluate_approval(session: Session, *, family: str, lineage: str,
                        "— deflated Sharpe must use the true lineage count (ADR-0016)")
     if wf is None:
         reasons.append("missing purged walk-forward result")
-    elif wf.positive_folds < len(wf.fold_results) // 2 + 1:
-        reasons.append(f"walk-forward: only {wf.positive_folds}/{len(wf.fold_results)} "
-                       "folds positive")
+    else:
+        # F-021: robustness is measured by folds that BEAT THE BENCHMARK, not
+        # merely folds with positive absolute returns (a bull-market beta run
+        # clears the latter without any demonstrated edge). benchmark_folds is
+        # the currency-consistent excess-fold count; -1 means the caller supplied
+        # no benchmark comparison, which is itself a fail-closed refusal.
+        need = len(wf.fold_results) // 2 + 1
+        if wf.benchmark_folds < 0:
+            reasons.append("walk-forward has no benchmark comparison — a "
+                           "benchmark-relative fold count is required (F-021)")
+        elif wf.benchmark_folds < need:
+            reasons.append(f"walk-forward: only {wf.benchmark_folds}/"
+                           f"{len(wf.fold_results)} folds beat the benchmark "
+                           f"(need {need})")
     if not oos_untouched_attested:
         reasons.append("OOS holdout not attested as untouched during development")
     return ApprovalDecision(approved=not reasons, reasons=reasons)

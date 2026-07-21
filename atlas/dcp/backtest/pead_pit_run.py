@@ -376,7 +376,8 @@ def run_pead_pit(session: Session, audit: PostgresAuditLog, *,
     gate = portfolio_gate(result=result, null_returns=nulls, spy=spy, ew=ew,
                           n_trials=n_trials)
     wf = pit_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
-                          embargo=EMBARGO, warmup=start_i, costs=COSTS)
+                          embargo=EMBARGO, warmup=start_i, costs=COSTS,
+                          benchmark=buy_and_hold_strategy(BENCHMARK))  # F-021
 
     audit.append(
         event_type="quant.backtest.completed", entity_type="strategy",

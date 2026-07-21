@@ -410,3 +410,53 @@ def test_f022_matching_stamped_identity_promotes(pg_session):
         "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '')"),
         {"sid": sid, "c": json.dumps({"_identity": ident})})
     require_signed_validation_artifact(s, str(sid))   # no raise
+
+
+class _StubGate:
+    """A passing null-model/DSR gate leg (evaluate_approval reads these three)."""
+    passed = True
+    reasons: list[str] = []
+    n_trials = 1
+
+
+class _StubWF:
+    def __init__(self, n: int, positive: int, benchmark: int) -> None:
+        self.fold_results = [object()] * n
+        self.positive_folds = positive
+        self.benchmark_folds = benchmark
+
+
+def test_f021_walkforward_must_beat_the_benchmark_not_just_be_positive(pg_session):
+    """F-021: a run whose folds are ALL positive but that beats the benchmark in
+    only a minority of folds (a bull-market beta run) must FAIL the walk-forward
+    gate — the old positive-folds check would have passed it."""
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=1)          # 4/4 positive, 1/4 beat SPY
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert not d.approved
+    assert any("beat the benchmark" in r for r in d.reasons)
+
+
+def test_f021_majority_beating_benchmark_clears_the_wf_leg(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=3)          # 3/4 beat SPY -> majority
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert d.approved
+    assert not any("walk-forward" in r for r in d.reasons)
+
+
+def test_f021_absent_benchmark_comparison_fails_closed(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=-1)          # no benchmark supplied
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert not d.approved
+    assert any("no benchmark comparison" in r for r in d.reasons)
