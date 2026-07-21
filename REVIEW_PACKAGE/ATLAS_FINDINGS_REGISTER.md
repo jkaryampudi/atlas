@@ -108,3 +108,16 @@ F-015, F-016, F-017, F-018, F-021, F-022, F-023, F-024-app, F-026-app) + M31;
 **F-001 (Critical) + F-005 PARTIAL**; **9 High OPEN** (F-002, F-006, F-007, F-009,
 F-010, F-012, F-019, F-020, F-025). Authoritative status: `ATLAS_FINAL_REMEDIATION_EVIDENCE.md`.
 Operator actions: `ATLAS_OPERATOR_ACTIONS.md`. **Gate still NOT met.**
+
+### Round-4 update (P2.23–P2.26)
+
+Now **FIXED** (added this round): **F-019** + **F-020** (audit hash epoch +
+protected tail anchor, migration 0036), **F-006** (AUD-consistent benchmark),
+**F-010** (cross-currency fcf_yield fails closed).
+
+**Running total: 19 High FIXED** + M31; **F-001 (Critical) + F-005 PARTIAL**;
+**5 High OPEN**: F-002 (issuer identity — blocked on missing identity-history
+data), F-007 (versioned ingestion — past history already overwritten), F-012
+(rebalance + revalidation — gated on F-002/F-007), F-009 (split-basis EPS),
+F-025 (scheduler supervision). Blockers detailed in `ATLAS_FINAL_REMEDIATION_EVIDENCE.md`.
+**Gate still NOT met.**

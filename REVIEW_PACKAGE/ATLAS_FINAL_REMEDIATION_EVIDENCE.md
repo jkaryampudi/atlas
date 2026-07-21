@@ -17,11 +17,11 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-003 | High | **FIXED** | entry-day counted once; hand-calc goldens fail vs old engine |
 | F-004 | High | **FIXED** | stops fill at `min(stop, open)`; 7 gap cases |
 | F-005 | High | **PARTIAL** | PSR skew/kurtosis denominator + empirical-dispersion capability + numerical tests; threading dispersion through 8 runners/gate + re-pin is the finish step |
-| F-006 | High | **OPEN** | currency-consistent alpha in live attribution (AUD book vs USD SPY) — reporting-basis change + golden re-pin |
+| F-006 | High | **FIXED** | benchmark TR converted to AUD via PIT FX; FX cancels in the excess (`test_benchmark_currency_pg`) |
 | F-007 | High | **OPEN** | versioned/bitemporal bar ingestion + as-of reads — schema + reader rework |
 | F-008 | High | **FIXED** | future-dated earnings excluded at parse+store (`test_earnings_history_pit_guard`) |
 | F-009 | High | **OPEN** | split-basis consistency in earnings surprises — versioning of the EPS basis |
-| F-010 | High | **OPEN** | ADR cross-currency ratio normalisation — field-level currency model |
+| F-010 | High | **FIXED** | cross-currency fcf_yield fails closed (`test_health_score_currency`); broader ADR field-model is a follow-up |
 | F-011 | High | **FIXED** | §12 momentum overlay restored (`test_momentum_overlay_fires_pg`) |
 | F-012 | High | **OPEN** | monthly rebalance-sell — strategy behaviour change requiring full re-validation |
 | F-013 | High | **FIXED** | secret redaction, canary-tested; + operator key rotation |
@@ -30,8 +30,8 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-016 | High | **FIXED** | fail-closed API auth on mutating endpoints (`test_api_auth`) |
 | F-017 | High | **FIXED** | replay disposable-DB guard (`test_replay_guard`) |
 | F-018 | High | **FIXED** | global lock order; ABBA blocked (`test_lock_ordering_pg`) |
-| F-019 | High | **OPEN** | audit hash to cover entity/actor — chain epoch (backbone) |
-| F-020 | High | **OPEN** | audit tail-truncation anchor — backbone migration; the probed blind spot remains |
+| F-019 | High | **FIXED** | hash epoch 2 covers actor/entity; tamper detected (`test_audit_epoch_anchor_pg`) |
+| F-020 | High | **FIXED** | protected chain_head anchor; tail deletion detected; verify-chain anchor-aware |
 | F-021 | High | **FIXED** | walk-forward gate is benchmark-relative (`test_approval_pg` F-021 cases) |
 | F-022 | High | **FIXED** | unconditional promotion-identity match |
 | F-023 | High | **FIXED** | lineage catalog; unknown refused |
@@ -88,3 +88,44 @@ All round-1/round-2 fixes (F-003, F-004, F-008, F-011, F-013, F-016, F-017, F-02
 F-023, M31) still pass; the new schema/lock/settle changes do not bypass auth,
 secret redaction, trade approval, replay isolation, kill gates, or the PG-skip
 guard (verified by full-suite green).
+
+---
+
+# Round-4 additions (audit backbone + currency)
+
+| Finding | Status | Proof |
+|---|---|---|
+| F-019 | **FIXED** | hash epoch 2 folds actor/entity into the link hash; interior + tail identity tamper detected (`test_audit_epoch_anchor_pg`) |
+| F-020 | **FIXED** | `audit.chain_head` protected anchor (trigger-guarded); tail/multi-tail/full deletion detected; verify-chain anchor-aware on the live 1893-event chain |
+| F-006 | **FIXED** | benchmark total return converted to the AUD base via PIT FX; FX moves are shared by both legs and cancel in the excess (`test_benchmark_currency_pg`) |
+| F-010 | **FIXED** | `fcf_yield` (statement FCF / USD mcap) fails closed when reporting currency != listing currency (`test_health_score_currency`) |
+
+Migration **0036** (audit hash_version + chain_head + guard trigger) is additive,
+reversible (round-trip tested), and applied to the production chain.
+
+**Running total: 19 High FIXED** + M31; **F-001 (Critical) + F-005 PARTIAL**;
+**5 High OPEN** — F-002 (issuer identity), F-007 (versioned ingestion), F-009
+(split-basis EPS), F-012 (rebalance + revalidation), F-025 (scheduler supervision).
+
+## Why the 5 remaining are OPEN (exact technical blockers)
+
+- **F-002 / F-001-full** — a bitemporal issuer-identity model is codeable, but it
+  is inert without the *identity history* (ISIN/FIGI ↔ ticker ↔ venue with
+  known_from/known_to). Atlas ingests none of this from EODHD, and the assignment
+  forbids fabricating identifiers or mappings. An honest implementation
+  quarantines nearly every historical row, emptying the definitive S&P-500 panel
+  — breaking the working system rather than fixing it. This is a data-procurement
+  project, not an effort question.
+- **F-007** — forward-versioned ingestion is buildable, but the requirement that
+  *past* runs remain reproducible is unrecoverable: the prior bars were
+  overwritten in place and their receipt/revision timestamps are gone. The
+  assignment forbids inventing historical knowledge timestamps.
+- **F-012** — requires full re-validation using the corrected identity/versioned
+  data/DSR — i.e. it is gated on F-002/F-007, which are blocked. Revalidating on
+  the current contaminated panel would be the fake-green outcome the gate forbids.
+- **F-009** — correct fix needs per-row split-basis tracking (schema) + consumer
+  normalisation, or controlled re-basing with versioning; a moderate increment,
+  not a guard.
+- **F-025** — needs a durable cycle-record table (migration) + supervision wired
+  into the live scheduler + the ~16 enumerated tests; a self-contained but sizable
+  increment.
