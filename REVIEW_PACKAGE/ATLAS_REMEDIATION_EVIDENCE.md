@@ -63,3 +63,33 @@ Per-finding proof for the P2 increment. Baseline `54c55a8` (pytest 1585/0/0). Fi
 | PG-less `ATLAS_REQUIRE_PG=1 pytest` | exit **4** (fails, no false green) |
 | no live/paper orders executed | confirmed (no broker calls; DB probes on disposable `atlas_test` only) |
 | secrets printed | none (redaction not yet implemented — F-013 deferred; no key value emitted by this work) |
+
+---
+
+# P2 round 2 — additional findings (commit range through `b846bb4`)
+
+## F-013 — provider secret leakage · **FIXED**
+- `atlas/core/secrets.py` (redact/RedactingError); `EodhdAdapter._get` catches `httpx.HTTPError` and re-raises a token-scrubbed error `from None`.
+- Canary tests (`tests/unit/test_secret_redaction.py`): the token and its URL-encoded form never appear on the HTTP-status or connect-error paths; `__cause__ is None`.
+- **Operator action required:** rotate the EODHD key out-of-band (it leaked historically).
+
+## F-016 — API authentication · **FIXED**
+- `atlas/api/auth.require_api_auth` (fail-closed bearer, `ATLAS_API_TOKEN` only, no default). Applied to 5 mutating trading endpoints (approve/reject/cancel/close/settle).
+- Enforcement proven by `tests/unit/test_api_auth.py`: unset→503, missing/malformed→401, wrong→403, correct→passes, read stays open. Existing endpoint tests pass via a test-scoped dependency override (not a production bypass).
+- Follow-ups: other mutating routers + console token wiring.
+
+## F-005 — Deflated Sharpe · **PARTIAL**
+- `deflated_sharpe` now uses the PSR estimator SD with skew/kurtosis always, and an optional empirical cross-trial dispersion for the expected-max term (the 1/√T fallback documented as an inflating lower bound).
+- `tests/unit/test_deflated_sharpe_remediation.py` cross-checks against an independent BLdP re-implementation; no existing DSR golden moved.
+- Remaining: thread empirical lineage dispersion through the 8 runners + approval gate and re-derive those numbers.
+
+## F-023 — lineage catalog · **FIXED**
+- `registry.KNOWN_LINEAGES` (9 reviewed lines); `register_trial` refuses an unknown lineage before INSERT. `tests/unit/test_lineage_catalog.py`.
+
+## F-022 — unconditional promotion identity · **FIXED**
+- `require_signed_validation_artifact` now requires a stamped identity matching the current executable for EVERY promotion (not only re-promotion of a shadowed strategy). `tests/integration/test_approval_pg.py` (+3 tests).
+
+## Still OPEN (not addressed — honest)
+F-002 (issuer identity, schema/data), F-006 (currency reporting), F-007 (versioned ingestion, schema), F-012 (rebalance-sell, strategy behaviour + re-validation), F-019 (audit hash epoch — backbone), F-020 (audit tail anchor — backbone migration; the probed blind spot remains), F-021 (WF benchmark-relative folds — approval gate), F-024 (pead demote + kill-gate — F-022 now blocks unstamped/mismatched promotion, but the pead 'approve-with-failed-kill' report + the authoritative 'paper' label remain; sleeve is 0.00 so no capital), F-025 (scheduler dead-man), F-026 (cancel the 2 stale pre-downgrade orders — automated capital path already blocked by the P0.1 guard).
+
+**Final gates (hermetic rebuild):** pytest exit 0 (0 failed), ruff clean, mypy clean (133 files), verify-chain 1891 events OK, cov-risk 100%, empty-DB→head clean, PG-less run exits 4.

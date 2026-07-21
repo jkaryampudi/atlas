@@ -56,3 +56,17 @@ Each needs its own reviewed increment; none is safe to rush:
 - **F-024** `pead-sue-tr` authoritative on failed-kill evidence — **not done**.
 - **F-025** scheduler dead-man / durable failure records — **not done**.
 - **F-026** stale pre-downgrade approved orders cancellation — **not done** (automated capital path already blocked by the P0.1 guard).
+
+---
+
+## P2 round 2 addendum
+
+Additional findings closed after the initial increment (commits `P2.5`, `P2.6a-c`):
+- **F-013** (secret redaction) and **F-016** (API auth) — `atlas/core/secrets.py`, `atlas/api/auth.py`; auth on the 5 mutating trading endpoints (fail-closed, `ATLAS_API_TOKEN` only). Operator must rotate the EODHD key out-of-band.
+- **F-023** (lineage catalog) — `registry.KNOWN_LINEAGES`; unknown lineage refused.
+- **F-022** (unconditional promotion identity) — `require_signed_validation_artifact` now verifies a matching stamped identity for every promotion.
+- **F-005** (Deflated Sharpe) — **PARTIAL**: PSR skew/kurtosis denominator + empirical-dispersion capability + numerical tests; runner/gate threading pending.
+
+**Still deferred (deep/backbone/schema — not started):** F-002 (issuer identity), F-006 (currency), F-007 (versioned ingestion), F-012 (rebalance), F-019/F-020 (audit hash epoch + tail anchor — backbone migrations), F-021 (WF benchmark-relative — approval gate), F-024 (pead label/kill-gate; F-022 now blocks the promotion vector), F-025 (scheduler dead-man), F-026 (stale-order cleanup — automated path already guarded).
+
+**Running total:** 9 High + M31 fully remediated; F-001 (Critical) + F-005 partial. Completion gate still NOT met.

@@ -88,9 +88,10 @@ Original finding descriptions above are unchanged. Remediation status (proof in 
 
 | Finding | Status |
 |---|---|
-| F-003, F-004, F-008, F-011, F-017 | **FIXED** with regression tests that fail against the pre-remediation code |
+| F-003, F-004, F-008, F-011, F-013, F-016, F-017, F-022, F-023 | **FIXED** with regression tests that fail against the pre-remediation code |
 | F-001 (Critical) | **PARTIAL** — unambiguous zero-era / reused-ticker contamination excluded fail-closed and verified vs ADT/VAL/MNK; full resolution needs F-002 (issuer identity) |
+| F-005 | **PARTIAL** — DSR estimator variance corrected (PSR skew/kurtosis) + empirical cross-trial dispersion capability + numerical tests; threading the dispersion through the 8 runners/approval gate is the finish step |
 | M31 (silent PG skip) | **FIXED** — `ATLAS_REQUIRE_PG` hard-fail + CI wired |
-| F-002, F-005, F-006, F-007, F-012, F-013, F-016, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026 | **OPEN** — not addressed this increment; each scoped as a follow-up in `ATLAS_REMEDIATION_ROADMAP.md` |
+| F-002, F-006, F-007, F-012, F-019, F-020, F-021, F-024, F-025, F-026 | **OPEN** — not addressed; each scoped in `ATLAS_REMEDIATION_ROADMAP.md`. F-002 & F-007 are schema/data increments; F-019/F-020 change the audit backbone; F-021 changes the approval gate; each warrants a dedicated branch |
 
-**Completion gate NOT met** (unresolved Critical/High ≠ 0). The increment corrects the backtest arithmetic and one PIT contamination but leaves the data-integrity, reproducibility, statistical-honesty and security defects substantially open. F-013 additionally requires the operator to rotate the exposed EODHD key out-of-band.
+**Completion gate NOT met** (unresolved Critical/High ≠ 0). 9 High + M31 fully remediated; F-001 (Critical) and F-005 partially. The remaining ~10 High are the deep architectural / backbone / approval-gate items, deliberately not rushed. F-013 additionally requires the operator to rotate the exposed EODHD key out-of-band.

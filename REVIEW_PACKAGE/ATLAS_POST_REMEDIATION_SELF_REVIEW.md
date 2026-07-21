@@ -37,3 +37,17 @@ None of Critical/High severity introduced by the P2 changes. One observation (In
 ## Honest verdict on the increment
 
 The six items closed are closed correctly and are regression-protected. **The completion gate (Critical/High = 0) is not met**: 1 Critical remains partially open (F-001, pending F-002) and ~14 High remain fully open. The system's research results are **not** made trustworthy by this increment — the backtest arithmetic and one PIT contamination are corrected (real improvements to credibility), but data-integrity, reproducibility, statistical-honesty, and security defects that drove the "NOT YET TRUSTWORTHY" verdict are still substantially open.
+
+---
+
+## Round-2 hostile checks
+
+| Attack | Result |
+|---|---|
+| **Secret in an adapter error?** (F-013) canary token on HTTP-status + connect-error paths | Scrubbed; `__cause__` dropped. **Holds.** OPEN: historical leaked key must be rotated. |
+| **Unauthenticated mutation?** (F-016) approve/settle without/with wrong/valid token | 401/403/503/pass. **Holds** for the 5 trading endpoints. OPEN: other mutating routers (factory burn, scheduler) still unauthenticated. |
+| **Fresh lineage resets the DSR penalty?** (F-023) `register_trial(lineage='special-tag')` | Refused pre-INSERT. **Holds.** |
+| **Promote on an unstamped/mismatched artifact?** (F-022) never-shadowed strategy, no `_identity` / wrong `_identity` | Refused; matching stamp promotes. **Holds.** |
+| **DSR still uses 1/T?** (F-005) | The estimator variance is corrected everywhere; the expected-max dispersion is correct only when the caller supplies it — **still the fallback by default**. PARTIAL. |
+
+**Newly-OPEN-and-confirmed still-exploitable:** audit tail-truncation (F-020, probed), in-place bar overwrite (F-007), currency-mismatched alpha (F-006), reused-ticker held-position marking (F-002), WF gate not benchmark-relative (F-021). These remain as the reviewer described.
