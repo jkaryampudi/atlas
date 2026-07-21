@@ -460,3 +460,28 @@ def test_f021_absent_benchmark_comparison_fails_closed(pg_session):
                           wf=wf, oos_untouched_attested=True)
     assert not d.approved
     assert any("no benchmark comparison" in r for r in d.reasons)
+
+
+def test_f024_failed_mandatory_gate_refuses_approval(pg_session):
+    """F-024: a FAILED mandatory gate (e.g. a pre-committed kill trial) is
+    terminal — evaluate_approval refuses even when every other leg passes."""
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=4)          # all other legs pass
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True,
+                          mandatory_gates={"kill_trial_2016": False})
+    assert not d.approved
+    assert any("kill_trial_2016" in r and "FAILED" in r for r in d.reasons)
+
+
+def test_f024_passing_mandatory_gate_does_not_block(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=4)
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True,
+                          mandatory_gates={"kill_trial_2016": True})
+    assert d.approved

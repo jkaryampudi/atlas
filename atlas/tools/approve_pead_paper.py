@@ -97,9 +97,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"walk-forward: {run.wf.positive_folds}/"
               f"{len(run.wf.fold_results)} folds positive")
 
+        # F-024: the pre-committed 2016 kill trial FAILED (ADR-0013). That is a
+        # mandatory gate — evaluate_approval now REFUSES on it, so this tool can
+        # no longer promote pead-sue-tr on failed-kill evidence. A genuine
+        # re-approval requires a fresh PASSING kill trial.
         decision = evaluate_approval(
             s, family=run.family, lineage=run.lineage, gate=g, wf=run.wf,
-            oos_untouched_attested=a.attest_oos_untouched)
+            oos_untouched_attested=a.attest_oos_untouched,
+            mandatory_gates={"kill_trial_2016": False})
         if not decision.approved:
             print("REFUSED — approval gate reasons:")
             for r in decision.reasons:
