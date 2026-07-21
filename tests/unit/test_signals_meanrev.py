@@ -120,9 +120,15 @@ def test_costs_strictly_reduce_returns():
 
 
 def test_golden_regression_pins():
-    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3)."""
+    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3).
+    RE-PINNED for F-003/F-004 (see test_backtest_engine.py); pre-remediation:
+        total_return -0.21801054229210914 -> -0.22419802901762587
+        sharpe       -1.110146973897122  -> -1.154476533095521
+        max_drawdown -0.23582232520460777 -> -0.24186887630849607
+    (n_trades 22 unchanged)
+    """
     r = run_backtest(regime_series(), meanrev_v1, COSTS, start_i=60, end_i=1200)
-    assert r.total_return == pytest.approx(-0.21801054229210914)
-    assert r.sharpe == pytest.approx(-1.110146973897122)
+    assert r.total_return == pytest.approx(-0.22419802901762587)
+    assert r.sharpe == pytest.approx(-1.154476533095521)
     assert r.n_trades == 22
-    assert r.max_drawdown == pytest.approx(-0.23582232520460777)
+    assert r.max_drawdown == pytest.approx(-0.24186887630849607)

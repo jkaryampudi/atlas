@@ -84,20 +84,33 @@ def run_backtest(bars: list[OBar], strategy: Strategy,
             exit_px: float | None = None
             reason = ""
             if b.low <= pos_intent.stop:
-                exit_px, reason = costs.sell(pos_intent.stop), "stop"
+                # F-004: a gap-through open fills at the OPEN, never at the
+                # unobtainable stop price. On a normal intraday stop the open is
+                # above the stop, so min() returns the stop; on a gap-down the
+                # open is below the stop, so the fill is the (worse) open. The
+                # open must be a valid, obtainable price — fail closed otherwise
+                # (no fabricated intraday liquidity).
+                if not math.isfinite(b.open) or b.open <= 0:
+                    raise ValueError(
+                        f"stop exit at bar {i}: invalid open {b.open!r} — cannot "
+                        "derive an obtainable fill price")
+                exit_px, reason = costs.sell(min(pos_intent.stop, b.open)), "stop"
             elif b.high >= pos_intent.target:
                 exit_px, reason = costs.sell(pos_intent.target), "target"
             elif i - pos_entry_i >= pos_intent.time_stop:
                 exit_px, reason = costs.sell(b.close), "time"
+            # F-003: BOTH the exit and hold paths mark from yesterday's close
+            # when the position was held into today (entered on a PRIOR day),
+            # else from the entry price (entered today). The exit path formerly
+            # used a strict '>' while the hold path used '>=', so a position
+            # entered on day i-1 and exited on day i marked from the entry price
+            # and re-counted the entry-day gain already booked on day i-1.
+            prev_mark = bars[i - 1].close if i - 1 >= pos_entry_i else pos_entry
             if exit_px is not None:
                 trades.append(Trade(pos_entry_i, i, pos_entry, exit_px, reason))
-                day_ret = exit_px / (bars[i - 1].close if reason != "stop" else pos_entry)
-                # mark-to-market path: yesterday close -> exit today
-                prev_mark = bars[i - 1].close if i - 1 > pos_entry_i else pos_entry
                 day_ret = exit_px / prev_mark - 1.0
                 pos_entry = pos_intent = None
             else:
-                prev_mark = bars[i - 1].close if i - 1 >= pos_entry_i else pos_entry
                 day_ret = b.close / prev_mark - 1.0
         # 3) ask strategy (sees ONLY history up to and including today)
         if pos_entry is None and pending is None:
