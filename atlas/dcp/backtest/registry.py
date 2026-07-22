@@ -18,9 +18,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import statistics
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+# The three metrics EVERY genuine backtest writes, whatever its family schema —
+# portfolio runners add avg_turnover/n_rebalances, single-name runners add
+# hit_rate/n_trades, but all real runs carry these three. A row carrying all
+# three is a real out-of-sample observation; a row missing any is a synthetic/
+# placeholder fixture (e.g. an exact sharpe=1.0/2.0/3.0 with no return or
+# drawdown) and is NOT sampled for the cross-trial Sharpe dispersion (F-005).
+# Content rule fixed before any number is read, not a threshold tuned to a DSR;
+# it must stay a SUBSET common to every real schema so no genuine run is dropped.
+_REAL_METRIC_KEYS: tuple[str, ...] = ("sharpe", "total_return", "max_drawdown")
 
 
 # F-023: the closed catalog of reviewed research lineages. Every new trial
@@ -88,3 +99,33 @@ def lineage_count(session: Session, lineage: str) -> int:
     return int(session.execute(text(
         "SELECT count(*) FROM quant.trial_registry WHERE lineage = :l"),
         {"l": lineage}).scalar() or 0)
+
+
+def lineage_sr_dispersion(session: Session, lineage: str) -> float | None:
+    """Empirical cross-trial Sharpe dispersion for the Deflated-Sharpe
+    expected-maximum term (F-005, BLdP). Returns the sample standard deviation of
+    the annualised Sharpe ESTIMATES across the lineage's REAL registered
+    backtests, or ``None`` when fewer than two exist (nothing to estimate — the
+    gate then floors at ``sqrt(1/n_days)``).
+
+    'Real' means the trial's metrics carry the full backtest signature
+    (``_REAL_METRIC_KEYS``). Placeholder/synthetic rows lacking it (e.g. a fixture
+    with ``sharpe`` set to an exact 1.0/2.0/3.0 and no return/drawdown) are NOT
+    observations of the family's out-of-sample Sharpe distribution and would
+    corrupt the estimate, so they are excluded. This is a content rule fixed
+    before any number is read, not a threshold tuned to a desired DSR — the same
+    filter that ``register_trial`` populates for genuine runs.
+
+    Unlike ``lineage_count`` (which stays a conservative over-count of *bets
+    placed*, synthetic rows included, because over-counting only DEFLATES), the
+    dispersion is a distributional estimate and MUST be taken over genuine
+    observations only. The two intentionally scope differently; see F-005."""
+    key_pred = " AND ".join(f"metrics ? '{k}'" for k in _REAL_METRIC_KEYS)
+    rows = session.execute(text(
+        "SELECT (metrics->>'sharpe')::float FROM quant.trial_registry "
+        f"WHERE lineage = :l AND {key_pred}"),
+        {"l": lineage}).scalars().all()
+    xs = [float(x) for x in rows if x is not None]
+    if len(xs) < 2:
+        return None
+    return statistics.stdev(xs)

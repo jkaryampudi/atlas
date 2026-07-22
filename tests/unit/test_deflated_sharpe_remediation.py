@@ -56,6 +56,36 @@ def test_supplying_the_minimum_dispersion_reproduces_the_fallback():
         pytest.approx(deflated_sharpe(1.85, n_days, 68))
 
 
+def test_dispersion_below_floor_is_clamped_up_to_the_lower_bound():
+    """The fail-closed floor (F-005): a supplied dispersion BELOW sqrt(1/n_days)
+    is clamped up to it, so it reproduces the fallback and can NEVER raise the
+    DSR above what the lower bound gives. The cross-trial std of Sharpe estimates
+    cannot lie below the single-estimate SE, so this is the honest value, not a
+    convenience — and it guarantees the gate is never loosened."""
+    n_days = 1140
+    minimum_ann = math.sqrt(1.0 / n_days) * math.sqrt(252)
+    tiny = 0.1 * minimum_ann                              # a small-sample artefact
+    clamped = deflated_sharpe(1.85, n_days, 68, sr_dispersion_annual=tiny)
+    assert clamped == pytest.approx(deflated_sharpe(1.85, n_days, 68))   # == fallback
+    # and it is never ABOVE the fallback for any dispersion, floored or not
+    assert clamped <= deflated_sharpe(1.85, n_days, 68) + 1e-12
+
+
+def test_worked_bldp_example_flagship_below_gate():
+    """Worked BLdP example on the real flagship inputs (xsmom-pit-tr): annual
+    Sharpe 0.821 over ~3524 daily bars, momentum lineage n_trials=23, empirical
+    cross-trial dispersion 0.3257 (annual). Hand-computed against the independent
+    reference; the honest DSR is ~0.75 — BELOW the 0.90 gate (consistent with the
+    ADR-0018 research_shadow downgrade), and strictly below the lower-bound view."""
+    sr, n_days, n_trials, disp = 0.821, 3524, 23, 0.3257
+    honest = deflated_sharpe(sr, n_days, n_trials, sr_dispersion_annual=disp)
+    lower_bound = deflated_sharpe(sr, n_days, n_trials)          # the old inflated view
+    assert honest == pytest.approx(_reference_dsr(sr, n_days, n_trials, sigma_ann=disp))
+    assert honest < lower_bound                                 # empirical > floor here
+    assert honest < 0.90                                        # fails the gate, honestly
+    assert honest == pytest.approx(0.752, abs=0.01)
+
+
 def test_kurtosis_and_skew_move_the_denominator():
     base = deflated_sharpe(1.85, 1140, 1)
     fat_tails = deflated_sharpe(1.85, 1140, 1, kurtosis=9.0)      # more estimator variance

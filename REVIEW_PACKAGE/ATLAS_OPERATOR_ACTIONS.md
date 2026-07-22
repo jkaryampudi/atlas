@@ -108,11 +108,37 @@ file or any transcript.
 
 ---
 
+## 8. Purge synthetic placeholder trials from the momentum lineage (F-005 residual)
+- **Reason:** three rows in `quant.trial_registry` under `lineage='momentum'` are
+  synthetic placeholder fixtures — `sharpe` set to an exact 1.0 / 2.0 / 3.0 with
+  NO `total_return`/`max_drawdown` (not real backtests). The F-005 dispersion
+  helper already EXCLUDES them by content rule (they carry no real-metric
+  signature), so they do not corrupt the honest DSR (0.752). But they DO inflate
+  `lineage_count('momentum')` from 20 to 23. Over-counting `n_trials` only
+  DEFLATES the DSR (conservative — no capital risk), so this is a data-hygiene
+  cleanup, not a correctness fix. Purging them would RAISE the honest flagship DSR
+  from 0.752 to ~0.775 — still below the 0.90 gate, so the `research_shadow`
+  verdict is unchanged either way.
+- **Procedure (governance + data):** deleting registered trials touches the
+  multiple-testing count that ADR-0016 makes load-bearing, so it is a reviewed
+  change, not an ad-hoc `DELETE`. Identify the rows
+  (`SELECT id, spec_hash FROM quant.trial_registry WHERE lineage='momentum' AND
+  NOT (metrics ? 'total_return')` → the 3 sharpe-only rows) and remove them under
+  a signed note referencing this finding, OR leave them (safe — the count is
+  conservative and the dispersion already ignores them).
+- **Verify:** `lineage_sr_dispersion(session,'momentum')` is unchanged (0.326);
+  `lineage_count('momentum')` drops to 20; the flagship DSR recomputes to ~0.775.
+- **Restart required:** no. **Role:** Principal (governance) / operator (data).
+
+---
+
 ## Still-open findings needing engineering (not operator actions)
-Finishing F-005 (DSR dispersion threading) is the only remaining engineering
-increment. F-012 (monthly rebalance-sell) is FIXED — the deployed cycle now has a
+**None.** F-005 (DSR empirical-dispersion threading) FIXED this round — the honest
+flagship DSR is 0.752, below the 0.90 gate, confirming the ADR-0018
+`research_shadow` verdict (no gate weakened; residual is the §8 registry purge
+above). F-012 (monthly rebalance-sell) is FIXED — the deployed cycle now has a
 `t6d_rebalance` node matching the validated construct (dormant/no-op while
-xsmom-pit-tr is research_shadow; correct on re-promotion). **Now fixed since this list was last written:** F-002 (core; residual
-is the vendor decision in §6), F-006, F-007 (core; §7 scoped follow-ons), F-009,
-F-010, F-019, F-020, F-025. See `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the
-current per-finding status.
+xsmom-pit-tr is research_shadow; correct on re-promotion). **All Critical/High are
+resolved in code;** the only outstanding items are the non-code residuals in
+§6 (F-002 vendor), §7 (F-007 Principal-scope), and §8 (F-005 registry purge).
+See `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the current per-finding status.

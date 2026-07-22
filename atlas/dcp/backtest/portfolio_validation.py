@@ -119,12 +119,19 @@ class PortfolioGateReport:
 
 def portfolio_gate(*, result: PortfolioResult, null_returns: list[float],
                    spy: PortfolioResult, ew: PortfolioResult,
-                   n_trials: int) -> PortfolioGateReport:
+                   n_trials: int,
+                   sr_dispersion_annual: float | None = None) -> PortfolioGateReport:
     """Verdict under the UNMODIFIED thresholds imported above. The binding
     buy-and-hold comparison is SPY (the fund's actual alternative); the
-    equal-weight benchmark is carried in the report, not the verdict."""
+    equal-weight benchmark is carried in the report, not the verdict.
+
+    ``sr_dispersion_annual`` (F-005): the empirical cross-trial Sharpe dispersion
+    of the lineage (``registry.lineage_sr_dispersion``); ``None`` falls back to —
+    and any supplied value is floored at — the ``sqrt(1/n_days)`` lower bound, so
+    supplying it can only lower the DSR, never loosen the gate."""
     p = sum(1 for x in null_returns if x >= result.total_return) / len(null_returns)
-    dsr = deflated_sharpe(result.sharpe, len(result.equity_curve) - 1, n_trials)
+    dsr = deflated_sharpe(result.sharpe, len(result.equity_curve) - 1, n_trials,
+                          sr_dispersion_annual=sr_dispersion_annual)
     reasons: list[str] = []
     if p > P_MAX:
         reasons.append(f"null-model: p={p:.3f} > {P_MAX} "

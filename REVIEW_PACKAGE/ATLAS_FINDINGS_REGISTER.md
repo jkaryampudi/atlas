@@ -228,3 +228,30 @@ RESIDUALS, not open findings: F-002 dated identity change-history (vendor
 decision), F-007 FX versioning + per-runner K-pinning (Principal scope), and
 finishing F-005 (DSR dispersion threading). Gates on a fresh atlas_test: ruff
 clean, mypy clean (138 files), verify-chain OK, cov-risk 100%.
+
+### Round-9 update (P2.34) — F-005 empirical DSR dispersion threading
+
+**F-005 → FIXED.** The Deflated-Sharpe expected-maximum term now scales by the
+lineage's EMPIRICAL cross-trial Sharpe dispersion instead of the null-theoretical
+lower bound `√(1/n_days)` that silently inflated the DSR. New
+`registry.lineage_sr_dispersion` (sample std of annualised Sharpes over REAL
+trials — the 3-key core signature common to both metric schemas; synthetic
+placeholders excluded by content rule; `None` if <2) is threaded through
+`portfolio_gate`, `null_model_gate`, `_endpoint_verdicts`, and all 8 runners.
+`deflated_sharpe` clamps a supplied dispersion UP to the floor
+(`σ=max(empirical,√(1/n_days))`) — statistically the floor is `Var[estimate]`'s
+lower bound, and operationally it guarantees the fix can only LOWER (never raise)
+any DSR, so no gate is weakened and every floor-fallback lineage is byte-identical
+(zero golden churn). **Honest result, verbatim:** the flagship `xsmom-pit-tr`
+computes **DSR 0.752** (sharpe 0.821, n_days 3524, n_trials 23, σ=0.326) — below
+the 0.90 gate and below the lower-bound 0.866, CONFIRMING and slightly deepening
+the ADR-0018 `research_shadow` verdict (≈0.85). The strategy is already
+non-authoritative (no capital); no gate was touched. 12 tests (worked BLdP
+example, floor-clamp, schema-inclusion, synthetic-exclusion, end-to-end runner
+threading); a 5-lens adversarial review returned **0 confirmed findings**.
+
+**Running total: ALL 24 High FIXED-or-core-fixed** + M31; F-001 (Critical)
+strengthened. **0 High partial · 0 High open in code** — completion gate met in
+code. Remaining are non-code residuals (F-002 vendor, F-007 Principal-scope, F-005
+synthetic-fixture purge = operator). Gates: **1753 passed**, ruff clean, mypy
+clean (strict on the 11 changed dcp modules).
