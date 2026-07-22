@@ -178,17 +178,25 @@ def maybe_billing_outage_alert(session: Session, clock: Clock, *,
 
 
 def main() -> None:
-    """Out-of-band expiring-proposal sweep — schedule HOURLY via cron/launchd
-    (`python -m atlas.ops.alerts`). The daily cycle's t9b sweeps too, but a
-    24h agent proposal crosses its final 6h BETWEEN cycles; an intra-day
-    sweep is what actually catches it before t2 buries it. Once-per-proposal
-    latching makes any schedule safe — hourly runs never re-page."""
+    """Out-of-band expiring-proposal sweep + daily-cycle dead-man — schedule
+    HOURLY via cron/launchd (`python -m atlas.ops.alerts`). The daily cycle's
+    t9b sweeps proposals too, but a 24h agent proposal crosses its final 6h
+    BETWEEN cycles; an intra-day sweep is what actually catches it before t2
+    buries it. Running the cycle supervisor HERE (as well as in the in-process
+    scheduler) means a MISSED cycle is still detected even when the API — and its
+    scheduler — is the thing that is down. Once-per-(kind,key) latching makes any
+    schedule safe — hourly runs never re-page."""
     from atlas.core.clock import SystemClock
     from atlas.core.db import session_scope
+    from atlas.ops.supervise import check_missed_cycles, check_stuck_cycles
 
+    clock = SystemClock()
     with session_scope() as s:
-        fired = check_expiring_proposals(s, SystemClock())
-    print(f"expiring-proposal sweep: paged {len(fired)} proposal(s)")
+        fired = check_expiring_proposals(s, clock)
+        missed = check_missed_cycles(s, clock)
+        stuck = check_stuck_cycles(s, clock)
+    print(f"expiring-proposal sweep: paged {len(fired)} proposal(s); "
+          f"dead-man: {len(missed)} missed, {len(stuck)} stuck cycle(s)")
 
 
 if __name__ == "__main__":

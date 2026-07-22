@@ -113,6 +113,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -148,6 +149,14 @@ from atlas.ops.alerts import (
     check_expiring_proposals,
     maybe_billing_outage_alert,
     notify,
+)
+from atlas.ops.cycle_ledger import (
+    HEARTBEAT_SECONDS,
+    CycleOverlapError,
+    close_cycle,
+    day_llm_spend,
+    heartbeat,
+    open_cycle,
 )
 from atlas.tools.verify_chain import run as verify_chain
 
@@ -678,10 +687,31 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
                                        for n in nodes])
 
 
+def _cycle_failed(results: dict[str, str]) -> bool:
+    """Fail-soft node failures live in output_ref strings; the exit code must
+    agree so a webhook-less install still sees the failure (review 2026-07)."""
+    ingest_line = results.get("t0_ingest") or ""
+    return ("failed=True" in ingest_line
+            or "desk FAILED" in (results.get("t7_desk") or "")
+            or "scan FAILED" in (results.get("t7_desk") or "")
+            or "bridge FAILED" in (results.get("t8_bridge") or "")
+            or "signals FAILED" in (results.get("t6b_signals") or "")
+            or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
+            or "bands FAILED" in (results.get("t5b_bands") or "")
+            or "cusum FAILED" in (results.get("t5c_cusum") or "")
+            or "attribution FAILED" in (results.get("t8b_attribution") or "")
+            or "core FAILED" in (results.get("t8c_core") or "")
+            or "brief FAILED" in (results.get("t9b_brief") or "")
+            or "FAILED" in (results.get("t9_report") or ""))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Atlas T0-T9 daily cycle")
     parser.add_argument("--now", help="ISO instant for deterministic re-runs "
                                       "(default: wall clock)")
+    parser.add_argument("--trigger", default="cli",
+                        help="who launched this cycle (scheduler|manual|cli|"
+                             "launchd|systemd); recorded in ops.cycle_runs")
     args = parser.parse_args()
     clock: Clock = (FrozenClock(datetime.fromisoformat(args.now))
                     if args.now else SystemClock())
@@ -698,36 +728,82 @@ def main() -> None:
         # scan first (ADR-0007): the desk studies the scanner's shortlist,
         # never the full universe — breadth is the scanner's job, and it's free
         desk = build_scanned_desk(run_desk, desk_symbols)
+
+    business_date = clock.now().astimezone(UTC).date()
+    run_id = f"daily-{business_date.isoformat()}"
+
+    # GUARD BEFORE CLAIM (F-025): a refused (too-early) run must not consume the
+    # day or leave a durable ledger row — exactly the pre-existing session-close
+    # semantics, evaluated before any write. Emit the same @@CYCLE guard line the
+    # in-cycle guard does, so the console still shows the refusal reason.
+    refusal = cycle_refusal(clock)
+    if refusal is not None:
+        _emit("guard", "refused", refusal)
+        print(f"REFUSED: {refusal}")
+        raise SystemExit(EXIT_REFUSED)
+
+    # Durable 'running' claim on a connection OUTSIDE the cycle's atomic
+    # transaction (autonomous), and the cross-process overlap guard.
+    try:
+        cycle_id = open_cycle(business_date, run_id, args.trigger, clock=clock,
+                              host=socket.gethostname(), pid=os.getpid())
+    except CycleOverlapError as e:
+        print(f"SKIPPED: {e}")
+        raise SystemExit(0) from None    # benign: another process owns the date
+
+    # Liveness heartbeat: a daemon advances heartbeat_at while the cycle runs, so
+    # the supervisor can tell a hung process from a live-but-slow one. The pid the
+    # ledger recorded is the authoritative crashed-vs-alive signal; this is the
+    # hung-but-alive signal. Best-effort — a heartbeat hiccup never disturbs the
+    # cycle, and the daemon dies with the process.
+    import threading
+    _hb_stop = threading.Event()
+
+    def _heartbeat_loop() -> None:
+        while not _hb_stop.wait(HEARTBEAT_SECONDS):
+            try:
+                heartbeat(cycle_id, clock=clock)
+            except Exception:             # noqa: BLE001 — never disturb the cycle
+                pass
+
+    threading.Thread(target=_heartbeat_loop, name="atlas-cycle-heartbeat",
+                     daemon=True).start()
+
+    status, exit_code, detail = "failed", 1, None
+    spend = Decimal(0)
     try:
         with session_scope() as s:
-            results = run_daily_cycle(s, clock, adapter, desk=desk)
+            try:
+                results = run_daily_cycle(s, clock, adapter, desk=desk)
+            finally:
+                # Capture the day's LLM spend from the SAME (uncommitted) session
+                # before it commits/rolls back, so a FAILED day's spend still
+                # lands durably in the ledger (M57). Best-effort inside the finally.
+                spend = day_llm_spend(s, business_date)
+        # committed cleanly
+        failed = _cycle_failed(results)
+        status, exit_code = ("failed", 2) if failed else ("completed", 0)
+        if failed:
+            detail = "fail-soft node failure (see ops.cycle_runs / jobs board)"
+        print(json.dumps(results, indent=2))
+        raise SystemExit(exit_code)
     except CycleRefusedError as e:
-        # a polite, deliberate no-op: nothing was written (no checkpoint row,
-        # no audit event), the day is NOT consumed, and the distinct exit code
-        # keeps the scheduler from paging FAILED for a run that simply came
-        # before the close — the plain line below is what lands in the
-        # scheduler's status detail
+        # main pre-checked refusal, so this is unexpected (clock drift); record it.
+        status, exit_code, detail = "refused", EXIT_REFUSED, str(e)
         print(f"REFUSED: {e}")
         raise SystemExit(EXIT_REFUSED) from None
-    ingest_line = results.get("t0_ingest") or ""
-    failed = ("failed=True" in ingest_line
-              or "desk FAILED" in (results.get("t7_desk") or "")
-              or "scan FAILED" in (results.get("t7_desk") or "")
-              or "bridge FAILED" in (results.get("t8_bridge") or "")
-              or "signals FAILED" in (results.get("t6b_signals") or "")
-              or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
-              or "bands FAILED" in (results.get("t5b_bands") or "")
-              or "cusum FAILED" in (results.get("t5c_cusum") or "")
-              or "attribution FAILED" in (results.get("t8b_attribution") or "")
-              or "core FAILED" in (results.get("t8c_core") or "")
-              or "brief FAILED" in (results.get("t9b_brief") or "")
-              # t9's internal fail-soft lines (scorecard / learning / source-
-              # picks / screen-cohort): they already page via the high-priority
-              # notify, but the exit code must agree so a webhook-less install
-              # still sees the failure in the scheduler status (review 2026-07)
-              or "FAILED" in (results.get("t9_report") or ""))
-    print(json.dumps(results, indent=2))
-    raise SystemExit(2 if failed else 0)
+    except SystemExit:
+        raise                            # status/exit_code already set above
+    except BaseException as e:           # hard failure: the cycle rolled back
+        status, exit_code = "failed", 1
+        detail = f"{type(e).__name__}: {e}"
+        raise
+    finally:
+        _hb_stop.set()                    # stop the heartbeat daemon
+        # Terminal ledger write on an autonomous connection — survives the very
+        # rollback it records (M56), with the captured spend (M57).
+        close_cycle(cycle_id, status, clock=clock, exit_code=exit_code,
+                    llm_spend=spend, detail=detail)
 
 
 if __name__ == "__main__":

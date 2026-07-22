@@ -67,9 +67,9 @@ def _run_cycle() -> None:
     progress: list[dict[str, object]] = _last["progress"]  # type: ignore[assignment]
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "atlas.ops.daily"], cwd=_REPO,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            bufsize=1)
+            [sys.executable, "-m", "atlas.ops.daily", "--trigger", "scheduler"],
+            cwd=_REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
         tail: list[str] = []
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -153,16 +153,37 @@ def _run_backup() -> None:
 # construction — the daily checkpoint replays an already-completed date and
 # the pre-session guard refuses a too-early one.
 TICK_SECONDS = 30.0
+# Run the dead-man / stuck supervisor every ~10 min (the alert_urgent latch makes
+# it idempotent, so cadence only bounds detection lag). F-025.
+SUPERVISE_EVERY_TICKS = 20
+
+
+async def _supervise_safely(startup: bool) -> None:
+    """Run the supervisor off-thread; it must NEVER stop the scheduler loop."""
+    from atlas.core.clock import SystemClock
+    from atlas.ops.supervise import recover_on_startup, supervise
+    try:
+        if startup:
+            # a crash may have left a stale 'running' claim — clear it so a retry
+            # can proceed, and page for anything already missed while we were down.
+            await asyncio.to_thread(recover_on_startup, SystemClock())
+        await asyncio.to_thread(supervise, SystemClock())
+    except Exception as e:  # noqa: BLE001 — supervision is best-effort
+        notify("Atlas supervisor", f"cycle supervision failed: {e}",
+               priority="high")
 
 
 async def scheduler_loop() -> None:
     """Wall-clock tick loop for the two daily fire times. Started from the
     API's lifespan when ATLAS_INPROC_SCHEDULER=1. Each pending fire time is
     executed as soon as a tick observes it in the past (catch-up after system
-    sleep), then re-armed for the next day."""
+    sleep), then re-armed for the next day. Also runs the F-025 dead-man
+    supervisor at boot (recovering any stale claim) and every SUPERVISE_EVERY_TICKS."""
+    await _supervise_safely(startup=True)
     now = datetime.now(UTC)
     pending = {"cycle": next_fire(now, CYCLE_UTC),
                "backup": next_fire(now, BACKUP_UTC)}
+    ticks = 0
     while True:
         await asyncio.sleep(TICK_SECONDS)
         now = datetime.now(UTC)
@@ -174,3 +195,6 @@ async def scheduler_loop() -> None:
         if now >= pending["backup"]:
             pending["backup"] = next_fire(now, BACKUP_UTC)
             await asyncio.to_thread(_run_backup)
+        ticks += 1
+        if ticks % SUPERVISE_EVERY_TICKS == 0:
+            await _supervise_safely(startup=False)
