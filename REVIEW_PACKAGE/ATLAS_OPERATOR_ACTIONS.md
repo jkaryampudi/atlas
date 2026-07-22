@@ -56,11 +56,23 @@ file or any transcript.
   returns 401; with the token, 200/expected.
 - **Restart required:** yes (to load the env). **Role:** operator.
 
-## 5. Configure the scheduler dead-man alert target (F-025 — OPEN)
-- **Reason:** durable scheduler supervision / missed-cycle detection is **not yet
-  implemented** (F-025 remains open). Until it is, set `ATLAS_ALERT_URL` so the
-  existing alert path (`atlas/ops/alerts.py`) at least surfaces cycle failures.
-- **Restart required:** yes. **Role:** operator. **Status:** interim mitigation.
+## 5. Configure the scheduler dead-man alert target (F-025 — now IMPLEMENTED)
+- **Reason:** durable scheduler supervision + missed-cycle dead-man is now
+  implemented (migration 0039 `ops.cycle_runs`, `atlas/ops/supervise.py`, wired
+  into the scheduler tick and the hourly `alerts.main()` sweep). Set
+  `ATLAS_ALERT_URL` so the pages (`cycle_missed` / `cycle_stuck`) actually reach
+  you; with it unset the condition is still durably recorded (the `ops.alert.urgent`
+  audit latch) but only printed to stderr.
+- **Also schedule the hourly sweep** (`python -m atlas.ops.alerts`) via cron so
+  the dead-man fires even when the API — and its in-process supervisor — is the
+  thing that is down (the sweep runs it too).
+- **Single-host assumption:** stuck-recovery uses process-liveness (the recorded
+  pid), which is host-local. This is correct because the scheduler subprocess, the
+  in-proc supervisor, the hourly sweep, and `make daily` all run on the SAME
+  machine. If Atlas is ever split across hosts, a cross-host 'running' row is only
+  recovered at the 12h absolute cap — revisit then.
+- **Restart required:** yes (to load `ATLAS_ALERT_URL`). **Role:** operator.
+  **Status:** feature landed; operator sets the alert URL + cron.
 
 ## 6. Issuer-identity change-history feed + ISIN backfill (F-002 residual)
 - **Reason:** F-002's resolution layer is built and populated from real ISINs
@@ -80,8 +92,8 @@ file or any transcript.
 ---
 
 ## Still-open findings needing engineering (not operator actions)
-F-007 (versioned ingestion), F-009 (split-basis EPS), F-012 (rebalance-sell +
-revalidation), F-025 (scheduler supervision), and finishing F-005 (DSR dispersion
-threading). **Now fixed since this list was last written:** F-002 (core; residual
-is the vendor decision in §6 above), F-006, F-010, F-019, F-020. See
+F-007 (versioned ingestion), F-012 (rebalance-sell + revalidation — gated on
+F-007), and finishing F-005 (DSR dispersion threading). **Now fixed since this
+list was last written:** F-002 (core; residual is the vendor decision in §6
+above), F-006, F-009, F-010, F-019, F-020, F-025. See
 `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the current per-finding status.

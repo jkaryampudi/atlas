@@ -20,7 +20,7 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-006 | High | **FIXED** | benchmark TR converted to AUD via PIT FX; FX cancels in the excess (`test_benchmark_currency_pg`) |
 | F-007 | High | **OPEN** | versioned/bitemporal bar ingestion + as-of reads — schema + reader rework |
 | F-008 | High | **FIXED** | future-dated earnings excluded at parse+store (`test_earnings_history_pit_guard`) |
-| F-009 | High | **OPEN** | split-basis consistency in earnings surprises — versioning of the EPS basis |
+| F-009 | High | **FIXED** | split_basis_asof anchor (migration 0038) + look-ahead-safe read-side re-basing (`earnings_basis.py`) reconciles a mixed-basis store to one basis at the read horizon; per-share DIVIDE, no double-adjust; 10 tests incl. the split-after-ingest bar; strict no-op on the single-fetch panel (no golden churn); zero confirmed adversarial-review findings |
 | F-010 | High | **FIXED** | cross-currency fcf_yield fails closed (`test_health_score_currency`); broader ADR field-model is a follow-up |
 | F-011 | High | **FIXED** | §12 momentum overlay restored (`test_momentum_overlay_fires_pg`) |
 | F-012 | High | **OPEN** | monthly rebalance-sell — strategy behaviour change requiring full re-validation |
@@ -36,7 +36,7 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-022 | High | **FIXED** | unconditional promotion-identity match |
 | F-023 | High | **FIXED** | lineage catalog; unknown refused |
 | F-024 | High | **FIXED (app)** | failed mandatory gate is terminal for approval; existing pead row demotion = operator action |
-| F-025 | High | **OPEN** | durable scheduler supervision + dead-man — needs a cycle-record table (migration) |
+| F-025 | High | **FIXED** | durable `ops.cycle_runs` ledger (migration 0039) written on a connection OUTSIDE the cycle txn → failure row + LLM spend survive rollback (M56/M57); clock-injected dead-man (missed) + pid-liveness stuck detection + restart recovery; cross-process overlap guard; wired into daily.main/scheduler/alerts; 13 tests. Three adversarial-review defects (heartbeat dead-code false-kill, slow startup recovery, narrow lookback) found AND fixed (pid-liveness + heartbeat daemon + widened lookback) |
 | F-026 | High | **FIXED (app)** | settle refuses a stale non-authoritative buy (`test_stale_order_settle_guard_pg`); cancelling the 2 existing orders = operator action |
 | M31 | Med | **FIXED** | PG-less run fails (`exit 4`), not false-green |
 
@@ -175,3 +175,72 @@ validated backtest number, so F-012's revalidation is untouched by this work.
 instruments (e.g. BNY — Bank of NY Mellon) carry a fundamentals row but no ISIN,
 so they resolve to None. This is a vendor-fetch gap, not a code fault — a
 fundamentals re-fetch should populate them; until then they fail closed (safe).
+
+---
+
+# Round-6 additions (F-009 split-basis + F-025 scheduler supervision)
+
+Both built understand→design→implement→**adversarial-review**→fix (ultracode). A
+6-lens hostile review with independent refute-verification found **zero** real
+defects in F-009 and **three** in F-025's first cut — all fixed before commit.
+
+## F-009 — mixed split-basis EPS → **FIXED**
+
+The panel is currently single-basis (all 60,762 rows share `fetched_at`
+2026-07-15, zero later splits), so the bug is *latent*: it triggers only when a
+split lands after a partial re-fetch and the append-only store (`ON CONFLICT DO
+NOTHING`) mixes an old-basis frozen row with a new-basis appended one.
+
+| Piece | Where |
+|---|---|
+| `split_basis_asof` anchor (nullable; store always sets it; NULL = safe no-op) | migration **0038** |
+| Pure look-ahead-safe primitive `cumulative_split_factor(splits, lo, hi)` (strict lower / inclusive upper, mirrors the price adjuster) | `atlas/dcp/market_data/adjustment.py` |
+| Immutable read-side re-basing `eps / factor(split_basis_asof, K)` — per-share DIVIDE; applies only splits AFTER the row's basis epoch, so it never double-adjusts | `atlas/dcp/market_data/earnings_basis.py` |
+| Wired into every cross-quarter consumer | `features/sue.py`, `signals/pead/generate.py`, `backtest/pead_pit_run.py`, `research/financials_panel.py` |
+| 10 tests (7 unit + 3 PG) incl. the reviewer's split-after-ingest bar + SUE uniform-basis invariance + look-ahead boundary | `test_split_factor.py`, `test_earnings_split_basis_pg.py` |
+
+**No-op on current data** (factor=1 everywhere) → no golden churn, no
+revalidation; purely preventive. SUE is invariant to a *uniform* basis, so
+normalising all reports to the read horizon leaks no future info at any rebalance.
+
+## F-025 — durable ledger + dead-man supervision → **FIXED**
+
+Root defect: the whole T0–T9 cycle runs in ONE `session_scope()`, so a failure
+rolls back the workflow row, audit events AND the LLM spend — failures are
+invisible and the cost breaker undercounts on retry; nothing watches for a cycle
+that never ran.
+
+| Piece | Where |
+|---|---|
+| `ops.cycle_runs` ledger; partial-unique `(business_date) WHERE status='running'` = cross-process overlap guard | migration **0039** |
+| Autonomous writer (own `session_scope()`) — 'running' claim + terminal row + captured spend survive the cycle's rollback (**M56/M57**) | `atlas/ops/cycle_ledger.py` |
+| Clock-injected dead-man (missed = expected-past-deadline with no attempted row) + **pid-liveness** stuck detection + restart recovery | `atlas/ops/supervise.py` |
+| Guard-before-claim + heartbeat daemon + terminal-close-in-finally | `daily.py::main` |
+| Boot recovery + ~10-min supervision tick; hourly `alerts.main()` sweep (survives API-down) | `scheduler.py`, `alerts.py` |
+| 13 tests: M56 kill-durability, M57 spend, missed dead-man (once, idempotent), refused/failed≠missed, weekend semantics, overlap, crash-recovery, **live-cycle-never-killed**, prompt startup recovery, cold-ledger | `test_scheduler_supervision_pg.py` |
+
+**Adversarial-review defects, found and fixed:**
+1. *heartbeat() was dead code* → stuck detection was a 180-min total-runtime cap
+   that would kill a legitimately-long LIVE cycle, release the overlap guard, and
+   silently discard its completed status/spend. **Fix:** process-liveness (the
+   recorded pid) is now the authoritative kill signal — a live cycle's pid is
+   alive → never killed; a crash's pid is gone → recovered. `heartbeat()` is now
+   wired via a daemon thread (hang detection + observability).
+2. *recover_on_startup used the full 180-min threshold* → a crash newer than that
+   (crash 23:30, restart 23:50) wasn't cleared, blocking the retry into a silent
+   SKIPPED/exit-0. **Fix:** recovery keys on the dead pid, not elapsed time — a
+   crash is cleared promptly.
+3. *missed-cycle lookback was 7 days* → a gap older than a week was silently
+   skipped. **Fix:** widened to 90 days (the alert latch makes a wide window safe).
+
+**Deployment note (operator):** pid-liveness is host-local — sound because Atlas
+is single-host (the scheduler subprocess, the in-proc supervisor, cron
+`alerts.main`, and `make daily` all run on the same machine). A cross-host row is
+never auto-killed on a pid basis (only at the 12h absolute cap).
+
+**Running total (Round-6): F-002 (core), F-009, F-025 all FIXED** →
+**22 High + the Critical strengthened**; remaining OPEN: **F-007** (versioned
+ingestion — history overwritten), **F-012** (revalidation — gated on F-007), and
+the F-002 residual (dated identity change-history — vendor decision). Gates on a
+fresh atlas_test: pytest all-pass, ruff clean, mypy clean, verify-chain OK,
+cov-risk 100%.

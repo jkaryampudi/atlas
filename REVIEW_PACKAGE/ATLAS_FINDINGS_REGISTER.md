@@ -144,3 +144,34 @@ receive it. No strategy math/params/validated numbers changed.
 strengthened; F-005 PARTIAL; **4 High OPEN**: F-007, F-009, F-012, F-025. Gates on
 a fresh atlas_test: **pytest 1700 passed / 0 failed**, ruff clean, mypy clean
 (135 files), verify-chain 1895 OK, cov-risk 100%. **Gate still NOT met.**
+
+### Round-6 update (P2.31) — F-009 split-basis + F-025 scheduler supervision
+
+Both built with an adversarial-review phase (6 lenses, refute-verified). F-009
+drew **zero** confirmed defects; F-025's first cut drew **three** (all fixed
+before commit).
+
+**F-009 → FIXED.** `split_basis_asof` anchor (migration 0038) + look-ahead-safe
+`cumulative_split_factor` + immutable read-side re-basing (`earnings_basis.py`)
+reconcile a mixed-basis store onto one basis at the read horizon (per-share
+DIVIDE, no double-adjust), wired into all four cross-quarter consumers. Strict
+no-op on the single-fetch panel → no golden churn. 10 tests incl. the reviewer's
+split-after-ingest bar.
+
+**F-025 → FIXED.** `ops.cycle_runs` ledger (migration 0039) written OUTSIDE the
+cycle transaction → failure row + LLM spend survive rollback (M56/M57);
+clock-injected missed-cycle dead-man + **pid-liveness** stuck detection (a live
+long cycle is never falsely killed) + restart recovery; cross-process overlap
+guard; wired into `daily.main`/scheduler/`alerts.main`. 13 tests. The three
+review defects — heartbeat dead-code (false-kill of a live cycle), slow startup
+recovery, 7-day lookback — were fixed via pid-liveness + a heartbeat daemon +
+a 90-day lookback.
+
+**Running total: 22 High FIXED-or-core-fixed** + M31; F-001 (Critical)
+strengthened; F-005 PARTIAL; **2 High OPEN**: F-007 (versioned ingestion —
+history overwritten), F-012 (revalidation — gated on F-007); plus the F-002
+residual (dated identity change-history — vendor decision). Gates on a fresh
+atlas_test: **pytest 1723 passed / 0 failed**, ruff clean, mypy clean (136 files),
+verify-chain OK, cov-risk 100%. **Completion gate: Critical=0; High open = 2
+(F-007, F-012), both gated on unrecoverable overwritten history / its
+revalidation — the honest blockers named in ATLAS_FINAL_REMEDIATION_EVIDENCE.md.**
