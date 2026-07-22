@@ -129,7 +129,7 @@ def test_full_cycle_ordering_and_kill_guards(clean_audit):
     assert list(results.keys()) == [
         "t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
         "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
-        "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
+        "t6c_pead_signals", "t6d_rebalance", "t7_desk", "t8_bridge", "t8b_attribution",
         "t8c_core", "t9_report", "t9b_brief"]
     # standing-core maintenance idles honestly in a fixture without SPY/INDA
     assert results["t8c_core"] == ("core retired (ADR-0017) — no ETF proposals by signed policy")
@@ -340,7 +340,7 @@ REFUSED_MSG = ("cycle for 2026-07-13 refused: US session not yet closed "
                "(closes 20:00 UTC + 30min vendor grace); re-run after 20:30 UTC")
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
          "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
-         "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
+         "t6c_pead_signals", "t6d_rebalance", "t7_desk", "t8_bridge", "t8b_attribution",
          "t8c_core", "t9_report", "t9b_brief"]
 
 

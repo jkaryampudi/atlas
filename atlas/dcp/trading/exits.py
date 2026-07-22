@@ -154,6 +154,15 @@ class StopExitReport:
 
 
 @dataclass(frozen=True)
+class RebalanceExitReport:
+    position_id: str
+    order_id: str
+    symbol: str
+    qty: int
+    rebalance_session: date      # the monthly rebalance the name dropped out of
+
+
+@dataclass(frozen=True)
 class _EntryLineage:
     proposal_id: UUID
     approval_id: UUID
@@ -339,6 +348,137 @@ def scan_stop_exits(session: Session, clock: Clock,
             execution_id=report.execution_id, symbol=p.symbol,
             fill_date=bar.bar_date, fill_price=price, qty=qty,
             shortfall_bps=sf))
+    return tuple(reports)
+
+
+# ------------------------------------------------------ monthly rebalance sell
+
+def scan_rebalance_exits(session: Session,
+                         clock: Clock) -> tuple[RebalanceExitReport, ...]:
+    """F-012: on a monthly rebalance session, SELL every held momentum-sleeve
+    position whose name has DROPPED OUT of the current winner set — making the
+    deployed sell cadence match the VALIDATED construct (xsmom_pit_run:
+    ``weights = dict(pending)`` fully exits every name absent from the new winner
+    set at each month-end). Pre-authorized under the position's entry approval
+    (like a protective stop; a sell RELEASES risk, so no buy-side L1-L11), full
+    quantity, order_type='rebalance', left ``pending_submit`` so the NEXT cycle's
+    settle fills it at the next session open — the same execute-at-next-open
+    convention the backtest uses.
+
+    Fires ONLY when a rebalance was formed THIS signal session (t6b wrote signals
+    dated it): a no-op on every non-rebalance daily cycle (=> monthly turnover),
+    and a pure no-op under research_shadow (no paper/live strategy => no signals
+    formed, and the momentum attribution join requires paper/live state => no
+    held sleeve). A name already exiting via a stop or a prior rebalance is
+    skipped (the live-sell idempotency guard), so the two never double-sell."""
+    from atlas.dcp.signals.xsmom.generate import (SLEEVE_MAX_NAMES,
+                                                  STRATEGY_FAMILY, _signal_session)
+    _lifecycle_lock(session)
+    now = clock.now()
+    audit = _audit(session, clock)
+    sig_session = _signal_session(session, clock)
+    if sig_session is None:
+        return ()
+
+    # cadence gate: was a rebalance formed at THIS signal session? (t6b writes
+    # only on month-end/initiation/catch_up, and only for a paper/live strategy)
+    formed = session.execute(text(
+        "SELECT count(*) FROM quant.signals s "
+        "JOIN quant.strategies st ON st.id = s.strategy_id "
+        "WHERE st.family = :fam AND st.state IN ('paper','live') "
+        "  AND s.signal_date = :d"),
+        {"fam": STRATEGY_FAMILY, "d": sig_session}).scalar()
+    if not formed:
+        return ()
+
+    # target = the deployed winner set this rebalance (top SLEEVE_MAX_NAMES by
+    # rank — the same cap the buy side trades)
+    target = {str(r.instrument_id) for r in session.execute(text(
+        "SELECT s.instrument_id FROM quant.signals s "
+        "JOIN quant.strategies st ON st.id = s.strategy_id "
+        "WHERE st.family = :fam AND st.state IN ('paper','live') "
+        "  AND s.signal_date = :d AND s.direction = 'long' AND s.rank <= :n"),
+        {"fam": STRATEGY_FAMILY, "d": sig_session, "n": SLEEVE_MAX_NAMES}).all()}
+
+    # held PURELY-momentum positions: every open lot is attributed to a paper/live
+    # momentum signal through its entry-proposal lineage — never core / PEAD /
+    # discretionary holdings, AND never a position co-mingling a momentum lot with
+    # a non-momentum lot (ADR-0014 one-row-per-instrument can merge two same-name
+    # agent buys). A full-quantity FIFO sell of a co-mingled position would
+    # over-liquidate the non-sleeve shares, so such a position is left for the
+    # human/stop path (F-012 adversarial review) rather than partially/wrongly sold.
+    mom = ("ARRAY(SELECT s2.id FROM quant.signals s2 "
+           "JOIN quant.strategies st2 ON st2.id = s2.strategy_id "
+           "WHERE st2.family = :fam AND st2.state IN ('paper','live'))")
+    held = session.execute(text(
+        "SELECT p.id, p.qty, i.id AS iid, i.symbol "
+        "FROM trading.positions p JOIN market.instruments i ON i.id = p.instrument_id "
+        "WHERE p.closed_at IS NULL AND p.qty > 0 AND p.opened_at IS NOT NULL "
+        "  AND EXISTS (SELECT 1 FROM trading.tax_lots tl "
+        "     JOIN trading.executions e ON e.id = tl.execution_id "
+        "     JOIN trading.orders o ON o.id = e.order_id "
+        "     JOIN trading.trade_proposals tp ON tp.id = o.proposal_id "
+        "     WHERE tl.position_id = p.id AND tl.disposed_at IS NULL "
+        "       AND tp.signal_ids && " + mom + ") "
+        "  AND NOT EXISTS (SELECT 1 FROM trading.tax_lots tl2 "
+        "     JOIN trading.executions e2 ON e2.id = tl2.execution_id "
+        "     JOIN trading.orders o2 ON o2.id = e2.order_id "
+        "     JOIN trading.trade_proposals tp2 ON tp2.id = o2.proposal_id "
+        "     WHERE tl2.position_id = p.id AND tl2.disposed_at IS NULL "
+        "       AND NOT (tp2.signal_ids && " + mom + ")) "
+        "ORDER BY p.opened_at FOR UPDATE OF p"),
+        {"fam": STRATEGY_FAMILY}).all()
+
+    reports: list[RebalanceExitReport] = []
+    for p in held:
+        if str(p.iid) in target:
+            continue                        # still a winner -> hold
+        # In-flight guard (mirrors close_position, proposals.py): skip a name that
+        # already has EITHER a live sell order OR a live EXIT proposal awaiting a
+        # human seal. A deferred rebalance sell + a later-approved close would mint
+        # TWO sells of the same shares -> the second wedges settle_orders and rolls
+        # back the whole nightly cycle every run (F-012 adversarial review).
+        if session.execute(text(
+                "SELECT 1 FROM trading.trade_proposals tp "
+                "LEFT JOIN trading.orders o ON o.proposal_id = tp.id "
+                "WHERE tp.instrument_id = :iid "
+                "  AND ((tp.action = 'exit' "
+                "        AND tp.state IN ('pending_approval','approved')) "
+                "    OR (o.side = 'sell' "
+                "        AND o.state IN ('pending_submit','submitted','partially_filled'))) "
+                "LIMIT 1"), {"iid": p.iid}).first() is not None:
+            continue
+        lineage = _entry_lineage(session, p.id)
+        qty = int(p.qty)
+        check_id = _persist_static_check(
+            session, clock, proposal_id=lineage.proposal_id, kind="order_time",
+            verdict="PASS",
+            results=[{"rule": "REBALANCE", "pass": True, "value": None,
+                      "limit": None,
+                      "detail": f"{p.symbol} left the monthly winner set at "
+                                f"{sig_session.isoformat()} — full exit"}],
+            price_snapshot={"rebalance_session": sig_session.isoformat()})
+        order_id = session.execute(text(
+            "INSERT INTO trading.orders (proposal_id, approval_id, risk_check_id, "
+            " broker, side, qty, order_type, state, created_at) "
+            "VALUES (:p, :a, :c, 'paper', 'sell', :q, 'rebalance', "
+            "        'pending_submit', :t) RETURNING id"),
+            {"p": lineage.proposal_id, "a": lineage.approval_id,
+             "c": UUID(check_id), "q": qty, "t": now}).scalar_one()
+        audit.append(event_type="order.state_changed", entity_type="order",
+                     entity_id=str(order_id), actor_type="dcp",
+                     actor_id="rebalance_exit_engine",
+                     payload={"order_id": str(order_id), "from": None,
+                              "to": "pending_submit"})
+        audit.append(event_type="position.rebalance_exit", entity_type="position",
+                     entity_id=str(p.id), actor_type="dcp",
+                     actor_id="rebalance_exit_engine",
+                     payload={"position_id": str(p.id), "symbol": p.symbol,
+                              "rebalance_session": sig_session.isoformat(),
+                              "order_id": str(order_id), "qty": qty})
+        reports.append(RebalanceExitReport(
+            position_id=str(p.id), order_id=str(order_id), symbol=p.symbol,
+            qty=qty, rebalance_session=sig_session))
     return tuple(reports)
 
 

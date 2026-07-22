@@ -143,7 +143,7 @@ from atlas.dcp.signals.xsmom.generate import active_signal_symbols, generate_sig
 from atlas.dcp.trading.bands import check_bands, check_cusum
 from atlas.dcp.trading.bridge import bridge_memos
 from atlas.dcp.trading.core_allocation import maintain_core_proposals
-from atlas.dcp.trading.exits import scan_stop_exits
+from atlas.dcp.trading.exits import scan_rebalance_exits, scan_stop_exits
 from atlas.dcp.trading.proposals import expire_stale, settle_orders, snapshot
 from atlas.ops.alerts import (
     check_expiring_proposals,
@@ -429,6 +429,21 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         state["pead_signals"] = report
         return report.summary()
 
+    def t6d_rebalance() -> str:
+        # F-012: the SELL side of the monthly rebalance. Runs AFTER t6b_signals
+        # so tonight's fresh winner set is visible, and sells any held
+        # momentum-sleeve name that dropped out of it — making the deployed sell
+        # cadence match the validated construct. Fires only on a rebalance
+        # session (a no-op otherwise and under research_shadow). Fail-soft like
+        # the signal nodes: a failure pages, the settled/protected book stands.
+        try:
+            fired = scan_rebalance_exits(session, clock)
+        except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
+            state["rebalance_failed"] = True
+            return f"rebalance FAILED: {e}"[:300]
+        state["rebalance"] = fired
+        return f"rebalance_sells={len(fired)}"
+
     def t7_desk() -> str:
         if desk is None:
             return "desk off (no model key configured)"
@@ -676,6 +691,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         Node("t6_reconcile", t6_reconcile),
         Node("t6b_signals", t6b_signals),
         Node("t6c_pead_signals", t6c_pead_signals),
+        Node("t6d_rebalance", t6d_rebalance),
         Node("t7_desk", t7_desk),
         Node("t8_bridge", t8_bridge),
         Node("t8b_attribution", t8b_attribution),
@@ -697,6 +713,7 @@ def _cycle_failed(results: dict[str, str]) -> bool:
             or "bridge FAILED" in (results.get("t8_bridge") or "")
             or "signals FAILED" in (results.get("t6b_signals") or "")
             or "pead signals FAILED" in (results.get("t6c_pead_signals") or "")
+            or "rebalance FAILED" in (results.get("t6d_rebalance") or "")
             or "bands FAILED" in (results.get("t5b_bands") or "")
             or "cusum FAILED" in (results.get("t5c_cusum") or "")
             or "attribution FAILED" in (results.get("t8b_attribution") or "")
