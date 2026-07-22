@@ -16,6 +16,7 @@ from atlas.core.clock import FrozenClock
 from atlas.core.db import session_scope
 from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
+from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.ingest import ingest_day, seed_instruments
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
@@ -50,6 +51,10 @@ def main() -> None:
     clock = FrozenClock(datetime(day.year, day.month, day.day, 22, 0, tzinfo=UTC))
     with session_scope() as s:
         assert_disposable_db(s, force=args.force)
+        # F-007: stamp bar/corp-action versions from the replay's injected clock,
+        # so two replays of the same date are byte-identical (deterministic
+        # knowledge_date, not the DB wall clock).
+        set_knowledge_date(s, clock)
         audit = PostgresAuditLog(s, clock)
         # checkpointed daily cycle (ADR-0005 pattern 3): re-running the same
         # date skips completed nodes instead of re-ingesting

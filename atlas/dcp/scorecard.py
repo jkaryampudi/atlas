@@ -118,6 +118,7 @@ from atlas.dcp.market_data.adapters.eodhd import EodhdAdapter, vendor_symbol
 from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
 from atlas.dcp.market_data.adjustment import adjust_for_splits
 from atlas.dcp.market_data.daily import incremental_sessions
+from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.ingest import record_split, upsert_bar
 from atlas.dcp.market_data.models import Bar, Split
 
@@ -409,6 +410,7 @@ def _top_up_inactive_bars(
     (the scanner's caveat, ops/daily.py)."""
     notes: list[str] = []
     now = clock.now()
+    set_knowledge_date(session, clock)     # F-007: deterministic version stamping
     for symbol in sorted(awaiting):
         inst = instruments.get(symbol)
         if inst is None or inst.is_active:

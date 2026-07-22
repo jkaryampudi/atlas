@@ -76,6 +76,7 @@ from atlas.dcp.market_data.earnings import EarningsDaily, refresh_earnings
 from atlas.dcp.market_data.estimate_snapshots import (EstimateSnapshotDaily,
                                                        snapshot_estimates,
                                                        universe_symbols)
+from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
 from atlas.dcp.market_data.identity import refresh_identity
 from atlas.dcp.market_data.ingest import (_non_trading_day_gate, record_dividend,
@@ -381,6 +382,10 @@ def _refresh_fundamentals(session: Session, adapter: MarketDataAdapter,
 def run_daily_ingest(session: Session, clock: Clock, adapter: MarketDataAdapter, *,
                      markets: tuple[str, ...] = ("US", "AU")) -> DailyIngestReport:
     now = clock.now()
+    # F-007: stamp this ingest's knowledge instant from the injected clock, so the
+    # bar-version trigger records a deterministic, testable knowledge_date rather
+    # than the DB wall clock (falls back to now() if unset).
+    set_knowledge_date(session, clock)
     failures: list[str] = []
     results = {m: _ingest_market(session, adapter, m, now, failures) for m in markets}
     fx = _ingest_fx(session, adapter, now, failures)

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
+from atlas.dcp.market_data.corp_action_versions import append_corp_action_version
 from atlas.dcp.market_data.calendars import (is_trading_day, previous_trading_day,
                                               recent_sessions)
 from atlas.dcp.market_data.models import Bar, Dividend, GateStatus, Split
@@ -77,12 +78,21 @@ def record_split(session: Session, instrument_id: object, split: Split, source: 
     read-side adjustment (review finding)."""
     if not is_valid_split_ratio(split.ratio):
         return False
+    # F-007: a vendor CORRECTION must reach the head too (not just the version
+    # sidecar), so the live/authoritative path uses the corrected ratio and
+    # known_by=now stays byte-identical to the head. DO UPDATE on a real change;
+    # an unchanged re-ingest writes the same value (idempotent, no duplicates).
     session.execute(text(
         "INSERT INTO market.corporate_actions "
         "(instrument_id, action_date, action_type, ratio, source) "
         "VALUES (:iid, :d, 'split', :r, :src) "
-        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING"),
+        "ON CONFLICT (instrument_id, action_date, action_type) DO UPDATE SET "
+        "  ratio = excluded.ratio, source = excluded.source "
+        "WHERE corporate_actions.ratio IS DISTINCT FROM excluded.ratio"),
         {"iid": instrument_id, "d": split.action_date, "r": split.ratio, "src": source})
+    # capture a knowledge-time version (append-on-change) for as-of reads.
+    append_corp_action_version(session, instrument_id, action_date=split.action_date,
+                               action_type="split", ratio=split.ratio, source=source)
     return True
 
 
@@ -94,14 +104,25 @@ def record_dividend(session: Session, instrument_id: object, div: Dividend,
     `ratio` stays NULL (that column is split semantics). Amount is the RAW
     declared cash per share (adjust on read, the bars convention). Same
     natural-key arbiter as record_split, so re-runs never duplicate."""
+    # F-007: adopt a corrected amount/currency into the head (see record_split).
+    # The change-gated WHERE preserves the count semantics: an unchanged re-ingest
+    # updates nothing and RETURNs no row (0); a new or corrected dividend RETURNs 1.
     res = session.execute(text(
         "INSERT INTO market.corporate_actions "
         "(instrument_id, action_date, action_type, amount, currency, source) "
         "VALUES (:iid, :d, 'dividend', :a, :cur, :src) "
-        "ON CONFLICT (instrument_id, action_date, action_type) DO NOTHING "
+        "ON CONFLICT (instrument_id, action_date, action_type) DO UPDATE SET "
+        "  amount = excluded.amount, currency = excluded.currency, "
+        "  source = excluded.source "
+        "WHERE corporate_actions.amount IS DISTINCT FROM excluded.amount "
+        "   OR corporate_actions.currency IS DISTINCT FROM excluded.currency "
         "RETURNING id"),
         {"iid": instrument_id, "d": div.ex_date, "a": div.amount,
          "cur": div.currency, "src": source})
+    # capture a knowledge-time version (append-on-change) for as-of reads.
+    append_corp_action_version(session, instrument_id, action_date=div.ex_date,
+                               action_type="dividend", amount=div.amount,
+                               currency=div.currency, source=source)
     return 1 if res.first() is not None else 0
 
 

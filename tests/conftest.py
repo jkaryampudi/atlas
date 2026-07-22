@@ -160,7 +160,8 @@ def _scrub_committed_market_world() -> None:
     try:
         with engine.begin() as c:
             c.execute(text(
-                "TRUNCATE market.price_bars_daily, market.corporate_actions, "
+                "TRUNCATE market.price_bars_daily, market.price_bars_versions, "
+                "market.corporate_actions, market.corporate_actions_versions, "
                 "market.fx_rates_daily, market.data_quality_gates, "
                 "market.fundamentals, market.earnings_calendar, "
                 "market.earnings_surprises, market.estimate_snapshots, "

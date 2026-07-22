@@ -121,6 +121,10 @@ def _prepare_data(session: Session, adapter: MarketDataAdapter, symbol: str,
 
     n_bars = n_splits = 0
     if fetch_from is not None:
+        # F-007: stamp bar/corp-action versions from the injected `now` (a live
+        # analysis instant), not the DB wall clock via the trigger's fallback.
+        session.execute(text("SELECT set_config('atlas.knowledge_date', :v, true)"),
+                        {"v": now.isoformat()})
         for sp in adapter.fetch_splits(symbol, fetch_from, end):
             record_split(session, instrument_id, sp, source)
             n_splits += 1

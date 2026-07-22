@@ -44,12 +44,14 @@ from __future__ import annotations
 
 from bisect import bisect_left
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from atlas.dcp.market_data.corp_action_versions import (load_dividends_asof,
+                                                        load_splits_asof)
 from atlas.dcp.market_data.models import Dividend, Split
 
 
@@ -76,9 +78,22 @@ def adjust_dividends_for_splits(dividends: list[Dividend],
     return out
 
 
-def load_adjusted_dividends(session: Session, symbol: str) -> list[Dividend]:
+def load_adjusted_dividends(session: Session, symbol: str, *,
+                            known_by: datetime | None = None) -> list[Dividend]:
     """Stored dividends for `symbol`, split-adjusted on read — the dividend
-    sibling of real_run.load_adjusted_obars (raw in the DB, adjusted here)."""
+    sibling of real_run.load_adjusted_obars (raw in the DB, adjusted here).
+
+    F-007: with ``known_by`` set, dividends AND splits are read as they were KNOWN
+    at that instant (corporate_actions_versions), so a registered total-return run
+    reproduces as-of its run date. ``known_by=None`` reads the head — byte-
+    identical to today."""
+    if known_by is not None:
+        iid = session.execute(text(
+            "SELECT id FROM market.instruments WHERE symbol = :s"),
+            {"s": symbol}).scalar()
+        divs = load_dividends_asof(session, iid, known_by=known_by, symbol=symbol)
+        splits = load_splits_asof(session, iid, known_by=known_by, symbol=symbol)
+        return adjust_dividends_for_splits(divs, splits)
     divs = [Dividend(symbol=symbol, ex_date=r.action_date,
                      amount=Decimal(r.amount), currency=r.currency)
             for r in session.execute(text(

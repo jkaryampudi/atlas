@@ -57,6 +57,7 @@ from sqlalchemy.orm import Session
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import trading_days_between
+from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.fx import required_pairs, upsert_rate
 from atlas.dcp.market_data.ingest import (
     record_split,
@@ -375,6 +376,7 @@ def main() -> None:
             fixtures_root=ROOT / "tests" / "fixtures", seeds_csv=a.seeds,
             extra_seeds_csv=VALIDATION_SEEDS if VALIDATION_SEEDS.exists() else None)
         with session_scope() as s:
+            set_knowledge_date(s, clock)   # F-007: deterministic version stamping
             sym_report = backfill_symbols(session=s, adapter=adapter,
                                           audit=PostgresAuditLog(s, clock),
                                           symbols=symbols, start=start, end=end)
@@ -392,6 +394,7 @@ def main() -> None:
                                     seeds_csv=a.seeds)
 
     with session_scope() as s:
+        set_knowledge_date(s, clock)       # F-007: deterministic version stamping
         audit = PostgresAuditLog(s, clock)
         report = backfill(session=s, adapter=adapter, audit=audit, markets=markets,
                           start=start, end=end, seeds_csv=a.seeds)

@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
+from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.ingest import record_dividend
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -213,6 +214,7 @@ def main() -> None:
 
     settings = get_settings()
     with session_scope() as s:
+        set_knowledge_date(s, clock)       # F-007: deterministic version stamping
         symbols = ([x.strip() for x in a.symbols.split(",") if x.strip()]
                    if a.symbols else symbols_with_stored_bars(s))
         if not symbols:
