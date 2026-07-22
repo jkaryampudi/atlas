@@ -232,6 +232,121 @@ def test_full_happy_path_build_approve_settle_snapshot(clean_audit):
     assert evs.count("order.state_changed") == 2               # -> pending_submit, -> filled
 
 
+# ------------------------------------------------- M35 execution price collar
+
+def _approved_buy(s, clock, memo_id):
+    """Build + approve a ZTLA buy → a 'pending_submit' order ready to settle."""
+    res = _build(s, clock, memo_id)
+    assert res.state == "pending_approval" and res.verdict == "PASS"
+    clock.advance_to(T0 + timedelta(hours=1))
+    outcome = approve(s, clock, proposal_id=res.proposal_id, acknowledged_risks=True)
+    assert outcome.status == "approved"
+    return res, outcome
+
+
+def _seed_next_open(s, open_px: Decimal) -> None:
+    """The next session's bar (open==close) + its FX, so a fill can resolve."""
+    iid = s.execute(text("SELECT id FROM market.instruments WHERE symbol = 'ZTLA'")).scalar()
+    s.execute(text(
+        "INSERT INTO market.price_bars_daily (instrument_id, bar_date, open, close, "
+        "volume, source) VALUES (:iid, :d, :o, :o, 1000000, 'EodhdAdapter')"),
+        {"iid": iid, "d": NEXT_SESSION, "o": open_px})
+    _fx(s, day=NEXT_SESSION)
+
+
+def test_buy_fill_beyond_price_collar_is_voided_no_capital(clean_audit):
+    """M35: a BUY whose next-open gaps far past the approved decision price (here
+    100 -> 130, ~30% >> the 10% collar) is refused fail-closed — the order is
+    cancelled, the proposal voided, NO execution/position exists, and the void
+    hits the audit chain. Doubles as an execution price-sanity gate."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    res, outcome = _approved_buy(s, clock, memo_id)
+
+    _seed_next_open(s, Decimal("130"))                       # 30% gap up
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    fills = settle_orders(s, clock)
+
+    assert fills == ()                                       # nothing filled
+    assert s.execute(text("SELECT state FROM trading.orders WHERE id = :o"),
+                     {"o": outcome.order_id}).scalar() == "cancelled"
+    assert s.execute(text("SELECT state FROM trading.trade_proposals WHERE id = :p"),
+                     {"p": res.proposal_id}).scalar() == "voided"
+    assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 0
+    assert s.execute(text(
+        "SELECT count(*) FROM trading.positions WHERE closed_at IS NULL")).scalar() == 0
+    evs = _events(s)
+    assert evs.count("proposal.voided") == 1
+    assert evs.count("execution.recorded") == 0
+    assert "order.state_changed" in evs
+    # idempotent: the cancelled order is never retried into a fill
+    assert settle_orders(s, clock) == ()
+    assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 0
+
+
+def test_buy_fill_below_price_collar_is_voided(clean_audit):
+    """M35 symmetry, end-to-end: a DOWNWARD glitch (decision 100, next open 1 →
+    ~99% drift) is refused exactly as an up-gap is — the collar is on |drift|, so
+    it doubles as a price-sanity gate against a vendor decimal error that would
+    otherwise book a bogus position at a fabricated price. (All other buy collar
+    tests use up-gaps; this pins the downward direction the abs() protects.)"""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    res, outcome = _approved_buy(s, clock, memo_id)
+
+    _seed_next_open(s, Decimal("1"))                         # ~99% down glitch
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    fills = settle_orders(s, clock)
+
+    assert fills == ()
+    assert s.execute(text("SELECT state FROM trading.orders WHERE id = :o"),
+                     {"o": outcome.order_id}).scalar() == "cancelled"
+    assert s.execute(text("SELECT state FROM trading.trade_proposals WHERE id = :p"),
+                     {"p": res.proposal_id}).scalar() == "voided"
+    assert s.execute(text("SELECT count(*) FROM trading.executions")).scalar() == 0
+
+
+def test_buy_fill_within_price_collar_fills(clean_audit):
+    """Regression: a normal overnight move inside the collar (100 -> 108, ~8%
+    < 10%) still fills — the collar refuses gaps, it does not block trading."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _, outcome = _approved_buy(s, clock, memo_id)
+
+    _seed_next_open(s, Decimal("108"))                       # ~8.1% incl. costs
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    fills = settle_orders(s, clock)
+
+    assert len(fills) == 1 and fills[0].order_id == outcome.order_id
+    assert s.execute(text("SELECT state FROM trading.orders WHERE id = :o"),
+                     {"o": outcome.order_id}).scalar() == "filled"
+    assert s.execute(text(
+        "SELECT count(*) FROM trading.positions WHERE closed_at IS NULL")).scalar() == 1
+
+
+def test_buy_fill_just_over_collar_is_voided(clean_audit):
+    """Near-boundary: open 110 → effective 110.110 → 1011 bps drift > the 1000
+    collar → voided; with the ~8% fill test above this brackets the collar to
+    (810, 1011], so a value regression (e.g. doubling to 2000) is caught here."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    res, outcome = _approved_buy(s, clock, memo_id)
+
+    _seed_next_open(s, Decimal("110"))                       # 1011 bps incl. costs
+    clock.advance_to(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    fills = settle_orders(s, clock)
+
+    assert fills == ()
+    assert s.execute(text("SELECT state FROM trading.orders WHERE id = :o"),
+                     {"o": outcome.order_id}).scalar() == "cancelled"
+    assert s.execute(text("SELECT state FROM trading.trade_proposals WHERE id = :p"),
+                     {"p": res.proposal_id}).scalar() == "voided"
+
+
 # ------------------------------------------------------------- terminal paths
 
 def test_risk_fail_lands_rejected_and_is_terminal(clean_audit):

@@ -255,3 +255,30 @@ strengthened. **0 High partial · 0 High open in code** — completion gate met 
 code. Remaining are non-code residuals (F-002 vendor, F-007 Principal-scope, F-005
 synthetic-fixture purge = operator). Gates: **1753 passed**, ruff clean, mypy
 clean (strict on the 11 changed dcp modules).
+
+### Round-10 update (P2.35) — M35 execution price collar (first MEDIUM)
+
+With all Critical/High resolved in code, remediation moves to the MEDIUM tier,
+starting with the most capital-critical: **M35 (Risk) → FIXED.** A pending BUY was
+sized/approved by the risk engine at its APPROVED decision price, then filled at
+the next session's OPEN with NO check the fill was near that price — a gap or a
+vendor glitch deployed unexpected capital/risk. Added an execution-time price
+collar in `settle_orders` (`atlas/dcp/trading/proposals.py`): a BUY whose fill
+drifts beyond `EXECUTION_PRICE_COLLAR_BPS` (10%) from its decision price is
+refused fail-closed — order → `cancelled`, proposal → `voided`, both audited, ZERO
+capital deployed (`_void_collar_breach`, mirroring the F-026 stale-order void). The
+collar is on `|drift|`, so it doubles as an execution price-sanity gate (a vendor
+decimal-error blows it). Sells are intentionally EXEMPT: a sell reduces risk
+(stop/rebalance/close) and refusing to exit is the greater hazard than a bad exit
+price. Verified the void fully RELEASES the pre-fill commitment — the pending-buy
+cash/risk reservation keys on order state (released by → `cancelled`) and the
+day-step gross gate `_committed_gross_today_aud` keys on proposal state (released
+by → `voided`); `_ledger_cash` reads executions only, so no cash moved. 9 tests
+(over/under/at-boundary/downward-glitch buy voids + within-collar fill + sell
+exemption + a unit test pinning the constant and the symmetric `abs()` arithmetic).
+An 8-agent adversarial review found 2 LOW test-integrity gaps (unpinned collar
+value; untested `abs()` symmetry) — BOTH FIXED by the unit test + a downward-glitch
+and near-boundary integration test; the sell-glitch concern was REFUTED (separately
+scoped to ingest price-sanity, not M35's capital-deployment scope). Residual (noted,
+not code): the collar is a code constant that should graduate into the governed
+`limit_set` (M38). Gates: **1761 passed**, ruff clean, mypy clean.

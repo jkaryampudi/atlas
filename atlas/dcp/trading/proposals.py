@@ -143,6 +143,19 @@ _CENT = Decimal("0.01")
 _PCT = Decimal("0.0001")
 _QTY6 = Decimal("0.000001")
 
+# M35: execution-time price collar. Risk sizes a proposal at its APPROVED decision
+# price; the order carries a FIXED qty, so if the fill lands materially away from
+# that price the executed notional (qty × fill) no longer matches the notional
+# risk cleared — the trade is not the one that was approved. A BUY whose fill
+# drifts beyond this collar from its decision price is REFUSED fail-closed (voided,
+# no capital deployed); the human may re-propose at the new price. Symmetric on
+# |drift|, so it also fires as a price-sanity gate at execution (a vendor glitch —
+# e.g. a 34,000× bar — blows it). Sells are intentionally EXEMPT: a sell reduces
+# risk (stops/rebalance/close), and refusing to exit is the greater hazard than a
+# bad exit price. Conservative default; a tunable RISK parameter that should
+# graduate into the governed limit_set (M38) rather than stay a code constant.
+EXECUTION_PRICE_COLLAR_BPS = Decimal("1000")   # 10% max fill-vs-decision drift
+
 
 # ------------------------------------------------------------------- results
 
@@ -1145,6 +1158,41 @@ def _void_stale_order(session: Session, clock: Clock, r: Any) -> None:
                  payload={"reason": "F-026: stale pre-downgrade buy refused; no capital deployed"})
 
 
+def _fill_price_drift_bps(fill: Fill) -> Decimal:
+    """M35: absolute fill-vs-decision price drift, in bps and UNSIGNED — a
+    favourable gap or a vendor glitch trips the collar as readily as an adverse
+    one. `decision_price` is a proposal entry price (schema CHECK > 0)."""
+    return (abs(fill.fill_price - fill.decision_price) * Decimal(10_000)
+            / fill.decision_price)
+
+
+def _void_collar_breach(session: Session, clock: Clock, r: Any, fill: Fill,
+                        drift_bps: Decimal) -> None:
+    """M35: refuse a BUY whose fill breached the execution price collar — cancel
+    the order and void its proposal fail-closed (no capital deployed at an
+    untrusted/adverse price), releasing the committed capital; both transitions
+    land on the audit chain. The human may re-propose at the new price."""
+    now = clock.now()
+    audit = _audit(session, clock)
+    reason = (
+        f"M35: fill {fill.fill_price} drifted {drift_bps.quantize(_PCT)} bps from "
+        f"decision {fill.decision_price} (collar {EXECUTION_PRICE_COLLAR_BPS} bps) "
+        "— buy refused, no capital deployed")
+    session.execute(text(
+        "UPDATE trading.orders SET state = 'cancelled', closed_at = :t "
+        "WHERE id = :o AND state = 'pending_submit'"), {"t": now, "o": r.id})
+    session.execute(text(
+        "UPDATE trading.trade_proposals SET state = 'voided' WHERE id = :p"),
+        {"p": r.proposal_id})
+    audit.append(event_type="order.state_changed", entity_type="order",
+                 entity_id=str(r.id), actor_type="dcp", actor_id="settle",
+                 payload={"from": "pending_submit", "to": "cancelled",
+                          "reason": reason})
+    audit.append(event_type="proposal.voided", entity_type="proposal",
+                 entity_id=str(r.proposal_id), actor_type="dcp", actor_id="settle",
+                 payload={"reason": reason})
+
+
 def settle_orders(session: Session, clock: Clock,
                   broker: Broker | None = None) -> tuple[FillReport, ...]:
     """Fill every 'pending_submit' order whose next-session bar now exists.
@@ -1204,6 +1252,15 @@ def settle_orders(session: Session, clock: Clock,
             decision_date=r.created_at.astimezone(UTC).date()), as_of=as_of)
         if fill is None:
             continue
+        # M35: execution-time price collar. A BUY that fills materially away from
+        # its risk-approved decision price is no longer the trade risk cleared —
+        # refuse it fail-closed rather than deploy capital at an untrusted price.
+        # Sells (risk-reducing exits) are exempt: refusing to close is worse.
+        if r.side == "buy":
+            drift = _fill_price_drift_bps(fill)
+            if drift > EXECUTION_PRICE_COLLAR_BPS:
+                _void_collar_breach(session, clock, r, fill, drift)
+                continue
         reports.append(_record_fill(session, clock, r, fill))
     return tuple(reports)
 
