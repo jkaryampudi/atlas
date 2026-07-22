@@ -52,6 +52,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from atlas.dcp.market_data.calendars import trading_days_between
+from atlas.dcp.market_data.earnings_basis import (load_instrument_splits,
+                                                  rebase_surprises)
 from atlas.dcp.market_data.earnings_history import EarningsSurprise
 from atlas.dcp.signals.pead.v1 import build_earnings_view
 
@@ -81,16 +83,23 @@ def compute_sue(db: Session, symbol: str, instrument_id: UUID,
             eps_estimate=Decimal(r.eps_estimate),
             surprise_pct=(Decimal(r.surprise_pct)
                           if r.surprise_pct is not None else None),
-            before_after_market=r.before_after_market, currency=None)
+            before_after_market=r.before_after_market, currency=None,
+            split_basis_asof=r.split_basis_asof)
         for r in db.execute(text(
             "SELECT fiscal_period_end, report_date, eps_actual, eps_estimate, "
-            "       surprise_pct, before_after_market "
+            "       surprise_pct, before_after_market, split_basis_asof "
             "FROM market.earnings_surprises "
             "WHERE instrument_id = :iid AND report_date <= :end "
             "ORDER BY fiscal_period_end"),
             {"iid": instrument_id, "end": end})]
     if not reports:
         return {}
+    # F-009: reconcile any mixed split bases onto one common basis at the read
+    # horizon before the cross-quarter SUE comparison (no-op on a single-fetch
+    # panel; splits capped at `end` keep it look-ahead safe for every t <= end).
+    reports = rebase_surprises(
+        reports, load_instrument_splits(db, instrument_id, up_to=end),
+        knowledge_date=end)
     view = build_earnings_view({symbol: reports}, cal)
 
     out: dict[date, float] = {}

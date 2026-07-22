@@ -6,9 +6,34 @@ compound. Deterministic, pure, property-tested.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
+from typing import Sequence
 
 from atlas.dcp.market_data.models import Bar, Split
+
+
+def cumulative_split_factor(splits: Sequence[Split], lo: date | None,
+                            hi: date) -> Decimal:
+    """The cumulative split factor needed to move a per-share quantity from the
+    basis current at ``lo`` to the basis current at ``hi`` (``hi >= lo``):
+    ``product(ratio)`` over splits with ``lo < action_date <= hi``.
+
+    Boundary convention mirrors ``adjust_for_splits`` exactly (a quantity dated
+    strictly BEFORE a split's action_date is pre-split): the lower bound is
+    STRICT (splits at/ before ``lo`` are already baked into the ``lo`` basis) and
+    the upper bound is INCLUSIVE (a split effective on ``hi`` is in force at
+    ``hi``). ``lo=None`` means "-inf" (all splits with action_date <= hi).
+
+    Splits are assumed pre-filtered to one instrument by the caller. When
+    ``lo > hi`` the interval is empty and the factor is 1 (no re-basing). To keep
+    look-ahead structural, callers pass only splits with action_date <= the
+    knowledge date, and set ``hi`` to that same knowledge date."""
+    factor = Decimal(1)
+    for s in splits:
+        if (lo is None or lo < s.action_date) and s.action_date <= hi:
+            factor *= s.ratio
+    return factor
 
 
 def adjust_for_splits(bars: list[Bar], splits: list[Split]) -> list[Bar]:

@@ -103,6 +103,8 @@ from atlas.dcp.backtest.xsmom_run import (
     percentile,
     total_trial_count,
 )
+from atlas.dcp.market_data.earnings_basis import (load_splits_by_symbol,
+                                                  rebase_reports_by_symbol)
 from atlas.dcp.market_data.earnings_history import EarningsSurprise
 from atlas.dcp.market_data.index_membership import (
     INDEX_CODE,
@@ -162,7 +164,7 @@ def load_pead_signals(session: Session, symbols: list[str], dates: list[date],
     for r in session.execute(text(
             "SELECT i.symbol, es.fiscal_period_end, es.report_date, "
             "       es.eps_actual, es.eps_estimate, es.surprise_pct, "
-            "       es.before_after_market "
+            "       es.before_after_market, es.split_basis_asof "
             "FROM market.earnings_surprises es "
             "JOIN market.instruments i ON i.id = es.instrument_id "
             "WHERE i.symbol = ANY(:syms) "
@@ -173,10 +175,17 @@ def load_pead_signals(session: Session, symbols: list[str], dates: list[date],
             eps_estimate=Decimal(r.eps_estimate),
             surprise_pct=(Decimal(r.surprise_pct)
                           if r.surprise_pct is not None else None),
-            before_after_market=r.before_after_market, currency=None))
-    # No split collection: EODHD stores EPS backward-split-adjusted to a single
-    # current basis (see signals/pead/v1.py SPLIT SAFETY), so surprises are
-    # directly comparable and re-adjusting would DOUBLE-adjust (audit 2026-07-15).
+            before_after_market=r.before_after_market, currency=None,
+            split_basis_asof=r.split_basis_asof))
+    # F-009: reconcile any mixed split bases onto ONE common basis at the panel
+    # horizon (SUE is invariant to a uniform basis, so this leaks no future info
+    # into any earlier rebalance; splits capped at the horizon). This does NOT
+    # blanket re-adjust (which double-adjusts, audit 2026-07-15) — it only divides
+    # a row by splits AFTER its own fetch basis. No-op on a single-fetch panel.
+    if dates:
+        reports = rebase_reports_by_symbol(
+            reports, load_splits_by_symbol(session, symbols, up_to=dates[-1]),
+            knowledge_date=dates[-1])
     view = build_earnings_view(reports, dates)
     with_signal = sum(1 for s in view.symbols())
     delisted_with = sum(1 for s in reports

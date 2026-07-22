@@ -38,6 +38,8 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from atlas.dcp.market_data.adjustment import cumulative_split_factor
+from atlas.dcp.market_data.earnings_basis import load_instrument_splits
 from atlas.dcp.market_data.fundamentals import _currency, _get, _number
 
 # Curated line items per statement (label -> vendor key), in render order. A
@@ -145,17 +147,25 @@ def _earnings_history(session: Session, instrument_id: str,
     recent first — settled facts from market.earnings_surprises."""
     rows = session.execute(text(
         "SELECT fiscal_period_end, report_date, eps_actual, eps_estimate, "
-        "       surprise_pct FROM market.earnings_surprises "
+        "       surprise_pct, split_basis_asof FROM market.earnings_surprises "
         "WHERE instrument_id = :iid AND report_date <= :on "
         "ORDER BY fiscal_period_end DESC LIMIT :n"),
         {"iid": instrument_id, "on": as_of, "n": _N_SURPRISES}).all()
+    # F-009: show the per-quarter EPS column on ONE common split basis (as_of), so
+    # a mixed-basis store (a split after a partial re-fetch) cannot display
+    # inconsistent EPS magnitudes. surprise_pct is split-neutral; no-op today.
+    splits = load_instrument_splits(session, instrument_id, up_to=as_of)
     out: list[dict[str, object]] = []
     for r in rows:
+        factor = (cumulative_split_factor(splits, r.split_basis_asof, as_of)
+                  if r.split_basis_asof is not None else Decimal(1))
+        ea = Decimal(r.eps_actual) / factor if r.eps_actual is not None else None
+        ee = Decimal(r.eps_estimate) / factor if r.eps_estimate is not None else None
         out.append({
             "fiscal_period_end": r.fiscal_period_end.isoformat(),
             "report_date": r.report_date.isoformat(),
-            "eps_actual": float(r.eps_actual) if r.eps_actual is not None else None,
-            "eps_estimate": float(r.eps_estimate) if r.eps_estimate is not None else None,
+            "eps_actual": float(ea) if ea is not None else None,
+            "eps_estimate": float(ee) if ee is not None else None,
             "surprise_pct": float(r.surprise_pct) if r.surprise_pct is not None else None,
         })
     return out
