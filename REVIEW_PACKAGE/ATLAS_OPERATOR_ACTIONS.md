@@ -91,9 +91,27 @@ file or any transcript.
 
 ---
 
+## 7. F-007 versioned-ingestion scoped follow-ons (Principal / engineering)
+- **Reason:** F-007's bitemporal substrate (bars + corporate actions, migrations
+  0040/0041) is landed and a pinned run reproduces byte-identically. Two scoped
+  pieces remain, neither data-blocked:
+  - **(a) FX versioning — Principal scope.** `market.fx_rates_daily` (`upsert_rate`)
+    is still overwrite-in-place, so a cross-currency / AUD-benchmark total-return
+    run reproduces only up to FX. Same sidecar pattern applies when prioritised.
+  - **(b) Per-runner K-pinning — engineering.** Thread `known_by=K` through the
+    remaining backtest runners and pin K in `quant.trial_registry` so every
+    registered run auto-reproduces. Low-risk (`known_by=now` is byte-identical).
+- **Data-blocked residual (no action closes it):** bars overwritten BEFORE the
+  0040 cutover kept no prior value — past runs before the cutover are not
+  retro-reproducible. Inherent loss, not a gap.
+- **Restart required:** no. **Role:** (a) Principal / (b) engineering.
+
+---
+
 ## Still-open findings needing engineering (not operator actions)
-F-007 (versioned ingestion), F-012 (rebalance-sell + revalidation — gated on
-F-007), and finishing F-005 (DSR dispersion threading). **Now fixed since this
-list was last written:** F-002 (core; residual is the vendor decision in §6
-above), F-006, F-009, F-010, F-019, F-020, F-025. See
-`ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the current per-finding status.
+F-012 (rebalance-sell + full revalidation — a large empirical exercise, partially
+unblocked by F-007's versioned substrate) and finishing F-005 (DSR dispersion
+threading). **Now fixed since this list was last written:** F-002 (core; residual
+is the vendor decision in §6), F-006, F-007 (core; §7 scoped follow-ons), F-009,
+F-010, F-019, F-020, F-025. See `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the
+current per-finding status.

@@ -18,7 +18,7 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-004 | High | **FIXED** | stops fill at `min(stop, open)`; 7 gap cases |
 | F-005 | High | **PARTIAL** | PSR skew/kurtosis denominator + empirical-dispersion capability + numerical tests; threading dispersion through 8 runners/gate + re-pin is the finish step |
 | F-006 | High | **FIXED** | benchmark TR converted to AUD via PIT FX; FX cancels in the excess (`test_benchmark_currency_pg`) |
-| F-007 | High | **OPEN** | versioned/bitemporal bar ingestion + as-of reads — schema + reader rework |
+| F-007 | High | **FIXED (core), residual data-blocked + scoped** | bitemporal knowledge-time versioning of bars (migration 0040) AND corporate actions (0041): append-only immutable sidecars + genesis baselines, as-of reads (`bar_versions.py`, `corp_action_versions.py`), `load_adjusted_obars(known_by=K)` / `load_adjusted_dividends(known_by=K)` composition; a pinned run reproduces byte-identically after a bar+split correction (`test_reproducibility_pg`); `known_by=None`=head byte-identical (no golden churn). 16 tests. 4 adversarial-review defects found+fixed (head adopts corrections; injectable knowledge_date on all ingest paths; dividend as-of; currency change-detection). Residual: pre-versioning overwritten values unrecoverable (data-blocked); FX versioning + per-runner K-pinning deferred (Principal scope) |
 | F-008 | High | **FIXED** | future-dated earnings excluded at parse+store (`test_earnings_history_pit_guard`) |
 | F-009 | High | **FIXED** | split_basis_asof anchor (migration 0038) + look-ahead-safe read-side re-basing (`earnings_basis.py`) reconciles a mixed-basis store to one basis at the read horizon; per-share DIVIDE, no double-adjust; 10 tests incl. the split-after-ingest bar; strict no-op on the single-fetch panel (no golden churn); zero confirmed adversarial-review findings |
 | F-010 | High | **FIXED** | cross-currency fcf_yield fails closed (`test_health_score_currency`); broader ADR field-model is a follow-up |
@@ -244,3 +244,69 @@ ingestion — history overwritten), **F-012** (revalidation — gated on F-007),
 the F-002 residual (dated identity change-history — vendor decision). Gates on a
 fresh atlas_test: pytest all-pass, ruff clean, mypy clean, verify-chain OK,
 cov-risk 100%.
+
+---
+
+# Round-7 additions (F-007 versioned/bitemporal ingestion) — **FIXED (core)**
+
+The Principal chose the FULL bitemporal scope (bars + corporate actions). Built
+understand -> design -> implement -> **adversarial-review** -> fix (ultracode).
+An empirical DB check confirmed the exact mechanism: `upsert_bar` uses
+`ON CONFLICT DO UPDATE` — a real in-place OVERWRITE that destroys the OHLCV a
+prior run saw; `ingested_at` is not even refreshed. So past values ARE gone
+(the honest residual), but everything forward is now versioned.
+
+## What was built (byte-identical on current data — no golden churn)
+
+| Piece | Where |
+|---|---|
+| Append-only, immutable `price_bars_versions` (trigger-maintained on the head; genesis @ per-row ingested_at) | migration **0040** |
+| Append-only, immutable `corporate_actions_versions` (append-on-change in record_split/record_dividend; genesis @ initial-backfill epoch) | migration **0041** |
+| As-of reads: `load_bars_asof`, `load_splits_asof`, `load_dividends_asof` (cap on knowledge_date <= K AND event date <= t) | `bar_versions.py`, `corp_action_versions.py` |
+| Injectable knowledge_date via a session GUC set by EVERY ingest path (daily, replay, backfill, dividends, scorecard, analyze) | `set_knowledge_date` |
+| As-of composition: `load_adjusted_obars(known_by=K)`, `load_adjusted_dividends(known_by=K)`; `known_by=None`=head | `real_run.py`, `total_return.py` |
+| 16 tests incl. the crown-jewel reproducibility test (a pinned run reproduces byte-identically after a bar AND a split correction; a later run reflects them) | `test_bar_versions_pg`, `test_corp_action_versions_pg`, `test_reproducibility_pg` |
+
+**Byte-identity proven** on real AAPL (bars 0 mismatches; splits equal) — every
+existing reader uses the head path (`known_by=None`), so no validated backtest
+number moved.
+
+## Adversarial-review defects — found AND fixed before commit
+
+A 6-lens hostile review with independent refute-verification (9 CONFIRMED, 4
+correctly REFUTED) caught four real defects in the first cut:
+1. **Corp-action corrections never reached the head** (DO NOTHING froze the first
+   value while the sidecar captured the correction) → the live/authoritative path
+   used the stale ratio and `known_by=now` diverged from head. **Fix:** the head
+   now `DO UPDATE`s on a real change, so it adopts corrections and as-of-now==head.
+2. **`set_knowledge_date` was wired only into the nightly ingest** → replay/
+   backfill/scorecard/analyze/dividends stamped the DB wall clock, breaking replay
+   determinism and invariant #6. **Fix:** wired into all six ingest entry points.
+3. **Dividends versioned but read from head** (`load_dividends_asof` was dead) →
+   the ADR-0009 total-return benchmark was not reproducible. **Fix:**
+   `load_adjusted_dividends(known_by=K)` composes the as-of reads.
+4. **Currency-only corrections silently dropped** (change-detection ignored
+   currency). **Fix:** currency added to the comparison.
+Each has a pinning regression test.
+
+## Honest residual (NOT fixed — stated plainly)
+
+- **Pre-versioning overwritten values are unrecoverable.** `DO UPDATE` kept no
+  copy; `ingested_at` was never refreshed on overwrite. So any bar silently
+  corrected BEFORE this cutover cannot have its prior value or revision time
+  recovered — the genesis pairs the CURRENT head value with the first-store
+  timestamp, and an intervening overwrite (no positive evidence any occurred, but
+  invisible by design) makes that pairing approximate. This is inherent data loss,
+  not a query gap; nothing is fabricated.
+- **FX (`fx_rates_daily`) versioning is deferred** (Principal scope). A
+  cross-currency / AUD-benchmark total-return run still reads FX from the head, so
+  its adjusted numbers are reproducible only up to FX. Documented fast-follow.
+- **Per-runner K-pinning is a mechanical follow-on.** The reproducibility
+  CAPABILITY + the composed loaders exist and are proven; threading `known_by=K`
+  through every backtest runner and pinning K in `quant.trial_registry` (so every
+  registered run auto-reproduces) is the remaining wiring — low-risk (`known_by=now`
+  default is byte-identical), not done this pass.
+
+**Does this unblock F-012?** Partially. F-012's revalidation now has a stable,
+versioned, immutable substrate to run against and can pin K; full end-to-end
+auto-reproducibility of every runner + FX is the remaining scope.

@@ -175,3 +175,32 @@ atlas_test: **pytest 1723 passed / 0 failed**, ruff clean, mypy clean (136 files
 verify-chain OK, cov-risk 100%. **Completion gate: Critical=0; High open = 2
 (F-007, F-012), both gated on unrecoverable overwritten history / its
 revalidation — the honest blockers named in ATLAS_FINAL_REMEDIATION_EVIDENCE.md.**
+
+### Round-7 update (P2.32) — F-007 versioned/bitemporal ingestion
+
+**F-007 → FIXED (core), residual data-blocked + scoped.** The Principal chose the
+full bitemporal scope (bars + corporate actions). An empirical check confirmed
+`upsert_bar`'s `ON CONFLICT DO UPDATE` genuinely overwrites in place (prior values
+gone — the honest residual). Built: migration **0040** (`price_bars_versions`,
+trigger-maintained, immutable, genesis @ ingested_at) + **0041**
+(`corporate_actions_versions`, append-on-change, immutable, genesis @ backfill
+epoch); as-of reads capping on knowledge_date≤K AND event-date≤t; injectable
+knowledge_date via a GUC set by every ingest path; `load_adjusted_obars(known_by)`
+/ `load_adjusted_dividends(known_by)` composition (None=head, byte-identical). The
+crown-jewel reproducibility test proves a pinned run reproduces byte-identically
+after a bar AND a split correction. 16 tests. A 6-lens adversarial review (9
+confirmed, 4 refuted) caught four real defects — head must adopt corrections;
+injectable knowledge_date on all ingest paths; dividend as-of; currency
+change-detection — all fixed with regression tests.
+
+**Residual (honestly not fixed):** pre-versioning overwritten values are
+unrecoverable (data-blocked); FX versioning + per-runner K-pinning are scoped
+follow-ons (Principal). F-012's revalidation now has a stable versioned substrate
+to run against but full auto-reproducibility of every runner + FX remains.
+
+**Running total: 23 High FIXED-or-core-fixed** + M31; F-001 (Critical)
+strengthened; F-005 PARTIAL; **1 High OPEN**: F-012 (rebalance-sell + full
+revalidation — a large empirical exercise, partially unblocked by F-007); plus
+the scoped residuals (F-002 dated change-history; F-007 FX + K-pinning). Gates on
+a fresh atlas_test: **pytest 1739 passed / 0 failed**, ruff clean, mypy clean (138
+files), verify-chain OK, cov-risk 100%.
