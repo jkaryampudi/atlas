@@ -204,3 +204,27 @@ revalidation — a large empirical exercise, partially unblocked by F-007); plus
 the scoped residuals (F-002 dated change-history; F-007 FX + K-pinning). Gates on
 a fresh atlas_test: **pytest 1739 passed / 0 failed**, ruff clean, mypy clean (138
 files), verify-chain OK, cov-risk 100%.
+
+### Round-8 update (P2.33) — F-012 monthly rebalance-sell
+
+**F-012 → FIXED.** Framing corrected first: the validated backtest already models
+monthly rebalance; only the DEPLOYED cycle lacked a rebalance-sell node, so
+Option 1 (register's first recommendation) — add the node to match the
+already-validated construct — needs a deployment turnover test, NOT a fresh
+validation (that was Option 2's cost, wrongly attributed to F-012 before). Built
+`scan_rebalance_exits` (`exits.py`) + node `t6d_rebalance` (daily.py): on a
+rebalance session it pre-authorizes a full-qty SELL (order_type='rebalance',
+next-open fill) for every held momentum-sleeve name that dropped out of the top-5
+winners. No-op on non-rebalance days + under research_shadow (no capital
+re-enabled). A 6-lens adversarial review (2 confirmed of 4) caught a HIGH
+settlement-wedge (an EXIT proposal in flight + a rebalance sell → double-sell →
+cycle rollback) and a MEDIUM co-mingled over-sell — both fixed (guard mirrors
+close_position; sell only purely-momentum positions) with regression tests. 8
+tests. The backtest is untouched; no validated number moved.
+
+**Running total: 24 High FIXED-or-core-fixed** + M31; F-001 (Critical)
+strengthened; F-005 PARTIAL. **0 High fully OPEN.** Remaining items are scoped
+RESIDUALS, not open findings: F-002 dated identity change-history (vendor
+decision), F-007 FX versioning + per-runner K-pinning (Principal scope), and
+finishing F-005 (DSR dispersion threading). Gates on a fresh atlas_test: ruff
+clean, mypy clean (138 files), verify-chain OK, cov-risk 100%.

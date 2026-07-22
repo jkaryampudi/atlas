@@ -109,9 +109,10 @@ file or any transcript.
 ---
 
 ## Still-open findings needing engineering (not operator actions)
-F-012 (rebalance-sell + full revalidation — a large empirical exercise, partially
-unblocked by F-007's versioned substrate) and finishing F-005 (DSR dispersion
-threading). **Now fixed since this list was last written:** F-002 (core; residual
+Finishing F-005 (DSR dispersion threading) is the only remaining engineering
+increment. F-012 (monthly rebalance-sell) is FIXED — the deployed cycle now has a
+`t6d_rebalance` node matching the validated construct (dormant/no-op while
+xsmom-pit-tr is research_shadow; correct on re-promotion). **Now fixed since this list was last written:** F-002 (core; residual
 is the vendor decision in §6), F-006, F-007 (core; §7 scoped follow-ons), F-009,
 F-010, F-019, F-020, F-025. See `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the
 current per-finding status.

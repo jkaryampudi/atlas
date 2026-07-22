@@ -23,7 +23,7 @@ were deliberately not rushed into capital-adjacent infrastructure.
 | F-009 | High | **FIXED** | split_basis_asof anchor (migration 0038) + look-ahead-safe read-side re-basing (`earnings_basis.py`) reconciles a mixed-basis store to one basis at the read horizon; per-share DIVIDE, no double-adjust; 10 tests incl. the split-after-ingest bar; strict no-op on the single-fetch panel (no golden churn); zero confirmed adversarial-review findings |
 | F-010 | High | **FIXED** | cross-currency fcf_yield fails closed (`test_health_score_currency`); broader ADR field-model is a follow-up |
 | F-011 | High | **FIXED** | §12 momentum overlay restored (`test_momentum_overlay_fires_pg`) |
-| F-012 | High | **OPEN** | monthly rebalance-sell — strategy behaviour change requiring full re-validation |
+| F-012 | High | **FIXED** | monthly rebalance-SELL node (`scan_rebalance_exits` in `exits.py`, wired as `t6d_rebalance` in daily.py) sells every held momentum-sleeve name that dropped out of the current winner set — aligning the DEPLOYED sell cadence to the ALREADY-VALIDATED construct (`weights=dict(pending)`). No strategy revalidation (the backtest is unchanged); the register's bar is a cycle turnover test. Pre-authorized (reuses entry approval), full-qty, order_type='rebalance', next-open fill; no-op on non-rebalance days + under research_shadow; 6 tests. **Framing corrected:** the earlier "full re-validation, gated on F-002/F-007" was the cost of Option 2 (revalidate a different construct), not Option 1 (add the node) — see below |
 | F-013 | High | **FIXED** | secret redaction, canary-tested; + operator key rotation |
 | F-014 | High | **FIXED** | split-factor validation; invalid ratios quarantined (`test_split_factor_validation`) |
 | F-015 | High | **FIXED** | nightly dividend refresh (`test_dividend_nightly_refresh_pg`) |
@@ -310,3 +310,66 @@ Each has a pinning regression test.
 **Does this unblock F-012?** Partially. F-012's revalidation now has a stable,
 versioned, immutable substrate to run against and can pin K; full end-to-end
 auto-reproducibility of every runner + FX is the remaining scope.
+
+---
+
+# Round-8 additions (F-012 monthly rebalance-sell) — **FIXED**
+
+**Framing correction (important).** Earlier rounds labelled F-012 "strategy
+behaviour change requiring full re-validation... gated on F-002/F-007." An
+empirical read corrected that: the VALIDATED backtest (xsmom_pit_run.py) ALREADY
+models the monthly rebalance (`weights = dict(pending)` fully exits every name
+that drops out of the winner set); it is the DEPLOYED daily cycle that diverges by
+having no rebalance-sell node (only ATR stops + human close). So the register's
+Option 1 — "add a monthly rebalance-sell node matching the validated cadence" —
+aligns deployment to the ALREADY-validated construct, introduces NO new strategy
+math, and needs a deployment-behaviour test (the register's "cycle test asserting
+monthly turnover"), NOT a fresh statistical validation. The "full re-validation,
+gated on F-002/F-007" was the cost of Option 2 (revalidate a DIFFERENT construct,
+buy-and-hold-with-stops), which we did not take. The backtest is untouched; no
+validated number moved.
+
+**What was built:** `scan_rebalance_exits(session, clock)` in
+`atlas/dcp/trading/exits.py`, wired as node `t6d_rebalance` in `daily.py` (after
+t6c, fail-soft). On a rebalance session it sells — pre-authorized under the
+position's entry approval (a sell RELEASES risk, so no buy-side L1-L11), full
+quantity, `order_type='rebalance'`, next-open fill via the unchanged
+settle_orders — every held momentum-sleeve name that dropped out of the current
+top-SLEEVE_MAX_NAMES(5) winner set. Cadence-gated on "signals formed this
+session" → a no-op on non-rebalance days (monthly turnover) and a **pure no-op
+under research_shadow** (no paper/live strategy → no signals + the momentum
+attribution join requires paper/live state → no held sleeve → no capital
+re-enabled). Verified: settle_orders fills the pending_submit rebalance sell; the
+re-entry cooling guard is `order_type='stop'`-only, so a rebalance-sold name
+re-enters next month freely (matching the construct).
+
+**Adversarial-review defects — found AND fixed (2 confirmed of 4 candidates; the
+other 2 refuted as pre-existing / unreachable):**
+1. **HIGH — settlement wedge.** The in-flight guard checked only for a sell
+   ORDER, missing a human EXIT proposal in `pending_approval`/`approved` with no
+   order yet. A deferred rebalance sell + a later-approved close would mint two
+   sells of the same shares; the second raises in `settle_orders`, rolling back
+   the whole nightly cycle every run (a permanent wedge, and stops stop firing).
+   **Fix:** the guard now mirrors `close_position` — skip a name with EITHER a
+   live sell order OR a live EXIT proposal.
+2. **MEDIUM — co-mingled over-sell.** A position merging a momentum lot and a
+   non-momentum lot (ADR-0014 one-row-per-instrument) was full-qty sold,
+   over-liquidating non-sleeve shares. **Fix:** the held query now requires EVERY
+   open lot be momentum-attributed; a co-mingled position is left for the
+   human/stop path (never partially/wrongly sold).
+Each has a pinning regression test. 8 tests total.
+
+**Honest residual (documented, not a new gap):** the deployed sleeve holds the
+top-5 by rank while the validated construct holds the full winner decile — so a
+name at decile rank 6-10 is rotated out in deployment but held in the backtest.
+This is the PRE-EXISTING SLEEVE_MAX_NAMES=5 live cap (Principal 2026-07-16), not
+introduced by F-012, which is scoped to the sell-side cadence. Delisted-name
+liquidation (`_liquidate_dead`) also has no deployed analogue — orthogonal to
+F-012 and pre-existing.
+
+**Running total (Round-8): F-012 FIXED** → **24 High fixed-or-core-fixed** + M31;
+F-001 (Critical) strengthened; F-005 PARTIAL. **0 High fully OPEN** — the only
+remaining items are scoped RESIDUALS: F-002 dated identity change-history (vendor
+decision), F-007 FX versioning + per-runner K-pinning (Principal scope), and
+finishing F-005 (DSR dispersion threading). Gates on a fresh atlas_test: ruff
+clean, mypy clean, verify-chain OK, cov-risk 100%.
