@@ -91,7 +91,9 @@ def limit_set_current() -> dict[str, object]:
     return {"seeded": True,
             "version": row["version"], "mode": row["mode"],
             "effective_from": eff.isoformat(),
-            "active": eff <= date.today(),
+            # M48: the "active as of today" decision flows through the injectable
+            # clock seam (like preflight/correlations), not a raw date.today().
+            "active": eff <= _clock().now().date(),
             "created_by": row["created_by"],
             "register": register}
 

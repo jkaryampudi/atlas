@@ -2,7 +2,10 @@
 name = "atlas"
 version = "0.1.0"
 description = "Atlas AI Capital — AI investment operating system (Phase 1 foundation)"
-requires-python = ">=3.12"
+# M49 (reproducibility substrate): the declared floor matches the ACTUAL tested
+# interpreter (was ">=3.12" while the runtime is 3.14.4 — a reproducibility gap).
+# The exact patch is pinned in .python-version (3.14.4) for hermetic reproduction.
+requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.8",
@@ -36,7 +39,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"   # M49: match the pinned runtime + requires-python
 strict = true
 files = ["atlas/core", "atlas/dcp", "atlas/fxlab"]
 

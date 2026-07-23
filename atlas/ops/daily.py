@@ -161,11 +161,14 @@ from atlas.ops.cycle_ledger import (
 from atlas.tools.verify_chain import run as verify_chain
 
 
-def _emit(node: str, status: str, result: str | None = None) -> None:
-    """One machine-readable progress line per node transition."""
+def _emit(node: str, status: str, result: str | None = None, *,
+          clock: Clock) -> None:
+    """One machine-readable progress line per node transition. The `at` stamp
+    flows from the cycle's injected clock (M48), so a `--now` replay emits a
+    fully deterministic stream — not the wall clock."""
     print("@@CYCLE " + json.dumps(
         {"node": node, "status": status, "result": result,
-         "at": datetime.now(UTC).isoformat()}), flush=True, file=sys.stdout)
+         "at": clock.now().isoformat()}), flush=True, file=sys.stdout)
 
 
 # Session-close guard (production defect 2026-07-13): a console "Run Cycle
@@ -334,7 +337,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
     # consume the one-per-date checkpoint exactly like the 2026-07-13 defect
     refusal = cycle_refusal(clock)
     if refusal is not None:
-        _emit("guard", "refused", refusal)
+        _emit("guard", "refused", refusal, clock=clock)
         raise CycleRefusedError(refusal)
     day = clock.now().date().isoformat()
     state: dict[str, object] = {}
@@ -668,13 +671,13 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         is how the console animates the cycle in real time (the scheduler
         captures it; a plain CLI run just prints it)."""
         def wrapped():
-            _emit(name, "running")
+            _emit(name, "running", clock=clock)
             try:
                 result = fn()
             except Exception as e:
-                _emit(name, "failed", str(e)[:200])
+                _emit(name, "failed", str(e)[:200], clock=clock)
                 raise
-            _emit(name, "done", result)
+            _emit(name, "done", result, clock=clock)
             return result
         return wrapped
 
@@ -755,7 +758,7 @@ def main() -> None:
     # in-cycle guard does, so the console still shows the refusal reason.
     refusal = cycle_refusal(clock)
     if refusal is not None:
-        _emit("guard", "refused", refusal)
+        _emit("guard", "refused", refusal, clock=clock)
         print(f"REFUSED: {refusal}")
         raise SystemExit(EXIT_REFUSED)
 

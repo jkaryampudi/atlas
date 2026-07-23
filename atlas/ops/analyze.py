@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 
 from atlas.agents.desk import DeskReport, run_desk
 from atlas.agents.runtime.runner import budget_surface
-from atlas.core.clock import SystemClock
+from atlas.core.clock import Clock, SystemClock
 from atlas.core.config import get_settings
 from atlas.core.db import session_scope
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
@@ -181,8 +181,10 @@ def _interpret(report: DeskReport) -> tuple[dict[str, object], str]:
     return ({"outcome": "none"}, "desk produced no outcome for the symbol")
 
 
-def _run_analysis(symbol: str, source: str | None) -> None:
-    now = datetime.now(UTC)
+def _run_analysis(symbol: str, source: str | None, clock: Clock) -> None:
+    now = clock.now()               # M48: injected — this `now` sets the fetch
+    #        window and the atlas.knowledge_date version stamp (F-007) + the
+    #        fundamentals as_of, so it must be replayable, not the wall clock.
     with session_scope() as s:
         iid, exchange, market, known = _resolve_instrument(s, symbol)
         adapter = _build_adapter(symbol, exchange)
@@ -199,7 +201,7 @@ def _run_analysis(symbol: str, source: str | None) -> None:
             # never starve the nightly desk — precedence and watermark
             # semantics documented in atlas/agents/runtime/runner.py.
             with budget_surface("analyze"):
-                report = run_desk(s, SystemClock(), [symbol], source=source)
+                report = run_desk(s, clock, [symbol], source=source)
         except Exception:
             # failed runs' cost + audit trail must persist — the budget
             # breaker counts them (live_run.py precedent); a rollback here
@@ -207,27 +209,30 @@ def _run_analysis(symbol: str, source: str | None) -> None:
             s.commit()
             raise
     result, detail = _interpret(report)
-    _status.update(phase="done", finished_at=datetime.now(UTC).isoformat(),
+    _status.update(phase="done", finished_at=clock.now().isoformat(),
                    result=result, detail=detail)
 
 
-def start_analysis(symbol: str, source: str | None) -> bool:
+def start_analysis(symbol: str, source: str | None, *,
+                   clock: Clock | None = None) -> bool:
     """Console trigger. Returns False when an analysis is already running —
     one at a time; the caller reports 'busy' honestly, nothing runs twice.
     `symbol` is expected upcased/validated by the API layer; `source` is
-    stored verbatim (it never enters a prompt — see cio.py)."""
+    stored verbatim (it never enters a prompt — see cio.py). `clock` defaults
+    to the real SystemClock; tests inject a FrozenClock for determinism (M48)."""
     if not _analysis_lock.acquire(blocking=False):
         return False
+    clk = clock if clock is not None else SystemClock()
     _status.update(phase="fetching", symbol=symbol, source=source,
-                   started_at=datetime.now(UTC).isoformat(), finished_at=None,
+                   started_at=clk.now().isoformat(), finished_at=None,
                    detail="fetching data (bars + fundamentals)", result=None)
 
     def _target() -> None:
         try:
-            _run_analysis(symbol, source)
+            _run_analysis(symbol, source, clk)
         except Exception as e:  # noqa: BLE001 — the ops layer survives anything
             _status.update(phase="failed",
-                           finished_at=datetime.now(UTC).isoformat(),
+                           finished_at=clk.now().isoformat(),
                            detail=str(e)[:300])
         finally:
             _analysis_lock.release()

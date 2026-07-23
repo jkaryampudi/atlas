@@ -28,7 +28,7 @@ import argparse
 import json
 import threading
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import text
@@ -94,7 +94,9 @@ def ingest_picks(session: Session, clock: Clock, *, source: str,
     One transaction owns the batch (the caller's session_scope commits it).
     Data prep per ticker mirrors the analyze path exactly."""
     results: list[PickResult] = []
-    now = datetime.now(UTC)
+    now = clock.now()               # M48: the injected clock, not the wall clock —
+    #        this `now` stamps atlas.knowledge_date on every ingested bar/split
+    #        (F-007) and the fundamentals as_of; it must be replayable.
     for raw in tickers:
         ticker = raw.strip().upper()
         if not ticker:
@@ -140,16 +142,16 @@ _ingest_status: dict[str, object] = {
 
 
 def _run_ingest_job(source: str, recommendation_date: date,
-                    tickers: list[str], run_desk: bool) -> None:
+                    tickers: list[str], run_desk: bool, clock: Clock) -> None:
     with session_scope() as s:
-        results = ingest_picks(s, SystemClock(), source=source,
+        results = ingest_picks(s, clock, source=source,
                                recommendation_date=recommendation_date,
                                tickers=tickers, run_desk=run_desk)
     rec = sum(1 for r in results if r.outcome == "recorded")
     dup = sum(1 for r in results if r.outcome == "duplicate")
     nod = sum(1 for r in results if r.outcome == "no-data")
     _ingest_status.update(
-        phase="done", finished_at=datetime.now(UTC).isoformat(),
+        phase="done", finished_at=clock.now().isoformat(),
         detail=f"recorded {rec}, duplicate {dup}, no-data {nod}",
         result={"recorded": rec, "duplicate": dup, "no_data": nod,
                 "rows": [{"ticker": r.ticker, "outcome": r.outcome,
@@ -157,25 +159,28 @@ def _run_ingest_job(source: str, recommendation_date: date,
 
 
 def start_ingest_job(source: str, recommendation_date: date,
-                     tickers: list[str], run_desk: bool = False) -> bool:
+                     tickers: list[str], run_desk: bool = False, *,
+                     clock: Clock | None = None) -> bool:
     """Console trigger. Returns False when an ingest is already running — one
     at a time; the caller reports 'busy' honestly, nothing runs twice (same
-    contract as analyze/run-daily). Inputs are validated by the API layer."""
+    contract as analyze/run-daily). Inputs are validated by the API layer.
+    `clock` defaults to SystemClock; tests inject FrozenClock (M48)."""
     if not _ingest_lock.acquire(blocking=False):
         return False
+    clk = clock if clock is not None else SystemClock()
     _ingest_status.update(
         phase="ingesting", source=source, date=recommendation_date.isoformat(),
-        n_tickers=len(tickers), started_at=datetime.now(UTC).isoformat(),
+        n_tickers=len(tickers), started_at=clk.now().isoformat(),
         finished_at=None, result=None,
         detail=f"fetching data + snapshotting features for {len(tickers)} pick(s)"
                + (" + running the committee" if run_desk else ""))
 
     def _target() -> None:
         try:
-            _run_ingest_job(source, recommendation_date, tickers, run_desk)
+            _run_ingest_job(source, recommendation_date, tickers, run_desk, clk)
         except Exception as e:  # noqa: BLE001 — the ops layer survives anything
             _ingest_status.update(phase="failed",
-                                  finished_at=datetime.now(UTC).isoformat(),
+                                  finished_at=clk.now().isoformat(),
                                   detail=str(e)[:300])
         finally:
             _ingest_lock.release()
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     if not a.source:
         p.error("--source is required (unless --grade)")
     rec_date = (datetime.strptime(a.date, "%Y-%m-%d").date() if a.date
-                else datetime.now(UTC).date())
+                else clock.now().date())          # M48: the constructed clock
     tickers: list[str] = []
     if a.tickers:
         tickers += a.tickers.split(",")

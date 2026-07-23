@@ -282,3 +282,39 @@ and near-boundary integration test; the sell-glitch concern was REFUTED (separat
 scoped to ingest price-sanity, not M35's capital-deployment scope). Residual (noted,
 not code): the collar is a code constant that should graduate into the governed
 `limit_set` (M38). Gates: **1761 passed**, ruff clean, mypy clean.
+
+### Round-11 update (P2.36) — P1.4 reproducibility substrate (M47 / M48 / M49)
+
+The roadmap's **P1.4** tier, closing the last open P1 item. Three findings:
+- **M47 → FIXED.** Added a dependency lockfile (`uv.lock`, 79 packages pinned with
+  sha256 hashes, `uv lock --check` passes) — dependency versions are now
+  reproducible, not floor ranges.
+- **M49 → FIXED.** Pinned the interpreter and made every reference consistent
+  (was: runtime 3.14.4 vs a `>=3.12` declaration — the reproducibility gap):
+  new `.python-version` = 3.14.4 (exact-patch hermetic anchor), `requires-python`
+  `>=3.12`→`>=3.14`, and — surfaced by the adversarial review's own bar and fixed —
+  the `Dockerfile` base (`python:3.12`→`3.14`), CI `setup-python` (3.12→3.14), and
+  the mypy target (3.12→3.14). Without those three, CI and the Docker build would
+  have failed pip's `requires-python` check.
+- **M48 → FIXED.** Invariant-6 (all timestamps via `atlas.core.clock`, never
+  `datetime.now()`) now has (a) an **AST conformance test**
+  (`tests/unit/test_injectable_time.py`) that fails on any raw wall-clock read
+  under `atlas/` outside the one allowlisted file `atlas/core/clock.py`, and
+  (b) every one of the ~30 raw calls routed through the `Clock` seam. The
+  PERSISTED/DECISION sites (the `atlas.knowledge_date` version stamp feeding F-007,
+  the persisted `source_picks.recommendation_date`, the screen's PIT `as_of`, the
+  "active as of today" limit-set decision) use an **injected** clock (threaded
+  through `start_analysis`/`start_screen`/`start_snapshot`/ingest, or the existing
+  `_clock()` seams); observability status timestamps + the scheduler cron boundary
+  go through a module-level `SystemClock` seam. A 10-agent adversarial review found
+  **2 MEDIUM AST-soundness gaps** (the guard missed module-qualified
+  `datetime.datetime.now()` and aliased `from datetime import datetime as dt`) —
+  BOTH FIXED by rewriting the matcher to resolve import aliases, with a self-test
+  asserting all 8 evasion spellings are caught and the 5 safe seams are not; the
+  3 pin-and-lock candidates were already fixed (the 3.14 alignment above) and
+  REFUTED on the live tree; behavior-preservation / missed-violation /
+  concurrency-clock lenses were clean.
+
+**Running total:** ALL 24 High + F-001 (Critical) resolved in code; MEDIUM tier in
+progress — **M31, M35, M47, M48, M49 FIXED**; M56 found already-fixed. Gates:
+**1764 passed**, ruff clean, mypy clean (strict, 3.14 target).
