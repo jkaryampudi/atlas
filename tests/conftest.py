@@ -95,15 +95,23 @@ def pytest_configure(config: pytest.Config) -> None:
             "deliberate unit-only run.")
 
 
+# Postgres caps a table at 1600 columns FOR ITS LIFETIME — a dropped column keeps
+# its slot (pg_attribute row, attisdropped) counting forever until a table rewrite.
+# The migration-cycle tests do downgrade->upgrade, adding a fresh slot each run, and
+# that pressure accumulates ACROSS runs on the shared atlas_test. Rebuild fresh well
+# before the cap so a full run can never die mid-suite with TooManyColumns (P7/P8).
+_COLUMN_PRESSURE_LIMIT = 1200
+
+
 def _ensure_test_db() -> None:
-    """Create atlas_test if missing and migrate it to head. Runs once per
-    session. SELF-HEALING: the migration-cycle tests burn Postgres's per-table
-    lifetime column budget a little every run (each downgrade/upgrade re-adds
-    columns, and dropped-column slots are never reclaimed — the 1600 limit
-    counts them forever), so after enough full-suite runs an upgrade dies with
-    TooManyColumns mid-flight. The test DB is disposable by design: on ANY
-    upgrade failure, drop it, recreate it, and migrate once from scratch —
-    a corrupted bootstrap must never require a human to remember the DROP."""
+    """Create atlas_test if missing and migrate it to head. Runs once per session.
+    SELF-HEALING, two ways, so a full-suite run is reliable from ANY accumulated
+    state with NO human DROP:
+      * PROACTIVE (P7/P8): if a prior run's migration-cycle tests have pushed any
+        table near the 1600-column lifetime cap, drop+recreate BEFORE this run —
+        the rot can no longer surface as a mid-suite TooManyColumns cascade.
+      * REACTIVE (backstop): on any upgrade failure (e.g. a bootstrap stranded at
+        an old revision), drop, recreate, and migrate once from scratch."""
     global _prepared
     if _prepared:
         return
@@ -120,14 +128,7 @@ def _ensure_test_db() -> None:
         finally:
             admin.dispose()
 
-    def _upgrade() -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "ATLAS_DATABASE_URL": URL}
-        return subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
-                              capture_output=True, text=True)
-
-    _create_if_missing()
-    r = _upgrade()
-    if r.returncode != 0:
+    def _drop() -> None:
         admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
         try:
             with admin.connect() as c:
@@ -135,6 +136,38 @@ def _ensure_test_db() -> None:
                                f"WITH (FORCE)"))
         finally:
             admin.dispose()
+
+    def _column_pressure() -> int:
+        """Worst-case per-table pg_attribute count (dropped slots included, since
+        they still count toward the 1600 cap), or 0 if the DB is fresh/unreadable."""
+        eng = create_engine(URL, isolation_level="AUTOCOMMIT")
+        try:
+            with eng.connect() as c:
+                return int(c.execute(text(
+                    "SELECT COALESCE(max(cnt), 0) FROM ("
+                    "  SELECT count(*) AS cnt FROM pg_attribute a "
+                    "  JOIN pg_class c ON c.oid = a.attrelid "
+                    "  JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "  WHERE c.relkind = 'r' AND a.attnum > 0 "
+                    "    AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                    "  GROUP BY a.attrelid) t")).scalar() or 0)
+        except Exception:
+            return 0
+        finally:
+            eng.dispose()
+
+    def _upgrade() -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "ATLAS_DATABASE_URL": URL}
+        return subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
+                              capture_output=True, text=True)
+
+    _create_if_missing()
+    if _column_pressure() > _COLUMN_PRESSURE_LIMIT:      # proactive hermetic rebuild
+        _drop()
+        _create_if_missing()
+    r = _upgrade()
+    if r.returncode != 0:                                # reactive backstop
+        _drop()
         _create_if_missing()
         r = _upgrade()
         if r.returncode != 0:

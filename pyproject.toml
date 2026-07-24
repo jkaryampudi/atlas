@@ -2,10 +2,12 @@
 name = "atlas"
 version = "0.1.0"
 description = "Atlas AI Capital — AI investment operating system (Phase 1 foundation)"
-# M49 (reproducibility substrate): the declared floor matches the ACTUAL tested
-# interpreter (was ">=3.12" while the runtime is 3.14.4 — a reproducibility gap).
-# The exact patch is pinned in .python-version (3.14.4) for hermetic reproduction.
-requires-python = ">=3.14"
+# M49 (reproducibility substrate): the SUPPORTED floor is 3.12 — atlas/ compiles
+# clean on 3.12.13 and doctor.py gates on >= (3,12), so the code does not require
+# 3.14 and the range must not be narrowed to it. Reproduction pins the exact
+# DEV/CI interpreter separately in .python-version (3.14.4) — pinning the runtime,
+# not the compatibility contract (hostile-review of fbbd199, P1).
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.8",
@@ -39,7 +41,8 @@ line-length = 100
 target-version = "py312"
 
 [tool.mypy]
-python_version = "3.14"   # M49: match the pinned runtime + requires-python
+python_version = "3.12"   # type-check against the SUPPORTED floor (P1), so code
+                          # that would break the 3.12 minimum is caught
 strict = true
 files = ["atlas/core", "atlas/dcp", "atlas/fxlab"]
 

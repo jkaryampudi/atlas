@@ -123,7 +123,7 @@ def ingest_picks(session: Session, clock: Clock, *, source: str,
             continue
         detail = f"as_of {as_of}; {prep}"
         if run_desk:
-            detail += "; " + _run_desk_for(session, ticker, source)
+            detail += "; " + _run_desk_for(session, clock, ticker, source)
         results.append(PickResult(ticker, "recorded", detail))
     return results
 
@@ -198,15 +198,17 @@ def ingest_status() -> dict[str, object]:
     return out
 
 
-def _run_desk_for(session: Session, ticker: str, source: str) -> str:
+def _run_desk_for(session: Session, clock: Clock, ticker: str, source: str) -> str:
     """Optional committee enrichment: a real, evidence-grounded, source-tagged
     memo (Atlas's own view of the pick), under the analyze budget surface.
-    Deferred import keeps the DCP-only core free of the agents package."""
+    Deferred import keeps the DCP-only core free of the agents package. Uses the
+    caller's INJECTED clock (M48/P5 fix) — the memo's created_at + audit events
+    must share the ingest run's clock, not a fresh wall-clock SystemClock()."""
     from atlas.agents.desk import run_desk
     from atlas.agents.runtime.runner import budget_surface
     try:
         with budget_surface("analyze"):
-            report = run_desk(session, SystemClock(), [ticker], source=source)
+            report = run_desk(session, clock, [ticker], source=source)
     except Exception as e:  # noqa: BLE001 — budget/desk failure never fails the record
         return f"desk error: {str(e)[:80]}"
     if report.memos:

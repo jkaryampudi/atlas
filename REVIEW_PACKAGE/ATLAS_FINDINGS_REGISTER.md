@@ -318,3 +318,30 @@ The roadmap's **P1.4** tier, closing the last open P1 item. Three findings:
 **Running total:** ALL 24 High + F-001 (Critical) resolved in code; MEDIUM tier in
 progress — **M31, M35, M47, M48, M49 FIXED**; M56 found already-fixed. Gates:
 **1764 passed**, ruff clean, mypy clean (strict, 3.14 target).
+
+### Round-12 update (P2.37) — hostile review of fbbd199 (corrects Round-11)
+
+A focused hostile review of the Round-11 commit (`REVIEW_PACKAGE/ATLAS_FBBD199_HOSTILE_REVIEW.md`)
+found that Round-11 **over-reached and overstated**, and fixed it:
+- **P1 (High regression) — `requires-python` reverted `>=3.14` → `>=3.12`.** `atlas/` compiles clean
+  on CPython 3.12.13 and `doctor.py` gates on `>= (3,12)`; the code does NOT require 3.14, so the
+  narrowing was gratuitous. The 3.14.4 **runtime** stays pinned for reproduction (`.python-version`,
+  CI `setup-uv`); the compat contract does not. `uv.lock` re-resolved under `>=3.12`. Docker base +
+  mypy target reverted to the 3.12 floor.
+- **P5 (Medium) — `ingest_picks._run_desk_for` fixed.** It built a fresh `SystemClock()`, so an
+  ingest-with-desk run stamped the memo/audit off wall-clock while its `source_picks`/`knowledge_date`
+  rows used the injected clock — a real miss of the "all reads" claim. Now threads the injected clock.
+- **P3 (Medium) — `uv.lock` wired into CI.** It was valid but unused (`pip install -e`); CI now runs
+  `uv lock --check` + `uv sync --locked` so the lock is load-bearing.
+- **P7/P8 (verification reliability) — conftest now rebuilds `atlas_test` proactively** when a table
+  nears Postgres's 1600-column lifetime cap, so the migration-cycle "column-budget rot" can no longer
+  produce a mid-suite `TooManyColumns` cascade. Proven: a seeded 1300-col table triggers an unattended
+  rebuild; the full suite passes from an ABSENT database with **no manual `DROP`** (`1764 passed`,
+  exit 0). (Round-11's "1764 passed" had required a manual `DROP` — now it does not.)
+- **Claim corrected:** invariant-6 / the AST guard covers **Python** `datetime.now()`/`date.today()`,
+  NOT SQL `now()`/`CURRENT_DATE`. The make-replay deterministic spine is clean (independently traced);
+  the desk-budget `CURRENT_DATE` + `agent_runs.created_at DEFAULT now()` DB-clock reads are
+  pre-existing and confined to the non-deterministic desk subsystem (outside the replay envelope).
+
+Gates after the review fixes: **1764 passed from a clean DB unattended**, ruff clean, mypy clean
+(**3.12** target, 138 files), `uv lock --check` clean.

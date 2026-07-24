@@ -12,7 +12,22 @@ evasions (adversarial review, this cycle): the aliased form
 ``import datetime; datetime.datetime.now()`` are BOTH caught, not only the
 ``from datetime import datetime`` spelling the codebase happens to use. A
 ``clock.now()`` / ``SystemClock().now()`` / ``_WALL.now()`` call is not flagged —
-its receiver does not resolve to the ``datetime``/``date``/``time`` stdlib."""
+its receiver does not resolve to the ``datetime``/``date``/``time`` stdlib.
+
+HONEST SCOPE (what this static guard does NOT catch — hostile-review of fbbd199):
+  * Dynamic access — ``getattr(datetime, 'now')()`` or ``eval('datetime.now()')`` —
+    is unreachable by any static AST walk. Not idiomatic here; a human review
+    backstops it. (An indirect *wrapper* — a helper whose body calls
+    ``datetime.now()`` — IS caught: the raw call in the wrapper's own module fails
+    the guard.)
+  * SQL server-clock — ``now()`` / ``CURRENT_DATE`` inside a SQL string — is not
+    Python and is invisible here. Those are a SEPARATE reproducibility surface:
+    the deterministic replay spine avoids them (the bitemporal triggers read the
+    injected ``atlas.knowledge_date`` GUC, set at t0), but the desk-budget
+    accounting (``agents/runtime/budget.py`` ``CURRENT_DATE`` +
+    ``research.agent_runs.created_at DEFAULT now()``) still reads the DB clock —
+    a pre-existing hole confined to the non-deterministic desk/LLM subsystem,
+    outside make-replay's gate=green envelope. Tracked separately, not by invariant 6."""
 from __future__ import annotations
 
 import ast
