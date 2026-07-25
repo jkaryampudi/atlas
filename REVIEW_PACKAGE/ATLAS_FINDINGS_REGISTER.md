@@ -344,4 +344,56 @@ found that Round-11 **over-reached and overstated**, and fixed it:
   pre-existing and confined to the non-deterministic desk subsystem (outside the replay envelope).
 
 Gates after the review fixes: **1764 passed from a clean DB unattended**, ruff clean, mypy clean
+
+### Round-13 update (P2.38) — hostile RE-VERIFICATION of the 11 Critical/High findings
+
+Because Round-11's "FIXED" label hid a real over-reach + a missed wall-clock read,
+the 11 Critical/High findings were re-verified adversarially against CURRENT code
+(each verdict requires file:line evidence + a regression test that fails pre-fix;
+every "closed" claim was re-attacked by a second skeptic). **The result vindicated
+the skepticism: 5 were genuinely closed, but 5 HIGH + 1 Medium had real code gaps
+behind their "FIXED" labels — in every case a mechanism (a column, an epoch, a
+resolver library, a convert/fail-closed pattern) had been added but the ENFORCEMENT
+was never wired into the write / decision path.** All six are now genuinely closed:
+
+- **F-002 (HIGH)** — the issuer-identity system was a PASSIVE resolver; the ingest
+  write path had no check, and refresh_identity silently overwrote the OPEN row's
+  ISIN on a reassignment (keeping the old valid_from → actively mis-vouched the
+  wrong issuer). FIXED: refresh_identity VERSIONS on an identity break (close old,
+  open new; old era keeps the old issuer); the daily reconciliation now BREAKS on a
+  held position whose ticker was reassigned since open (held_position_issuer_drifted,
+  no new column — uses the versioned history vs opened_at). Commit 50e1e14.
+- **F-006 (HIGH)** — attribution.py was converted to AUD but the demotion band still
+  differenced an AUD sleeve return vs a USD SPY TR, so FX drift alone could trip the
+  −25pp demotion. FIXED: _spy_tr_close returns the benchmark in AUD; a flat-USD-vs-
+  flat-USD test with moving FX now shows ~0 excess. Commit d416ac2.
+- **F-010 (HIGH)** — health_score fail-closed on cross-currency but valuation_models
+  still divided EUR statements by a USD price for every non-USD ADR. FIXED:
+  compute_valuation fails closed (None fair value/upside/verdict + note) on a
+  reporting-vs-listing currency mismatch. Commit d416ac2.
+- **F-019 (HIGH)** — epoch-2 hashing bound identity for NEW events only; LEGACY
+  hash_version=1 rows verified under a formula omitting entity/actor, so their
+  identity was tamperable. FIXED (migration 0042): audit.decision_events is
+  append-only at the DB (UPDATE/DELETE refused unconditionally) — the tamper is
+  PREVENTED, not just detected. Commit b000b57.
+- **F-020 (HIGH)** — the anchor self-healed (event_count = count(*) on append) and
+  the chain_head guard was GUC-gated (any writer can set the GUC). FIXED
+  (migration 0042 + audit_repo): monotonic +1 event_count; the chain_head guard
+  refuses any decrease and any delete EVEN with the GUC; tail/interior deletion is
+  now impossible via the append-only guard. Commit b000b57.
+- **F-001 (Medium→closed code residual)** — straddling series were admitted WHOLE,
+  so a departed member could be marked on post-removal bars. FIXED: clip bars
+  strictly after end_date (delisting-aware engine liquidates at removal); pre-index
+  formation bars stay (the genuine F-002-data-blocked residual). Commit 8949901.
+
+Documented DATA/vendor-blocked residuals that remain (NOT open code gaps): F-002
+physical series-split + dated symbol-change history (vendor feed); F-007 pre-cutover
+overwritten bars + FX versioning (Principal); F-019/F-020 external WORM/signed anchor
+(infra). Each is disclosed in ATLAS_FINAL_REMEDIATION_EVIDENCE.md.
+
+**Running total:** F-005/F-007/F-009/F-012/F-025 confirmed genuinely closed;
+F-001/F-002/F-006/F-010/F-019/F-020 NOW genuinely closed (were partial). Every
+Critical/High finding is closed in code with a pre-fix-failing regression test.
+Gates: **1773 passed from a clean DB unattended**, ruff clean, mypy clean (138
+files), migration 0042 round-trips.
 (**3.12** target, 138 files), `uv lock --check` clean.
