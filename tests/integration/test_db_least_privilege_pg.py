@@ -14,10 +14,15 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
+from atlas.core.audit_repo import PostgresAuditLog
+from atlas.core.clock import FrozenClock
 from atlas.core.db_privilege import (
+    assert_audit_wall_enforced,
     assert_least_privilege_runtime,
+    audit_triggers_always_enabled,
     runtime_privilege,
 )
+from datetime import UTC, datetime
 from tests.conftest import URL, _ensure_test_db, requires_pg
 
 pytestmark = requires_pg
@@ -127,3 +132,54 @@ def test_runtime_role_has_append_but_not_mutate_on_audit(app_engine):
         ).mappings().one()
     assert priv["ins"] is True
     assert priv["upd"] is False and priv["del"] is False
+
+
+# ---------------------------------------- ENABLE ALWAYS (migration 0044) ----
+
+def test_audit_triggers_are_enable_always(pg_session):
+    """F-019/F-020: migration 0044 sets both audit guards to ENABLE ALWAYS
+    (tgenabled='A'), so replica mode cannot suppress them."""
+    assert audit_triggers_always_enabled(pg_session) is True
+    assert_audit_wall_enforced(pg_session)          # does not raise
+
+
+def test_replica_mode_cannot_suppress_audit_triggers_even_for_owner():
+    """The reproduced bypass, now CLOSED: even the OWNER superuser, having set
+    session_replication_role='replica', cannot UPDATE/DELETE an audit row or lower
+    the anchor — the ENABLE ALWAYS trigger (0044) still fires. Runs on a dedicated
+    owner connection (each attack on its own transaction; a trigger error aborts
+    it) and cleans up in `finally`."""
+    _ensure_test_db()
+    eng = create_engine(URL)                  # owner (superuser) connection
+    Sess = sessionmaker(bind=eng)
+    try:
+        with Sess() as s:
+            s.execute(text("TRUNCATE audit.decision_events, audit.chain_head "
+                           "RESTART IDENTITY CASCADE"))
+            s.commit()
+            PostgresAuditLog(s, FrozenClock(datetime(2026, 7, 25, 12, tzinfo=UTC))).append(
+                event_type="research.scorecard.updated", entity_type="scorecard",
+                entity_id="2026-07-25", actor_type="dcp", actor_id="scorecard",
+                payload={"k": "v"})
+            s.commit()
+            assert s.execute(text("SELECT count(*) FROM audit.decision_events")).scalar() >= 1
+        for sql in ("UPDATE audit.decision_events SET event_type='TAMPERED'",
+                    "DELETE FROM audit.decision_events",
+                    "UPDATE audit.chain_head SET last_seq = 0, event_count = 0"):
+            with Sess() as s:
+                s.execute(text("SET session_replication_role = 'replica'"))
+                assert s.execute(text("SHOW session_replication_role")).scalar() == "replica"
+                raised = False
+                try:
+                    s.execute(text(sql))
+                    s.commit()
+                except Exception:
+                    raised = True
+                    s.rollback()
+                assert raised, f"replica mode did NOT block: {sql}"
+    finally:
+        with Sess() as s:
+            s.execute(text("TRUNCATE audit.decision_events, audit.chain_head "
+                           "RESTART IDENTITY CASCADE"))
+            s.commit()
+        eng.dispose()

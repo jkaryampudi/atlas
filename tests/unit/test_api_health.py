@@ -27,3 +27,6 @@ def test_health_reports_db_privilege_posture():
     # the probe ran against the test DB and reported a role
     if dp.get("checked"):
         assert "is_superuser" in dp and "least_privilege" in dp
+        # F-019/F-020: the DB-layer audit wall (ENABLE ALWAYS triggers, 0044) is
+        # reported and active on the migrated test DB.
+        assert dp["audit_triggers_enable_always"] is True

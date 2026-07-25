@@ -12,12 +12,15 @@ class Settings(BaseSettings):
     limit_mode: str = "small_aum"  # ADR-0001 decision 2
     daily_llm_budget_usd: float = 10.0  # cost circuit breaker (reasoning plane, Phase 2+)
     eodhd_api_key: str = ""  # empty -> fixture adapter is used
-    # F-019/F-020: when true, the app REFUSES to start / marks itself unhealthy if
-    # its DB runtime role is a PostgreSQL superuser (a superuser bypasses the audit
-    # append-only + monotonic-anchor triggers via session_replication_role).
-    # Production/.env sets it true and connects as the least-privilege atlas_app
-    # role; dev/test leave it false (the disposable test DB connects as owner).
-    db_require_least_privilege: bool = False
+    # F-019/F-020: SECURE BY DEFAULT (True). The app REFUSES to start if its DB
+    # runtime role is a PostgreSQL superuser (a superuser can bypass the audit
+    # triggers), so a deployment must connect as the least-privilege atlas_app role
+    # (migration 0043) or knowingly opt out. The disposable test DB connects as the
+    # owner and sets this False in tests/conftest.py. NOTE: this is defence in
+    # depth — the audit wall itself is made replica-proof at the DB layer by the
+    # ENABLE ALWAYS triggers (migration 0044), which the startup guard asserts
+    # UNCONDITIONALLY regardless of this flag.
+    db_require_least_privilege: bool = True
 
 
 def get_settings() -> Settings:

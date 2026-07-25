@@ -16,6 +16,14 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+# F-019/F-020: the app now defaults db_require_least_privilege=True (secure by
+# default). The disposable test DB knowingly connects as the OWNER (superuser), so
+# tests opt out of the runtime-role assertion — the dedicated privilege tests
+# exercise the real enforcement against atlas_app directly. (The UNCONDITIONAL
+# audit-wall assertion still runs and passes: the test DB is migrated to head, so
+# the triggers are ENABLE ALWAYS.)
+os.environ.setdefault("ATLAS_DB_REQUIRE_LEAST_PRIVILEGE", "false")
+
 ROOT = Path(__file__).parents[1]
 ADMIN_URL = os.environ.get(
     "ATLAS_DATABASE_URL",

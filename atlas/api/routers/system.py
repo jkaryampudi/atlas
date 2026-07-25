@@ -18,14 +18,21 @@ def health() -> dict[str, object]:
     status = "ok"
     try:
         from atlas.core.db import session_scope
-        from atlas.core.db_privilege import runtime_privilege
+        from atlas.core.db_privilege import (
+            audit_triggers_always_enabled,
+            runtime_privilege,
+        )
         with session_scope() as sess:
             p = runtime_privilege(sess)
+            wall = audit_triggers_always_enabled(sess)
         db_priv = {"checked": True, "role": p.role,
                    "is_superuser": p.is_superuser,
                    "can_bypass_triggers": not p.least_privilege,
-                   "least_privilege": p.least_privilege}
-        if s.db_require_least_privilege and not p.least_privilege:
+                   "least_privilege": p.least_privilege,
+                   "audit_triggers_enable_always": wall}
+        # Degraded when the audit wall is not replica-proof (0044 missing), or when
+        # least privilege is demanded but the runtime can still bypass.
+        if not wall or (s.db_require_least_privilege and not p.least_privilege):
             status = "degraded"
     except Exception as e:  # noqa: BLE001 — health must never 500 on a probe failure
         db_priv = {"checked": False, "error": str(e)[:120]}

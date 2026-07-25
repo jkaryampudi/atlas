@@ -76,3 +76,35 @@ def assert_least_privilege_runtime(session: Session) -> None:
             "append-only + monotonic-anchor triggers (F-019/F-020). Refusing to "
             f"run. Connect as the least-privilege {RUNTIME_ROLE!r} role "
             "(migration 0043 / ops/sql/provision_runtime_role.sql).")
+
+
+# --------------------------------------------------------------------------- #
+# audit-wall enforcement — the DB-layer defense that does NOT depend on the
+# runtime role: ENABLE ALWAYS triggers fire even under
+# session_replication_role='replica', so a superuser cannot suppress them.
+# --------------------------------------------------------------------------- #
+_AUDIT_TRIGGERS = ("decision_events_append_only", "chain_head_guard")
+
+
+def audit_triggers_always_enabled(session: Session) -> bool:
+    """True iff BOTH audit guards are ENABLE ALWAYS (``tgenabled='A'``) — the
+    state migration 0044 installs. When they are merely origin-enabled ('O'), a
+    superuser can silence them via ``session_replication_role='replica'``."""
+    rows = session.execute(text(
+        "SELECT tgname, tgenabled FROM pg_trigger WHERE tgname = ANY(:names)"),
+        {"names": list(_AUDIT_TRIGGERS)}).all()
+    found = {r.tgname: r.tgenabled for r in rows}
+    return all(found.get(t) == "A" for t in _AUDIT_TRIGGERS)
+
+
+def assert_audit_wall_enforced(session: Session) -> None:
+    """Fail closed UNCONDITIONALLY at startup when the audit append-only / anchor
+    triggers are not ENABLE ALWAYS. This guarantees invariant-4 integrity even if
+    the deployment (mis)connects as a superuser: replica mode cannot suppress an
+    ENABLE ALWAYS trigger. Independent of the runtime-role check."""
+    if not audit_triggers_always_enabled(session):
+        raise RuntimeError(
+            "audit guards decision_events_append_only / chain_head_guard are not "
+            "ENABLE ALWAYS — a superuser could suppress them via "
+            "session_replication_role='replica' and tamper the audit chain "
+            "(F-019/F-020). Refusing to run. Apply migrations to head (0044).")

@@ -12,8 +12,8 @@ lint:
 	ruff check atlas tests
 type:
 	mypy
-migrate:
-	alembic upgrade head
+migrate:  ## apply migrations as the OWNER role, not the least-privilege runtime (F-019/F-020)
+	ATLAS_DATABASE_URL="$${ATLAS_MIGRATION_DATABASE_URL:-$${ATLAS_DATABASE_URL:-postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas}}" alembic upgrade head
 # F-017: replay SEEDS fixtures and UPSERTS fixture bars — never against the
 # production DB. It runs against ATLAS_REPLAY_DATABASE_URL (default: the local
 # disposable atlas_test database); the harness also refuses any non-disposable

@@ -41,13 +41,18 @@ _DOSSIER = Path(__file__).resolve().parents[1] / "dashboard" / "dossier.html"
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # F-019/F-020: fail closed at startup if the deployment demands least
-    # privilege but the DB runtime role is a superuser (which would bypass the
-    # audit append-only + monotonic-anchor triggers).
-    if get_settings().db_require_least_privilege:
-        from atlas.core.db import session_scope
-        from atlas.core.db_privilege import assert_least_privilege_runtime
-        with session_scope() as _s:
+    # F-019/F-020: fail closed at startup. The audit-wall check is UNCONDITIONAL —
+    # the append-only / anchor triggers must be ENABLE ALWAYS (0044) so replica
+    # mode cannot suppress them even for a superuser. The runtime-role check
+    # (no superuser) additionally runs when least privilege is demanded (default).
+    from atlas.core.db import session_scope
+    from atlas.core.db_privilege import (
+        assert_audit_wall_enforced,
+        assert_least_privilege_runtime,
+    )
+    with session_scope() as _s:
+        assert_audit_wall_enforced(_s)
+        if get_settings().db_require_least_privilege:
             assert_least_privilege_runtime(_s)
     task: asyncio.Task[None] | None = None
     if os.environ.get("ATLAS_INPROC_SCHEDULER") == "1":
