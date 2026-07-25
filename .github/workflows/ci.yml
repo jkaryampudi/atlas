@@ -29,10 +29,55 @@ jobs:
       - run: uv sync --locked --extra dev
       - run: uv run ruff check atlas tests
       - run: uv run mypy
-      - run: uv run pytest
-      - name: migration check
-        # raw-SQL migrations (no ORM metadata), so `alembic check` cannot apply;
-        # the meaningful assertion is: apply cleanly from zero and land on head
+      # Migrate the app-default DB to head BEFORE pytest. Several API unit tests boot
+      # TestClient(app), which connects to ATLAS_DATABASE_URL (the `atlas` service DB).
+      # Since the F-019/F-020 hardening the app fail-closes / reports "degraded" against
+      # an unmigrated DB (missing ENABLE-ALWAYS audit triggers + trading tables), so
+      # pytest must see a migrated `atlas`. This also preserves the original assertion:
+      # raw-SQL migrations (no ORM metadata) apply cleanly from zero and land on head.
+      - name: migrate app DB to head (before pytest)
         run: |
           uv run alembic upgrade head
           uv run alembic current | grep -q "(head)"
+      - run: uv run pytest
+
+  # F-019/F-020 CI hardening: the `checks` job runs everything as the OWNER role.
+  # This job proves the DEPLOYED posture end to end — migrations as the owner, the
+  # app booted as the least-privilege atlas_app runtime, and a superuser runtime
+  # refused. The DB-layer bypass refusals (disable trigger / replica / mutate audit)
+  # are covered by tests/integration/test_db_least_privilege_pg.py (in the pytest
+  # step); the lifespan behaviour by tests/integration/test_api_lifespan_runtime_role_pg.py.
+  runtime-least-privilege:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_DB: atlas, POSTGRES_USER: atlas, POSTGRES_PASSWORD: atlas}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U atlas" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: {python-version: "3.14"}
+      - run: uv sync --locked --extra dev
+      - name: migrations run AS THE OWNER role (provisions atlas_app + ENABLE ALWAYS triggers)
+        env:
+          ATLAS_DATABASE_URL: "postgresql+psycopg://atlas:atlas@localhost:5432/atlas"
+        run: uv run alembic upgrade head
+      - name: app boots as the LEAST-PRIVILEGE atlas_app runtime; /health is least-privilege
+        # End-to-end proof of the DEPLOYED runtime (a real uvicorn as atlas_app) that
+        # the pytest step cannot give. The lifespan START/REFUSE behaviour and every
+        # DB-layer bypass refusal are additionally covered by the pytest step
+        # (test_api_lifespan_runtime_role_pg.py + test_db_least_privilege_pg.py).
+        env:
+          ATLAS_DATABASE_URL: "postgresql+psycopg://atlas_app:atlas_app_local_only@localhost:5432/atlas"
+          ATLAS_DB_REQUIRE_LEAST_PRIVILEGE: "true"
+          ATLAS_INPROC_SCHEDULER: "0"
+        run: |
+          uv run uvicorn atlas.api.main:app --port 8001 &
+          APP_PID=$!
+          for i in $(seq 1 30); do curl -sf localhost:8001/v1/system/health >/dev/null && break || sleep 1; done
+          H=$(curl -s localhost:8001/v1/system/health); echo "$H"
+          kill "$APP_PID" 2>/dev/null || true
+          echo "$H" | uv run python -c "import sys,json; d=json.load(sys.stdin); p=d['db_privilege']; assert d['status']=='ok', d; assert p['role']=='atlas_app'; assert p['is_superuser'] is False; assert p['least_privilege'] is True; assert p['can_bypass_triggers'] is False; assert p['audit_triggers_enable_always'] is True; print('atlas_app runtime + audit wall OK')"
