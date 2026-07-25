@@ -30,7 +30,16 @@ services:
     # independent-review finding: no API auth yet).
     command: uvicorn atlas.api.main:app --host 0.0.0.0 --port 8000
     environment:
-      ATLAS_DATABASE_URL: postgresql+psycopg://atlas:atlas_local_only@db:5432/atlas
+      # F-019/F-020: the RUNTIME connects as the least-privilege atlas_app role
+      # (non-superuser, non-owner — provisioned by migration 0043), NOT the owner
+      # `atlas`. A superuser runtime could disable the audit append-only /
+      # monotonic-anchor triggers via session_replication_role; atlas_app cannot.
+      # Migrations still run as the owner `atlas` (host: `alembic upgrade head`)
+      # BEFORE this service starts, so the role + grants exist. With
+      # ATLAS_DB_REQUIRE_LEAST_PRIVILEGE=true the app fails closed at startup if it
+      # ever finds itself connected as a superuser.
+      ATLAS_DATABASE_URL: postgresql+psycopg://atlas_app:atlas_app_local_only@db:5432/atlas
+      ATLAS_DB_REQUIRE_LEAST_PRIVILEGE: "true"
       ATLAS_REDIS_URL: redis://redis:6379/0
       ATLAS_TRADING_MODE: paper
     ports: ["127.0.0.1:8000:8000"]
