@@ -35,6 +35,14 @@ def _clean(s):
 
 
 def _instrument(s, sym, sector="Information Technology"):
+    # F-006: grade_picks now scores on the AUD total-return basis, so both legs
+    # pass through fx_to_aud. A FLAT USD->AUD rate seeded before all bars
+    # (fx_to_aud carries forward) cancels in every return ratio, leaving the
+    # hand-pinned excess numbers unchanged while exercising the reporting path.
+    s.execute(text(
+        "INSERT INTO market.fx_rates_daily (base, quote, rate_date, rate, source) "
+        "VALUES ('USD','AUD', DATE '2020-01-01', '1.0', 'test') "
+        "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = '1.0'"))
     return s.execute(text(
         "INSERT INTO market.instruments (symbol, exchange, market, instrument_type, "
         " name, currency, is_active, sector_gics) "

@@ -18,7 +18,10 @@ from sqlalchemy import text
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
-from atlas.dcp.backtest.registry import lineage_count, register_trial, trial_count
+import statistics
+
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial, trial_count)
 from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.xsmom_run import run_xsmom
 from tests.conftest import requires_pg
@@ -114,12 +117,12 @@ def test_backfill_is_idempotent_and_preserves_existing_tags(pg_session):
     that already carries a tag (e.g. one registered by new code mid-deploy)."""
     s = pg_session
     s.execute(text("TRUNCATE quant.trial_registry"))
-    register_trial(s, family="xsmom-custom", lineage="special-tag",
+    register_trial(s, family="xsmom-custom", lineage="momentum",
                    spec={"v": 1}, metrics={})
     s.execute(text(_load_migration_0032().BACKFILL_SQL))
     assert s.execute(text(
         "SELECT lineage FROM quant.trial_registry "
-        "WHERE strategy_family='xsmom-custom'")).scalar_one() == "special-tag"
+        "WHERE strategy_family='xsmom-custom'")).scalar_one() == "momentum"
 
 
 def test_runner_dsr_computes_at_lineage_count_not_family_count(pg_session):
@@ -150,3 +153,91 @@ def test_runner_dsr_computes_at_lineage_count_not_family_count(pg_session):
     # and the same lineage-vs-family counts):
     assert run.gate.dsr <= deflated_sharpe(run.result.sharpe, n_days, 1)
     assert deflated_sharpe(1.2, n_days, 4) < deflated_sharpe(1.2, n_days, 1)
+
+
+def _real_metrics(sharpe: float) -> dict[str, float]:
+    """A genuine portfolio-backtest metrics signature (the 3 core keys + more)."""
+    return {"sharpe": sharpe, "total_return": 1.0, "max_drawdown": -0.2,
+            "avg_turnover": 0.5, "n_rebalances": 12.0}
+
+
+def test_runner_threads_empirical_dispersion_into_the_gate(pg_session):
+    """End-to-end F-005 wiring: with >=2 dispersed REAL momentum trials already
+    registered, run_xsmom must feed the gate the lineage's empirical dispersion —
+    i.e. gate.dsr is EXACTLY deflated_sharpe(..., sr_dispersion_annual=that value),
+    not the lower-bound fallback. Widely-spread seed Sharpes make the empirical
+    dispersion clear the sqrt(1/n_days) floor so the two paths are distinguishable."""
+    s = pg_session
+    seed_xsmom_world(s)                                    # clears momentum + panel
+    for i, sr in enumerate((-2.0, 0.0, 2.0)):             # deliberately wide spread
+        register_trial(s, family=f"xsmom-prior{i}", lineage="momentum",
+                       spec={"i": i}, metrics=_real_metrics(sr))
+    audit = PostgresAuditLog(
+        s, FrozenClock(datetime(2025, 6, 30, 22, tzinfo=UTC)))
+
+    run = run_xsmom(s, audit, paths=10, seed=7)
+
+    disp = lineage_sr_dispersion(s, "momentum")           # now includes run's own
+    assert disp is not None and disp > 0
+    n_days = len(run.result.equity_curve) - 1
+    expected = deflated_sharpe(run.result.sharpe, n_days, run.n_trials,
+                               sr_dispersion_annual=disp)
+    assert run.gate.dsr == expected
+    # and it is genuinely the empirical path, strictly below the lower-bound view
+    # (the wide spread exceeds the floor):
+    assert run.gate.dsr < deflated_sharpe(run.result.sharpe, n_days, run.n_trials)
+
+
+def test_lineage_sr_dispersion_excludes_synthetic_placeholders(pg_session):
+    """F-005: the empirical dispersion is the sample std of the annualised
+    Sharpes over REAL trials only. Synthetic placeholders (sharpe set, but no
+    return/drawdown) must NOT enter the estimate even though lineage_count still
+    counts them (the deliberate count/dispersion asymmetry)."""
+    s = pg_session
+    s.execute(text("TRUNCATE quant.trial_registry"))
+    real = [0.2, 0.8, 1.1, -0.3]
+    for i, sr in enumerate(real):
+        register_trial(s, family=f"xsmom-v{i}", lineage="momentum",
+                       spec={"i": i}, metrics=_real_metrics(sr))
+    # three synthetic fixtures: sharpe only, exactly as the polluted prod rows
+    for sr in (1.0, 2.0, 3.0):
+        s.execute(text(
+            "INSERT INTO quant.trial_registry (strategy_family, spec_hash, "
+            "metrics, lineage) VALUES ('synthetic', :h, "
+            "CAST(:m AS jsonb), 'momentum')"),
+            {"h": f"synthetic-{sr}", "m": f'{{"sharpe": {sr}}}'})
+
+    assert lineage_count(s, "momentum") == 7                 # counts ALL rows
+    disp = lineage_sr_dispersion(s, "momentum")
+    assert disp == statistics.stdev(real)                    # real trials only
+    # the synthetics, if included, would have blown it up:
+    assert disp < statistics.stdev(real + [1.0, 2.0, 3.0])
+
+
+def test_lineage_sr_dispersion_includes_single_name_schema(pg_session):
+    """Regression guard: single-name runners write hit_rate/n_trades instead of
+    avg_turnover/n_rebalances. They ARE real backtests and MUST be sampled — the
+    filter keys on the 3-key core common to every real schema, not the 5 portfolio
+    keys (which would silently drop momentum_v1's real trials)."""
+    s = pg_session
+    s.execute(text("TRUNCATE quant.trial_registry"))
+    for i, sr in enumerate((0.5, 0.9)):
+        register_trial(s, family="momentum", lineage="momentum", spec={"i": i},
+                       metrics={"sharpe": sr, "total_return": 0.3,
+                                "max_drawdown": -0.1, "hit_rate": 0.55,
+                                "n_trades": 40.0})           # single-name schema
+    assert lineage_sr_dispersion(s, "momentum") == statistics.stdev([0.5, 0.9])
+
+
+def test_lineage_sr_dispersion_none_below_two_real_trials(pg_session):
+    """< 2 real trials → None (nothing to estimate); the gate then floors at
+    sqrt(1/n_days). One real + any number of synthetics still returns None."""
+    s = pg_session
+    s.execute(text("TRUNCATE quant.trial_registry"))
+    assert lineage_sr_dispersion(s, "momentum") is None      # empty
+    register_trial(s, family="x", lineage="momentum", spec={}, metrics=_real_metrics(0.7))
+    s.execute(text(
+        "INSERT INTO quant.trial_registry (strategy_family, spec_hash, metrics, "
+        "lineage) VALUES ('synthetic', 'z', '{\"sharpe\": 2.0}', 'momentum')"))
+    assert lineage_count(s, "momentum") == 2
+    assert lineage_sr_dispersion(s, "momentum") is None      # only 1 REAL trial

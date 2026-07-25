@@ -74,6 +74,15 @@ def _clean_learning(s) -> None:
 
 def _instrument(s, symbol: str, *, active: bool = True,
                 exchange: str = "XTEST") -> str:
+    # F-006: the scorecard grades on the AUD total-return basis, so both legs
+    # pass through fx_to_aud. Seed a FLAT USD->AUD rate before the first session
+    # (carry-forward): flat cancels in every return ratio, so the hand-pinned
+    # excess numbers this suite depends on are unchanged.
+    s.execute(text(
+        "INSERT INTO market.fx_rates_daily (base, quote, rate_date, rate, source) "
+        "VALUES ('USD', 'AUD', :d, '1.0', 'test') "
+        "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = '1.0'"),
+        {"d": SESSIONS[0] - timedelta(days=3)})
     existing = s.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = :sym "
         "AND exchange = :ex"), {"sym": symbol, "ex": exchange}).scalar()
@@ -411,7 +420,7 @@ def client(monkeypatch, clean_audit):
     s.commit()
     yield TestClient(app), s, memo_id, clock
     _clean_learning(s)
-    s.execute(text("TRUNCATE audit.decision_events, research.memos, "
+    s.execute(text("TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
                    "research.agent_runs RESTART IDENTITY CASCADE"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol IN "

@@ -75,16 +75,20 @@ def test_run_daily_endpoint_reports_started_and_busy(monkeypatch):
 
 
 def test_emit_line_format(capsys):
+    from atlas.core.clock import FrozenClock
     from atlas.ops.daily import _emit
 
-    _emit("t3_settle", "done", "fills=1")
+    # M48: the emit `at` stamp flows from the cycle's injected clock, so a
+    # --now replay emits a deterministic stream — assert it is the frozen instant.
+    clock = FrozenClock(datetime(2026, 7, 14, 22, 0, tzinfo=UTC))
+    _emit("t3_settle", "done", "fills=1", clock=clock)
     out = capsys.readouterr().out.strip()
     assert out.startswith("@@CYCLE ")
     import json
 
     ev = json.loads(out[8:])
     assert (ev["node"], ev["status"], ev["result"]) == ("t3_settle", "done", "fills=1")
-    assert "at" in ev
+    assert ev["at"] == "2026-07-14T22:00:00+00:00"
 
 
 def test_status_progress_is_a_snapshot_copy():
@@ -173,16 +177,15 @@ def test_tick_loop_catches_up_after_system_sleep(monkeypatch):
         datetime(2026, 7, 18, 9, 0, 30, tzinfo=UTC),  # tick 3: nothing (re-armed)
     ])
 
-    from datetime import datetime as _real_dt
-
-    class _Now:
-        combine = _real_dt.combine          # next_fire uses datetime.combine
-
+    class _FakeClock:
+        """M48: the scheduler now reads _WALL.now() (the Clock seam), so the
+        simulated wall-clock jump is injected here, not by patching datetime.
+        next_fire keeps the real datetime.combine."""
         @staticmethod
-        def now(tz=None):
+        def now():
             return next(times)
 
-    monkeypatch.setattr(sched, "datetime", _Now)
+    monkeypatch.setattr(sched, "_WALL", _FakeClock())
     monkeypatch.setattr(sched, "start_cycle", lambda: fired.append("cycle") or True)
     monkeypatch.setattr(sched, "_run_backup", lambda: fired.append("backup"))
 

@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock, SystemClock
+from atlas.core.secrets import RedactingError
 from atlas.fxlab.engine import FxBar
 
 BASE = "https://eodhd.com/api"
@@ -51,12 +52,27 @@ class FxlabEodhdClient:
         self._key = api_key
         self._client = client or httpx.Client(timeout=30)
 
+    def _request(self, path: str, **params: str) -> object:
+        """The ONE secret-safe transport for this client (F-013): the EODHD
+        api_token rides in the query string, so httpx would embed it in any
+        HTTPStatusError/RequestError URL — catch every httpx error and re-raise
+        it scrubbed of the key, with `from None` so the token-bearing original is
+        never chained into a traceback/log/audit/alert payload."""
+        try:
+            r = self._client.get(f"{BASE}{path}",
+                                 params={"api_token": self._key, "fmt": "json", **params})
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            scrubbed = RedactingError(f"EODHD GET {path} failed: {exc}", self._key)
+        else:
+            return r.json()
+        # Raised OUTSIDE the except handler so the token-bearing httpx error is not
+        # chained (neither __cause__ nor __context__) — the key is unreachable.
+        raise scrubbed
+
     def fetch_eurusd(self, start: date, end: date) -> list[FxBar]:
-        r = self._client.get(f"{BASE}/eod/{VENDOR_CODE}",
-                             params={"api_token": self._key, "fmt": "json",
-                                     "from": start.isoformat(), "to": end.isoformat()})
-        r.raise_for_status()
-        data = r.json()
+        data = self._request(f"/eod/{VENDOR_CODE}",
+                             **{"from": start.isoformat(), "to": end.isoformat()})
         rows = data if isinstance(data, list) else []
         bars = [FxBar(bar_date=date.fromisoformat(str(row["date"])),
                       open=float(str(row["open"])), high=float(str(row["high"])),

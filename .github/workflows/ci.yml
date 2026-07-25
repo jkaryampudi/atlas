@@ -7,6 +7,9 @@ jobs:
       # job-level so pytest sees it too: integration tests must RUN in CI, not
       # silently skip (conftest auto-creates the isolated atlas_test database)
       ATLAS_DATABASE_URL: "postgresql+psycopg://atlas:atlas@localhost:5432/atlas"
+      # M31: hard-fail the run if Postgres is unreachable, so a broken DB service
+      # cannot produce a green build that silently skipped ~745 integration tests.
+      ATLAS_REQUIRE_PG: "1"
     services:
       postgres:
         image: postgres:16
@@ -16,15 +19,20 @@ jobs:
           --health-cmd "pg_isready -U atlas" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - run: pip install -e ".[dev]"
-      - run: ruff check atlas tests
-      - run: mypy
-      - run: pytest
+      - uses: astral-sh/setup-uv@v5
+        # M49: the pinned dev/CI interpreter (.python-version 3.14.4). requires-python
+        # stays >=3.12 (the supported floor) — this pins the RUNTIME, not the contract.
+        with: {python-version: "3.14"}
+      # M47: the lockfile is load-bearing in CI — fail if it drifts from pyproject,
+      # then install the EXACT pinned versions from uv.lock (reproducible, not floors).
+      - run: uv lock --check
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check atlas tests
+      - run: uv run mypy
+      - run: uv run pytest
       - name: migration check
         # raw-SQL migrations (no ORM metadata), so `alembic check` cannot apply;
         # the meaningful assertion is: apply cleanly from zero and land on head
         run: |
-          alembic upgrade head
-          alembic current | grep -q "(head)"
+          uv run alembic upgrade head
+          uv run alembic current | grep -q "(head)"

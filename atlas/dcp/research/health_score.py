@@ -42,6 +42,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from atlas.dcp.research.ratios import currencies_confirmed_same
+
 VENDOR_SOURCE = "EodhdAdapter"
 _MOM_WINDOW_DAYS = 400          # bounded scan; ~1y of sessions plus slack
 _MOM_LAG = 252                  # trading sessions ~ 1 year
@@ -90,6 +92,15 @@ def _factors_from_row(r: object) -> dict[str, float | None]:
     rev = _f(getattr(r, "rev"))
     gp = _f(getattr(r, "gp"))
     fcf = _f(getattr(r, "fcf"))
+    # F-010: fcf comes from the issuer's financial statements (reporting currency)
+    # while mcap is the LISTING price currency (USD for a US-listed ADR). Dividing
+    # them across currencies produces a false yield for any non-USD reporter. Only
+    # compute fcf_yield when the two currencies are known and equal; otherwise fail
+    # closed (None) rather than emit a currency-mixed signal. (The margin ratios
+    # below divide statement-currency by statement-currency, so they cancel.)
+    # F-010: the currency-compatibility rule lives in ONE shared layer (ratios.py).
+    same_currency = currencies_confirmed_same(
+        getattr(r, "reporting_cur", None), getattr(r, "listing_cur", None))
     return {
         "earnings_yield": _inv(_f(getattr(r, "pe"))),
         "ebitda_yield": _inv(_f(getattr(r, "evebitda"))),
@@ -101,7 +112,7 @@ def _factors_from_row(r: object) -> dict[str, float | None]:
         "profit_margin": _f(getattr(r, "pm")),
         "revenue_growth": _f(getattr(r, "rg")),
         "earnings_growth": _f(getattr(r, "eg")),
-        "fcf_yield": _ratio(fcf, mcap),
+        "fcf_yield": _ratio(fcf, mcap) if same_currency else None,   # F-010
         "fcf_margin": _ratio(fcf, rev),
     }
 
@@ -111,7 +122,8 @@ def _universe_fundamentals(session: Session,
     """id -> fundamental factor dict for every active US single name, from each
     name's latest fundamentals snapshot <= as_of (one jsonb query)."""
     rows = session.execute(text(
-        "SELECT i.id AS id, "
+        "SELECT i.id AS id, i.currency AS listing_cur, "
+        " f.p->'General'->>'CurrencyCode' AS reporting_cur, "
         " f.p->'Highlights'->>'MarketCapitalization' AS mcap, "
         " f.p->'Valuation'->>'TrailingPE' AS pe, "
         " f.p->'Valuation'->>'EnterpriseValueEbitda' AS evebitda, "

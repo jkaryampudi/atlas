@@ -80,7 +80,8 @@ from atlas.dcp.backtest.real_run import (
     K_FOLDS,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import lineage_count, register_trial
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial)
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.signals.xsmom.v1 import (
     LOOKBACK,
@@ -297,6 +298,7 @@ def run_xsmom(session: Session, audit: PostgresAuditLog, *,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
     n_trials = lineage_count(session, lineage)
+    sr_dispersion = lineage_sr_dispersion(session, lineage)  # F-005
     trials_after_total = total_trial_count(session)
 
     nulls = portfolio_null_distribution(panel, costs=COSTS, start=start,
@@ -317,7 +319,7 @@ def run_xsmom(session: Session, audit: PostgresAuditLog, *,
                                      COSTS, start=start)
     ew = run_portfolio_backtest(panel, equal_weight_eligible, COSTS, start=start)
     gate = portfolio_gate(result=result, null_returns=nulls, spy=spy, ew=ew,
-                          n_trials=n_trials)
+                          n_trials=n_trials, sr_dispersion_annual=sr_dispersion)
     wf = portfolio_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
                                 embargo=EMBARGO, warmup=SEASONING, costs=COSTS)
 

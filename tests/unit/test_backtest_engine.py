@@ -38,9 +38,19 @@ def test_costs_strictly_reduce_returns():
 
 
 def test_golden_regression_pins():
-    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3)."""
+    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3).
+
+    RE-PINNED for the F-003 (entry-day double-count) and F-004 (impossible stop
+    fill) corrections. The pre-remediation pins encoded the defective engine:
+        total_return 1.0200745813149137 -> 1.0579428606795505
+        sharpe       1.8469518012915334 -> 1.916970982685139
+        max_drawdown -0.11116306108617846 -> -0.10799720706825366
+        n_trades     30 (unchanged)
+    The corrected values are the CORRECT engine output; see
+    tests/unit/test_backtest_engine_remediation.py for the hand-calc proofs.
+    """
     r = run_backtest(regime_series(), momentum_v1, CostModel(), start_i=60, end_i=1200)
-    assert r.total_return == pytest.approx(1.0200745813149137)
-    assert r.sharpe == pytest.approx(1.8469518012915334)
+    assert r.total_return == pytest.approx(1.0579428606795505)
+    assert r.sharpe == pytest.approx(1.916970982685139)
     assert r.n_trades == 30
-    assert r.max_drawdown == pytest.approx(-0.11116306108617846)
+    assert r.max_drawdown == pytest.approx(-0.10799720706825366)

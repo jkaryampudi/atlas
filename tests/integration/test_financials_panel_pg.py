@@ -156,3 +156,42 @@ def test_missing_data_is_fail_soft(pg_session):
     assert f["earnings"]["estimates"] == []
     assert f["key_stats"]["beta_5y"] is None
     assert f["key_stats"]["fcf_yield_pct"] is None
+
+
+def _instrument_ccy(s, sym, currency):
+    return s.execute(text(
+        "INSERT INTO market.instruments (symbol, exchange, market, instrument_type, "
+        " name, currency, is_active) VALUES (:s,'US','US','stock',:s,:c,true) "
+        "RETURNING id"), {"s": sym, "c": currency}).scalar()
+
+
+def test_fcf_yield_blocks_on_currency_mismatch(pg_session):
+    """F-010: FCF is in the issuer's accounting currency (General.CurrencyCode)
+    while market cap is in the LISTING currency (instruments.currency). When they
+    differ, dividing them fabricates an FX-scaled yield — so fcf_yield_pct must be
+    None with an EXPLICIT currency-blocked flag, NOT a silent zero, while the raw
+    FCF fact still renders."""
+    s = pg_session
+    iid = _instrument_ccy(s, "ADRX", "USD")           # listed/priced in USD
+    payload = json.loads(json.dumps(_PAYLOAD))
+    payload["General"]["CurrencyCode"] = "INR"        # but reports statements in INR
+    as_of = date(2026, 6, 30)
+    _fundamentals(s, iid, as_of, payload)
+
+    ks = compute_financials(s, iid, "ADRX", as_of)["key_stats"]
+    assert ks["fcf"] == 2600000000.0                  # the raw vendor fact still shows
+    assert ks["fcf_yield_pct"] is None                # NOT computed across currencies
+    assert ks["fcf_yield_currency_blocked"] is True   # explicit exclusion, not absence
+
+
+def test_fcf_yield_computes_and_flags_unblocked_when_currencies_match(pg_session):
+    """The confirmed-same case: USD statements, USD listing -> the yield computes
+    and the block flag is explicitly False (so a consumer can distinguish a real
+    zero-ish yield from a currency block)."""
+    s = pg_session
+    iid = _instrument_ccy(s, "USDX", "USD")
+    as_of = date(2026, 6, 30)
+    _fundamentals(s, iid, as_of, _PAYLOAD)            # CurrencyCode USD
+    ks = compute_financials(s, iid, "USDX", as_of)["key_stats"]
+    assert ks["fcf_yield_pct"] == 100.0 * 2600000000.0 / 800000000000.0
+    assert ks["fcf_yield_currency_blocked"] is False

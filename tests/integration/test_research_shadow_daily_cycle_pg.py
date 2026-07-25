@@ -29,7 +29,7 @@ FX = Decimal("1.5")
 
 NODES = ["t0_ingest", "t1_verify_chain", "t2_expire", "t3_settle", "t4_stops",
          "t5_snapshot", "t5b_bands", "t5c_cusum", "t6_reconcile", "t6b_signals",
-         "t6c_pead_signals", "t7_desk", "t8_bridge", "t8b_attribution",
+         "t6c_pead_signals", "t6d_rebalance", "t7_desk", "t8_bridge", "t8b_attribution",
          "t8c_core", "t9_report", "t9b_brief"]
 
 

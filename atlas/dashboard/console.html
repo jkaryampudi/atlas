@@ -379,7 +379,13 @@
 
 <script>
 "use strict";
+// Loopback operator token (F-016). The /console route substitutes the deployment's
+// ATLAS_API_TOKEN here at serve time; it never lives in the static file. Empty =>
+// no auth configured (mutators fail closed 503) or served outside /console.
+window.__ATLAS_TOKEN__ = "";  // __ATLAS_CONSOLE_TOKEN__
 const API = location.origin;  // served BY the API — same origin, no CORS
+const AUTH = (typeof window.__ATLAS_TOKEN__ === "string" && window.__ATLAS_TOKEN__)
+  ? {authorization: "Bearer " + window.__ATLAS_TOKEN__} : {};
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -396,7 +402,7 @@ document.addEventListener("click", e => {
 
 async function get(path){
   try{
-    const r = await fetch(API + path, {cache:"no-store"});
+    const r = await fetch(API + path, {cache:"no-store", headers: AUTH});
     if(!r.ok) return {err:`${r.status} from ${path}`};
     return {data: await r.json()};
   }catch(e){ return {err:`${path}: unreachable`}; }
@@ -404,7 +410,7 @@ async function get(path){
 async function post(path, body){
   try{
     const r = await fetch(API + path, {method:"POST", cache:"no-store",
-      headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+      headers:{"content-type":"application/json", ...AUTH}, body: JSON.stringify(body)});
     if(!r.ok) return {err:`${r.status} from ${path}`};
     return {data: await r.json()};
   }catch(e){ return {err:`${path}: unreachable`}; }
@@ -415,7 +421,7 @@ async function post(path, body){
 async function postFull(path, body){
   try{
     const r = await fetch(API + path, {method:"POST", cache:"no-store",
-      headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+      headers:{"content-type":"application/json", ...AUTH}, body: JSON.stringify(body)});
     return {status: r.status, data: await r.json()};
   }catch(e){ return {err:`${path}: unreachable`}; }
 }

@@ -26,10 +26,19 @@ the run continues. Honest coverage counts are the deliverable.
 
 ``fetched_at`` comes from the injected clock (CLAUDE.md invariant 6). EPS
 values are stored AS THE VENDOR PROVIDES THEM — EODHD Earnings::History is
-backward-split-adjusted to the current share basis (the actual/estimate series
-is continuous across splits), so the signal uses them directly with NO on-read
-split adjustment (an earlier "adjust on read" assumption double-adjusted the
-data; corrected after an adversarial audit 2026-07-15).
+backward-split-adjusted to the share basis current AT FETCH TIME (the
+actual/estimate series is continuous across splits WITHIN one fetch), so
+``split_basis_asof`` is set to that fetch date (F-009).
+
+The signal must NOT blanket-re-adjust by all splits (an earlier "adjust on read"
+assumption double-adjusted data the vendor had already adjusted; corrected after
+an adversarial audit 2026-07-15). The F-009 read-side re-basing
+(``earnings_basis.py``) is different in kind: it divides a row only by splits
+with ``split_basis_asof < action_date <= K`` — i.e. splits that occurred AFTER
+the row's basis epoch and were therefore NOT yet baked in — reconciling rows
+fetched in different epochs (across a split) onto one common basis at the
+knowledge date K. Splits already in the fetch basis are excluded, so it never
+double-adjusts. On a single-fetch panel every factor is 1 (no-op).
 
 Usage:
   python -m atlas.dcp.market_data.earnings_history --symbols AAPL,MSFT,ATVI
@@ -69,6 +78,11 @@ class EarningsSurprise:
     surprise_pct: Decimal | None   # vendor split-neutral ratio (secondary signal)
     before_after_market: str | None
     currency: str | None = None
+    # F-009: the date whose split basis this row's per-share EPS is expressed in
+    # (= the fetched_at date). The read path re-bases every row to a single
+    # common basis at the knowledge date via this anchor (earnings_basis.py).
+    # None on rows loaded by paths that do not need re-basing (factor -> 1).
+    split_basis_asof: date | None = None
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -96,13 +110,22 @@ def _currency(value: object) -> str | None:
 
 
 def parse_earnings_history(payload: dict[str, object], symbol: str,
+                           *, known_as_of: date | None = None,
                            ) -> list[EarningsSurprise]:
     """Vendor fundamentals document -> completed-quarter surprise rows.
 
     Reads ONLY Earnings.History; every field passes a typed choke point.
     Returns rows sorted by fiscal_period_end. A payload with no usable
     Earnings.History block yields an empty list (a valid answer — ETFs and
-    never-reporting instruments have none)."""
+    never-reporting instruments have none).
+
+    F-008 point-in-time guards (fail closed — a violating row is EXCLUDED, never
+    stored as a fact):
+      * report_date must be strictly AFTER fiscal_period_end — an actual cannot
+        be announced on or before the quarter it reports has even ended;
+      * when ``known_as_of`` is given (the receipt/ingest date), report_date must
+        be on or before it — a vendor 'actual' dated in the future could not have
+        been known when we received it (a direct look-ahead)."""
     earnings = payload.get("Earnings")
     hist = earnings.get("History") if isinstance(earnings, dict) else None
     if not isinstance(hist, dict):
@@ -122,6 +145,10 @@ def parse_earnings_history(payload: dict[str, object], symbol: str,
             report_date = date.fromisoformat(str(row.get("reportDate")))
         except ValueError:
             continue  # no announcement date -> not point-in-time anchorable
+        if report_date <= fpe:
+            continue  # F-008: an actual cannot be reported on/before its period end
+        if known_as_of is not None and report_date > known_as_of:
+            continue  # F-008: a future-dated 'actual' could not have been known
         actual = _decimal(row.get("epsActual"))
         estimate = _decimal(row.get("epsEstimate"))
         if actual is None or estimate is None:
@@ -144,18 +171,25 @@ def store_surprises(session: Session, instrument_id: object,
     overwritten and re-ingestion is idempotent. Returns rows newly inserted."""
     inserted = 0
     for r in rows:
+        # F-008 belt-and-suspenders: never persist a look-ahead-inconsistent fact
+        # even if a caller bypassed parse_earnings_history's guards.
+        if r.report_date <= r.fiscal_period_end or r.report_date > fetched_at.date():
+            continue
         res = session.execute(text(
             "INSERT INTO market.earnings_surprises "
             "(instrument_id, fiscal_period_end, report_date, eps_actual, "
             " eps_estimate, surprise_pct, currency, before_after_market, "
-            " source, fetched_at) "
-            "VALUES (:iid, :fpe, :rd, :a, :e, :sp, :cur, :baf, :src, :fa) "
+            " source, fetched_at, split_basis_asof) "
+            "VALUES (:iid, :fpe, :rd, :a, :e, :sp, :cur, :baf, :src, :fa, :sba) "
             "ON CONFLICT (instrument_id, fiscal_period_end) DO NOTHING "
             "RETURNING id"),
             {"iid": instrument_id, "fpe": r.fiscal_period_end,
              "rd": r.report_date, "a": r.eps_actual, "e": r.eps_estimate,
              "sp": r.surprise_pct, "cur": r.currency,
-             "baf": r.before_after_market, "src": source, "fa": fetched_at})
+             "baf": r.before_after_market, "src": source, "fa": fetched_at,
+             # F-009: this row's per-share EPS is on the basis the vendor
+             # backward-adjusted to AT FETCH TIME -> anchor it to the fetch date.
+             "sba": fetched_at.astimezone(UTC).date()})
         inserted += 1 if res.first() is not None else 0
     return inserted
 
@@ -193,7 +227,7 @@ def ingest_earnings_history(session: Session, adapter: MarketDataAdapter,
             failures.append(f"earnings_history {symbol}: vendor fetch failed: {exc}")
             failed.append(symbol)
             continue
-        rows = parse_earnings_history(payload, symbol)
+        rows = parse_earnings_history(payload, symbol, known_as_of=now.date())
         if not rows:
             empty.append(symbol)
             continue

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from atlas.api.auth import require_system_internal
 from atlas.core.config import get_settings
 
 router = APIRouter()
@@ -10,12 +11,39 @@ router = APIRouter()
 @router.get("/health")
 def health() -> dict[str, object]:
     s = get_settings()
+    # F-019/F-020: report the DB runtime role's privilege posture. When the
+    # deployment demands least privilege but the runtime is a superuser (can bypass
+    # the audit triggers), health is 'degraded' — the wall is not truly enforced.
+    db_priv: dict[str, object] = {"checked": False}
+    status = "ok"
+    try:
+        from atlas.core.db import session_scope
+        from atlas.core.db_privilege import (
+            audit_triggers_always_enabled,
+            runtime_privilege,
+        )
+        with session_scope() as sess:
+            p = runtime_privilege(sess)
+            wall = audit_triggers_always_enabled(sess)
+        db_priv = {"checked": True, "role": p.role,
+                   "is_superuser": p.is_superuser,
+                   "can_bypass_triggers": not p.least_privilege,
+                   "least_privilege": p.least_privilege,
+                   "audit_triggers_enable_always": wall}
+        # Degraded when the audit wall is not replica-proof (0044 missing), or when
+        # least privilege is demanded but the runtime can still bypass.
+        if not wall or (s.db_require_least_privilege and not p.least_privilege):
+            status = "degraded"
+    except Exception as e:  # noqa: BLE001 — health must never 500 on a probe failure
+        db_priv = {"checked": False, "error": str(e)[:120]}
     return {
-        "status": "ok",
+        "status": status,
         "trading_mode": s.trading_mode,
         "armed": False,  # live arming is a Phase 6 mechanism; always false until then
         "limit_mode": s.limit_mode,
         "base_currency": s.base_currency,
+        "db_require_least_privilege": s.db_require_least_privilege,
+        "db_privilege": db_priv,
     }
 
 
@@ -67,7 +95,7 @@ def scheduler_status() -> dict[str, object]:
     return status()
 
 
-@router.post("/run-daily")
+@router.post("/run-daily", dependencies=[Depends(require_system_internal)])
 def run_daily() -> dict[str, object]:
     """One-click T0-T9 cycle from the console — the Principal's no-terminal
     path. Returns started=False (409-free, honest) when one is already

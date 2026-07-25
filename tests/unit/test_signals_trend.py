@@ -79,7 +79,11 @@ def test_engine_stop_exit_at_frozen_band_golden():
     t = r.trades[0]
     assert (t.entry_i, t.exit_i, t.reason) == (201, 205, "stop")
     assert t.entry == pytest.approx(103.0 * 1.001)
-    assert t.exit == pytest.approx(EXIT_BAND * 100.015 * 0.999)
+    # F-004: the stop bar is flat(97.0) — it OPENS at 97, below the frozen stop
+    # 98.0147 — so the fill is the obtainable open 97, not the stop price. The
+    # pre-remediation pin (EXIT_BAND * 100.015 * 0.999 = 97.9166) encoded a sell
+    # at a price the bar never traded at.
+    assert t.exit == pytest.approx(97.0 * 0.999)
 
 
 def test_monthly_reeval_reenters_inside_band_golden():
@@ -121,9 +125,14 @@ def test_costs_strictly_reduce_returns():
 
 
 def test_golden_regression_pins():
-    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3)."""
+    """Any drift in engine/strategy/fixture behaviour fails here (Doc 07 §3).
+    RE-PINNED for F-003/F-004 (see test_backtest_engine.py); pre-remediation:
+        total_return -0.09086623621181122 -> -0.08827066366032021
+        sharpe       -0.19757882149980135 -> -0.19059866846018308
+        max_drawdown -0.18592326158785055 -> -0.1835990763895966
+    """
     r = run_backtest(regime_series(), trend_v1, COSTS, start_i=60, end_i=1200)
-    assert r.total_return == pytest.approx(-0.09086623621181122)
-    assert r.sharpe == pytest.approx(-0.19757882149980135)
+    assert r.total_return == pytest.approx(-0.08827066366032021)
+    assert r.sharpe == pytest.approx(-0.19059866846018308)
     assert r.n_trades == 30
-    assert r.max_drawdown == pytest.approx(-0.18592326158785055)
+    assert r.max_drawdown == pytest.approx(-0.1835990763895966)

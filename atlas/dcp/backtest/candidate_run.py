@@ -40,7 +40,8 @@ from atlas.dcp.backtest.real_run import (
     assert_symbol_data_clean,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import lineage_count, register_trial, trial_count
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial, trial_count)
 from atlas.dcp.backtest.validation import GateReport, null_model_gate
 from atlas.dcp.backtest.walkforward import WalkForwardResult, walk_forward
 from atlas.dcp.signals.breakout.v1 import SPEC as BREAKOUT_SPEC
@@ -105,11 +106,13 @@ def run_candidate(session: Session, audit: PostgresAuditLog, family: str,
                  "max_drawdown": result.max_drawdown, "hit_rate": result.hit_rate,
                  "n_trades": float(result.n_trades)})
     n_trials = lineage_count(session, lineage)
+    sr_dispersion = lineage_sr_dispersion(session, lineage)  # F-005
 
     gate = null_model_gate(bars=obars, strategy=strategy, result=result,
                            avg_stop_frac=AVG_STOP_FRAC, avg_target_frac=AVG_TARGET_FRAC,
                            time_stop=TIME_STOP, costs=COSTS, start_i=WARMUP, end_i=n,
-                           n_trials=n_trials, paths=paths, seed=seed)
+                           n_trials=n_trials, paths=paths, seed=seed,
+                           sr_dispersion_annual=sr_dispersion)
     wf = walk_forward(obars, lambda b, t: strategy,
                       k=K_FOLDS, horizon=HORIZON, embargo=EMBARGO, warmup=WARMUP)
 

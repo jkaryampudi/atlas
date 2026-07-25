@@ -357,3 +357,131 @@ def test_approval_refuses_gate_deflated_at_family_count(pg_session):
                           gate=gate, wf=None, oos_untouched_attested=True)
     assert not d.approved
     assert any("lineage 'momentum' has 5" in r for r in d.reasons)
+
+
+def test_f022_unstamped_report_cannot_promote_a_never_shadowed_strategy(pg_session):
+    """F-022: identity verification is UNCONDITIONAL. A 'validated' strategy that
+    was NEVER research_shadow (shadowed_at NULL) with an 'approve' report carrying
+    NO _identity stamp must be REFUSED — previously the stamp requirement was
+    gated on shadowed_at, so such a promotion slipped through unverified."""
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, '{}', 'approve', '')"), {"sid": sid})   # no _identity
+    with pytest.raises(ValueError, match="identity-stamped validation artifact"):
+        require_signed_validation_artifact(s, str(sid))
+
+
+def test_f022_mismatched_stamped_identity_is_refused(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '')"),
+        {"sid": sid, "c": json.dumps({"_identity": {"code_sha": "deadbeef",
+                                                    "version": "0.0.0",
+                                                    "spec_hash": "x"}})})
+    with pytest.raises(ValueError, match="does not match"):
+        require_signed_validation_artifact(s, str(sid))
+
+
+def test_f022_matching_stamped_identity_promotes(pg_session):
+    s = pg_session
+    _clean(s)
+    sid = s.execute(text(
+        "INSERT INTO quant.strategies (family, name, version, spec, state) "
+        "VALUES ('momentum','trend_rs_vol','1.0.0','{}','validated') RETURNING id"
+    )).scalar_one()
+    ident = strategy_identity(s, str(sid))
+    s.execute(text(
+        "INSERT INTO quant.validation_reports "
+        "(strategy_id, backtest_id, checklist, verdict, reasons) "
+        "VALUES (:sid, NULL, CAST(:c AS jsonb), 'approve', '')"),
+        {"sid": sid, "c": json.dumps({"_identity": ident})})
+    require_signed_validation_artifact(s, str(sid))   # no raise
+
+
+class _StubGate:
+    """A passing null-model/DSR gate leg (evaluate_approval reads these three)."""
+    passed = True
+    reasons: list[str] = []
+    n_trials = 1
+
+
+class _StubWF:
+    def __init__(self, n: int, positive: int, benchmark: int) -> None:
+        self.fold_results = [object()] * n
+        self.positive_folds = positive
+        self.benchmark_folds = benchmark
+
+
+def test_f021_walkforward_must_beat_the_benchmark_not_just_be_positive(pg_session):
+    """F-021: a run whose folds are ALL positive but that beats the benchmark in
+    only a minority of folds (a bull-market beta run) must FAIL the walk-forward
+    gate — the old positive-folds check would have passed it."""
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=1)          # 4/4 positive, 1/4 beat SPY
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert not d.approved
+    assert any("beat the benchmark" in r for r in d.reasons)
+
+
+def test_f021_majority_beating_benchmark_clears_the_wf_leg(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=3)          # 3/4 beat SPY -> majority
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert d.approved
+    assert not any("walk-forward" in r for r in d.reasons)
+
+
+def test_f021_absent_benchmark_comparison_fails_closed(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=-1)          # no benchmark supplied
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True)
+    assert not d.approved
+    assert any("no benchmark comparison" in r for r in d.reasons)
+
+
+def test_f024_failed_mandatory_gate_refuses_approval(pg_session):
+    """F-024: a FAILED mandatory gate (e.g. a pre-committed kill trial) is
+    terminal — evaluate_approval refuses even when every other leg passes."""
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=4)          # all other legs pass
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True,
+                          mandatory_gates={"kill_trial_2016": False})
+    assert not d.approved
+    assert any("kill_trial_2016" in r and "FAILED" in r for r in d.reasons)
+
+
+def test_f024_passing_mandatory_gate_does_not_block(pg_session):
+    s = pg_session
+    _clean(s)
+    register_trial(s, family="fam", lineage="momentum", spec={}, metrics={})
+    wf = _StubWF(n=4, positive=4, benchmark=4)
+    d = evaluate_approval(s, family="fam", lineage="momentum", gate=_StubGate(),
+                          wf=wf, oos_untouched_attested=True,
+                          mandatory_gates={"kill_trial_2016": True})
+    assert d.approved

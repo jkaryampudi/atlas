@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
-from atlas.core.audit import ChainVerificationError
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from atlas.tools.verify_chain import run
@@ -37,18 +37,19 @@ def test_clean_chain_verifies_and_logs_its_own_pass(clean_audit):
     assert ev["verified_events"] == 3
 
 
-def test_payload_tamper_is_detected(clean_audit):
+def test_payload_tamper_is_refused(clean_audit):
+    """Migration 0042: the payload is immutable (append-only) — the tamper is now
+    PREVENTED at the DB, not merely detected afterwards. (verify_chain's payload-
+    hash detection is retained and unit-tested in test_audit_chain.py.)"""
     s = clean_audit
     _append(s, 2)
-    s.execute(text("UPDATE audit.decision_events "
-                   "SET payload = '{\"i\": 999}' WHERE seq = 1"))
-    with pytest.raises(ChainVerificationError, match="payload hash mismatch"):
-        run(s, CLOCK)
+    with pytest.raises(ProgrammingError, match="append-only"):
+        s.execute(text("UPDATE audit.decision_events "
+                       "SET payload = '{\"i\": 999}' WHERE seq = 1"))
 
 
-def test_row_deletion_is_detected(clean_audit):
+def test_row_deletion_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("DELETE FROM audit.decision_events WHERE seq = 2"))
-    with pytest.raises(ChainVerificationError):
-        run(s, CLOCK)
+    with pytest.raises(ProgrammingError, match="append-only"):
+        s.execute(text("DELETE FROM audit.decision_events WHERE seq = 2"))

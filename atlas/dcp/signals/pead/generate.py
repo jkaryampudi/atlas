@@ -85,6 +85,8 @@ from atlas.dcp.market_data.calendars import (
     last_completed_session,
     trading_days_between,
 )
+from atlas.dcp.market_data.earnings_basis import (load_splits_by_symbol,
+                                                  rebase_reports_by_symbol)
 from atlas.dcp.market_data.earnings_history import EarningsSurprise
 from atlas.dcp.signals.pead.v1 import build_earnings_view
 from atlas.dcp.signals.xsmom.generate import (
@@ -197,7 +199,8 @@ def _live_sues(session: Session, sig_session: date,
     reports: dict[str, list[EarningsSurprise]] = {}
     for r in session.execute(text(
             "SELECT i.symbol, es.fiscal_period_end, es.report_date, es.eps_actual, "
-            "       es.eps_estimate, es.surprise_pct, es.before_after_market "
+            "       es.eps_estimate, es.surprise_pct, es.before_after_market, "
+            "       es.split_basis_asof "
             "FROM market.earnings_surprises es "
             "JOIN market.instruments i ON i.id = es.instrument_id "
             "WHERE i.symbol = ANY(:syms) AND es.report_date <= :d "
@@ -209,8 +212,14 @@ def _live_sues(session: Session, sig_session: date,
             eps_estimate=Decimal(r.eps_estimate),
             surprise_pct=(Decimal(r.surprise_pct)
                           if r.surprise_pct is not None else None),
-            before_after_market=r.before_after_market, currency=None))
+            before_after_market=r.before_after_market, currency=None,
+            split_basis_asof=r.split_basis_asof))
 
+    # F-009: reconcile mixed split bases onto the signal-session basis before the
+    # cross-quarter SUE (splits capped at t -> look-ahead safe; no-op today).
+    reports = rebase_reports_by_symbol(
+        reports, load_splits_by_symbol(session, list(iids), up_to=sig_session),
+        knowledge_date=sig_session)
     view = build_earnings_view(reports, cal)
     sues: dict[str, float] = {}
     for sym in iids:

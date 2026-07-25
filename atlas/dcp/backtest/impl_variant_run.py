@@ -117,7 +117,8 @@ from atlas.dcp.backtest.real_run import (
     K_FOLDS,
     load_adjusted_obars,
 )
-from atlas.dcp.backtest.registry import lineage_count, register_trial
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial)
 from atlas.dcp.backtest.validation import deflated_sharpe
 from atlas.dcp.backtest.xsmom_pit_run import (
     BENCHMARK,
@@ -540,11 +541,15 @@ class ImplRun:
 
 def _endpoint_verdicts(strategy: PortfolioResult, spy: PortfolioResult,
                        nulls: list[PortfolioResult],
-                       n_trials: int) -> tuple[EndpointVerdict, ...]:
+                       n_trials: int,
+                       sr_dispersion_annual: float | None = None,
+                       ) -> tuple[EndpointVerdict, ...]:
     """The board's endpoint exhibit, EXACT (a curve truncated at endpoint E
     equals a run ended at E — decisions at t read only data <= t and a pending
     trade executes after the truncation mark). Thresholds imported; same
-    strictly-beats-SPY rule as portfolio_gate."""
+    strictly-beats-SPY rule as portfolio_gate. The per-endpoint DSR carries the
+    same empirical lineage dispersion as the full-window gate (F-005); each
+    endpoint floors it at its own sqrt(1/idx)."""
     dates = strategy.dates
     if spy.dates != dates or any(r.dates != dates for r in nulls):
         raise RuntimeError("strategy/SPY/null curves cover different sessions "
@@ -557,7 +562,8 @@ def _endpoint_verdicts(strategy: PortfolioResult, spy: PortfolioResult,
         sr = _return_at(strategy, idx)
         spy_r = _return_at(spy, idx)
         p = sum(1 for nr in nulls if _return_at(nr, idx) >= sr) / len(nulls)
-        dsr = deflated_sharpe(_sharpe_at(strategy, idx), idx, n_trials)
+        dsr = deflated_sharpe(_sharpe_at(strategy, idx), idx, n_trials,
+                              sr_dispersion_annual=sr_dispersion_annual)
         beats = sr > spy_r
         out.append(EndpointVerdict(
             endpoint=dates[idx], strategy_return=sr, spy_return=spy_r,
@@ -645,6 +651,7 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
                  "avg_turnover": result.avg_turnover,
                  "n_rebalances": float(result.n_rebalances)})
     n_trials = lineage_count(session, lineage)
+    sr_dispersion = lineage_sr_dispersion(session, lineage)  # F-005
     trials_after_total = total_trial_count(session)
 
     nulls = impl_null_results(panel, sleeves, variant, costs=COSTS,
@@ -655,8 +662,10 @@ def run_impl_variant(session: Session, audit: PostgresAuditLog,
                           start=start).result
     gate = portfolio_gate(result=result,
                           null_returns=[r.total_return for r in nulls],
-                          spy=spy, ew=ew, n_trials=n_trials)
-    endpoints = _endpoint_verdicts(result, spy, nulls, n_trials)
+                          spy=spy, ew=ew, n_trials=n_trials,
+                          sr_dispersion_annual=sr_dispersion)
+    endpoints = _endpoint_verdicts(result, spy, nulls, n_trials,
+                                   sr_dispersion_annual=sr_dispersion)
     del nulls  # curves served the exhibit; free ~30MB per gauntlet
     wf = pit_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
                           embargo=EMBARGO, warmup=start_i, costs=COSTS)

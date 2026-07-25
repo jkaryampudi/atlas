@@ -22,6 +22,7 @@ import threading
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
+from atlas.core.clock import Clock, SystemClock
 from atlas.ops.alerts import notify
 
 CYCLE_UTC = time(23, 30)     # 09:30 AEST — after the US close + EODHD publish
@@ -29,6 +30,12 @@ BACKUP_UTC = time(0, 30)     # an hour later, so the dump includes the run
 _REPO = Path(__file__).resolve().parents[2]
 
 _cycle_lock = threading.Lock()
+# M48: the scheduler's real-wall-clock source, routed through the Clock seam
+# rather than raw datetime.now(). The cron TICK legitimately needs true "now"
+# (never a FrozenClock) to fire and to catch up after laptop sleep — this is the
+# process/scheduling boundary — but going through _WALL keeps invariant-6 to a
+# single allowlisted site (clock.py) and lets a test monkeypatch it.
+_WALL: Clock = SystemClock()
 _last: dict[str, object] = {"started_at": None, "finished_at": None,
                             "ok": None, "refused": None, "detail": None}
 
@@ -62,14 +69,14 @@ def _run_cycle() -> None:
 
     from atlas.ops.daily import EXIT_REFUSED  # lazy: keep module import light
 
-    _last.update(started_at=datetime.now(UTC).isoformat(), finished_at=None,
+    _last.update(started_at=_WALL.now().isoformat(), finished_at=None,
                  ok=None, refused=None, detail="running", progress=[])
     progress: list[dict[str, object]] = _last["progress"]  # type: ignore[assignment]
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "atlas.ops.daily"], cwd=_REPO,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            bufsize=1)
+            [sys.executable, "-m", "atlas.ops.daily", "--trigger", "scheduler"],
+            cwd=_REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
         tail: list[str] = []
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -100,7 +107,7 @@ def _run_cycle() -> None:
     except Exception as e:  # noqa: BLE001 — the scheduler must survive anything
         ok, refused, detail = False, False, f"cycle runner crashed: {e}"
         notify("Atlas daily cycle CRASHED", str(e), priority="high")
-    _last.update(finished_at=datetime.now(UTC).isoformat(), ok=ok,
+    _last.update(finished_at=_WALL.now().isoformat(), ok=ok,
                  refused=refused, detail=detail)
 
 
@@ -121,7 +128,7 @@ def start_cycle() -> bool:
 
 
 def status() -> dict[str, object]:
-    now = datetime.now(UTC)
+    now = _WALL.now()
     last = dict(_last)
     last["progress"] = [dict(e) for e in _last.get("progress", [])]  # type: ignore[union-attr]
     return {"cycle_running": _cycle_lock.locked(),
@@ -153,19 +160,42 @@ def _run_backup() -> None:
 # construction — the daily checkpoint replays an already-completed date and
 # the pre-session guard refuses a too-early one.
 TICK_SECONDS = 30.0
+# Run the dead-man / stuck supervisor every ~10 min (the alert_urgent latch makes
+# it idempotent, so cadence only bounds detection lag). F-025.
+SUPERVISE_EVERY_TICKS = 20
+
+
+async def _supervise_safely(startup: bool) -> None:
+    """Run the supervisor off-thread; it must NEVER stop the scheduler loop."""
+    from atlas.ops.supervise import recover_on_startup, supervise
+    # A fresh real clock (SystemClock is the wrapper, not a raw datetime.now —
+    # invariant-6 clean); kept SEPARATE from the module _WALL so the tick-loop's
+    # injectable wall clock and the supervisor's do not share one monkeypatch.
+    try:
+        if startup:
+            # a crash may have left a stale 'running' claim — clear it so a retry
+            # can proceed, and page for anything already missed while we were down.
+            await asyncio.to_thread(recover_on_startup, SystemClock())
+        await asyncio.to_thread(supervise, SystemClock())
+    except Exception as e:  # noqa: BLE001 — supervision is best-effort
+        notify("Atlas supervisor", f"cycle supervision failed: {e}",
+               priority="high")
 
 
 async def scheduler_loop() -> None:
     """Wall-clock tick loop for the two daily fire times. Started from the
     API's lifespan when ATLAS_INPROC_SCHEDULER=1. Each pending fire time is
     executed as soon as a tick observes it in the past (catch-up after system
-    sleep), then re-armed for the next day."""
-    now = datetime.now(UTC)
+    sleep), then re-armed for the next day. Also runs the F-025 dead-man
+    supervisor at boot (recovering any stale claim) and every SUPERVISE_EVERY_TICKS."""
+    await _supervise_safely(startup=True)
+    now = _WALL.now()
     pending = {"cycle": next_fire(now, CYCLE_UTC),
                "backup": next_fire(now, BACKUP_UTC)}
+    ticks = 0
     while True:
         await asyncio.sleep(TICK_SECONDS)
-        now = datetime.now(UTC)
+        now = _WALL.now()
         if now >= pending["cycle"]:
             pending["cycle"] = next_fire(now, CYCLE_UTC)
             if not start_cycle():
@@ -174,3 +204,6 @@ async def scheduler_loop() -> None:
         if now >= pending["backup"]:
             pending["backup"] = next_fire(now, BACKUP_UTC)
             await asyncio.to_thread(_run_backup)
+        ticks += 1
+        if ticks % SUPERVISE_EVERY_TICKS == 0:
+            await _supervise_safely(startup=False)

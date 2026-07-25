@@ -46,7 +46,7 @@ from typing import Any, Mapping
 from sqlalchemy import text
 
 from atlas.core.audit_repo import PostgresAuditLog
-from atlas.core.clock import FrozenClock
+from atlas.core.clock import Clock, FrozenClock, SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.factory.recipe_run import (
     render_recipe_report,
@@ -59,6 +59,11 @@ RECIPE_PATHS = 1000          # the committed null-model path count (CLI default)
 RECIPE_SEED = 7              # the committed seed (CLI default)
 
 _recipe_lock = threading.Lock()
+# M48: the ONE wall clock for this module's observability timestamps (job
+# started_at/finished_at in _status). Routed through the Clock seam — never a raw
+# datetime.now() — so invariant-6 holds and a test can monkeypatch it. The
+# gauntlet's own PIT timestamps use a data-derived FrozenClock inside _run().
+_WALL: Clock = SystemClock()
 _status: dict[str, object] = {"phase": "idle", "name": None, "spec_hash": None,
                               "started_at": None, "finished_at": None,
                               "detail": None, "result": None}
@@ -133,7 +138,7 @@ def _run(spec: RecipeSpec) -> None:
     else:
         verdict = "FAIL"
     _status.update(
-        phase="done", finished_at=datetime.now(UTC).isoformat(),
+        phase="done", finished_at=_WALL.now().isoformat(),
         detail=(f"{verdict}; report docs/reports/recipe-{spec.name}.md"),
         result={"verdict": verdict, "legs": legs,
                 "spec_hash": spec.spec_hash(),
@@ -191,7 +196,7 @@ def start_recipe(raw: Mapping[str, Any]) -> dict[str, object]:
     spec_path.parent.mkdir(parents=True, exist_ok=True)
     spec_path.write_text(json.dumps(spec.canonical(), indent=2, default=str) + "\n")
     _status.update(phase="running", name=spec.name, spec_hash=spec.spec_hash(),
-                   started_at=datetime.now(UTC).isoformat(), finished_at=None,
+                   started_at=_WALL.now().isoformat(), finished_at=None,
                    detail=(f"registering + running the gauntlet for "
                            f"'{spec.name}' (burns 2 trials against lineage "
                            f"'{spec.lineage}')"),
@@ -206,7 +211,7 @@ def start_recipe(raw: Mapping[str, Any]) -> dict[str, object]:
             # any counted rows for the name belong to the surface that won
             # the race (or an earlier run) — never attribute them to us
             _status.update(phase="failed",
-                           finished_at=datetime.now(UTC).isoformat(),
+                           finished_at=_WALL.now().isoformat(),
                            detail=(f"refused at the registration chokepoint: "
                                    f"{e} Rows already counted under this name "
                                    f"belong to whichever run registered them — "
@@ -226,7 +231,7 @@ def start_recipe(raw: Mapping[str, Any]) -> dict[str, object]:
                            "; no trial had been registered yet"
                            if burned == 0 else "")
             _status.update(phase="failed",
-                           finished_at=datetime.now(UTC).isoformat(),
+                           finished_at=_WALL.now().isoformat(),
                            detail=(str(e)[:260] + burned_line))
         finally:
             _recipe_lock.release()
@@ -236,7 +241,7 @@ def start_recipe(raw: Mapping[str, Any]) -> dict[str, object]:
         thread.start()
     except Exception as e:
         _status.update(phase="failed",
-                       finished_at=datetime.now(UTC).isoformat(),
+                       finished_at=_WALL.now().isoformat(),
                        detail=f"worker thread failed to start: {e}"[:300])
         _recipe_lock.release()
         raise

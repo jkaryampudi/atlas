@@ -104,7 +104,8 @@ from atlas.dcp.backtest.portfolio_validation import (
     portfolio_gate,
 )
 from atlas.dcp.backtest.real_run import COSTS, EMBARGO, HORIZON, K_FOLDS
-from atlas.dcp.backtest.registry import lineage_count, register_trial
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial)
 from atlas.dcp.backtest.xsmom_run import total_trial_count
 from atlas.dcp.backtest.xsmom_pit_run import (
     BENCHMARK,
@@ -430,6 +431,9 @@ def run_recipe(session: Session, audit: PostgresAuditLog, spec: RecipeSpec, *,
     finally:
         reg.close()
     n_trials = lineage_count(session, spec.lineage)
+    # F-005: dispersion over PRIOR real trials — this one registered metrics={}
+    # before the run (register-before-run), so it is not yet an observation.
+    sr_dispersion = lineage_sr_dispersion(session, spec.lineage)
     trials_after_total = total_trial_count(session)
 
     strategy = recipe_strategy(members, values, spec.top_n)
@@ -452,8 +456,10 @@ def run_recipe(session: Session, audit: PostgresAuditLog, spec: RecipeSpec, *,
                           start=start).result
     gate = portfolio_gate(result=result,
                           null_returns=[r.total_return for r in nulls],
-                          spy=spy, ew=ew, n_trials=n_trials)
-    endpoints = _endpoint_verdicts(result, spy, nulls, n_trials)
+                          spy=spy, ew=ew, n_trials=n_trials,
+                          sr_dispersion_annual=sr_dispersion)
+    endpoints = _endpoint_verdicts(result, spy, nulls, n_trials,
+                                   sr_dispersion_annual=sr_dispersion)
     del nulls  # curves served the exhibit; free the memory
     wf = pit_walk_forward(panel, strategy, k=K_FOLDS, horizon=HORIZON,
                           embargo=EMBARGO, warmup=start_i, costs=COSTS)

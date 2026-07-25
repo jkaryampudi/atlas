@@ -119,12 +119,19 @@ class PortfolioGateReport:
 
 def portfolio_gate(*, result: PortfolioResult, null_returns: list[float],
                    spy: PortfolioResult, ew: PortfolioResult,
-                   n_trials: int) -> PortfolioGateReport:
+                   n_trials: int,
+                   sr_dispersion_annual: float | None = None) -> PortfolioGateReport:
     """Verdict under the UNMODIFIED thresholds imported above. The binding
     buy-and-hold comparison is SPY (the fund's actual alternative); the
-    equal-weight benchmark is carried in the report, not the verdict."""
+    equal-weight benchmark is carried in the report, not the verdict.
+
+    ``sr_dispersion_annual`` (F-005): the empirical cross-trial Sharpe dispersion
+    of the lineage (``registry.lineage_sr_dispersion``); ``None`` falls back to —
+    and any supplied value is floored at — the ``sqrt(1/n_days)`` lower bound, so
+    supplying it can only lower the DSR, never loosen the gate."""
     p = sum(1 for x in null_returns if x >= result.total_return) / len(null_returns)
-    dsr = deflated_sharpe(result.sharpe, len(result.equity_curve) - 1, n_trials)
+    dsr = deflated_sharpe(result.sharpe, len(result.equity_curve) - 1, n_trials,
+                          sr_dispersion_annual=sr_dispersion_annual)
     reasons: list[str] = []
     if p > P_MAX:
         reasons.append(f"null-model: p={p:.3f} > {P_MAX} "
@@ -148,25 +155,41 @@ class PortfolioWalkForwardResult:
     mean_sharpe: float
     worst_fold_return: float
     positive_folds: int
+    # F-021: folds whose net strategy return beat the benchmark over the same
+    # window (same panel -> same currency basis). -1 = not computed.
+    benchmark_folds: int = -1
 
 
 def portfolio_walk_forward(panel: PricePanel, strategy: PortfolioStrategy, *,
                            k: int, horizon: int, embargo: int, warmup: int,
-                           costs: CostModel) -> PortfolioWalkForwardResult:
+                           costs: CostModel,
+                           benchmark: PortfolioStrategy | None = None,
+                           ) -> PortfolioWalkForwardResult:
     """Purged + embargoed folds over the daily session timeline (constants
-    from real_run; leakage_free re-asserted per fold, as in walkforward.py)."""
+    from real_run; leakage_free re-asserted per fold, as in walkforward.py).
+
+    F-021: when a ``benchmark`` strategy is supplied (e.g. SPY buy-and-hold), each
+    fold is also run for the benchmark over the SAME window and net of the SAME
+    costs, and ``benchmark_folds`` counts folds where the strategy BEAT it — the
+    honest robustness criterion (a bull-market beta run no longer passes on
+    absolute-positive folds alone). Both legs read the one panel, so the
+    comparison is currency-consistent by construction."""
     results: list[PortfolioResult] = []
+    bench: list[float] = []
     for fold in purged_folds(len(panel.dates), k=k, horizon=horizon,
                              embargo=embargo, warmup=warmup):
         assert leakage_free(fold, horizon=horizon, embargo=embargo)
-        results.append(run_portfolio_backtest(
-            panel, strategy, costs,
-            start=panel.dates[fold.test_start],
-            end=panel.dates[fold.test_end - 1]))
+        start, end = panel.dates[fold.test_start], panel.dates[fold.test_end - 1]
+        results.append(run_portfolio_backtest(panel, strategy, costs, start=start, end=end))
+        if benchmark is not None:
+            bench.append(run_portfolio_backtest(
+                panel, benchmark, costs, start=start, end=end).total_return)
     rets = [r.total_return for r in results]
     return PortfolioWalkForwardResult(
         fold_results=results,
         mean_return=fmean(rets),
         mean_sharpe=fmean(r.sharpe for r in results),
         worst_fold_return=min(rets),
-        positive_folds=sum(1 for x in rets if x > 0))
+        positive_folds=sum(1 for x in rets if x > 0),
+        benchmark_folds=(sum(1 for r, b in zip(rets, bench) if r > b)
+                         if benchmark is not None else -1))

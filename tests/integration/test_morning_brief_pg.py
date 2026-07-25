@@ -322,7 +322,7 @@ def test_api_shape_latest_and_404(constructed, monkeypatch):
         assert "no morning brief" in r.json()["detail"]
     finally:
         _clean(s)
-        s.execute(text("TRUNCATE audit.decision_events RESTART IDENTITY"))
+        s.execute(text("TRUNCATE audit.decision_events, audit.chain_head RESTART IDENTITY"))
         s.commit()
         reset_app_engine()
 

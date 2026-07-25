@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Protocol, Sequence
 
 from sqlalchemy import text
@@ -38,6 +39,8 @@ class WalkForwardArtifact(Protocol):
     def fold_results(self) -> Sequence[object]: ...
     @property
     def positive_folds(self) -> int: ...
+    @property
+    def benchmark_folds(self) -> int: ...   # F-021: folds beating the benchmark (-1 = absent)
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,9 @@ class ApprovalDecision:
 def evaluate_approval(session: Session, *, family: str, lineage: str,
                       gate: GateArtifact | None,
                       wf: WalkForwardArtifact | None,
-                      oos_untouched_attested: bool) -> ApprovalDecision:
+                      oos_untouched_attested: bool,
+                      mandatory_gates: Mapping[str, bool] | None = None,
+                      ) -> ApprovalDecision:
     """The n-consistency check compares the gate's n_trials against the same
     LINEAGE count the gate must have used (ADR-0016): a gate deflated at the
     old per-family count no longer clears this check once the lineage holds
@@ -68,11 +73,30 @@ def evaluate_approval(session: Session, *, family: str, lineage: str,
                        "— deflated Sharpe must use the true lineage count (ADR-0016)")
     if wf is None:
         reasons.append("missing purged walk-forward result")
-    elif wf.positive_folds < len(wf.fold_results) // 2 + 1:
-        reasons.append(f"walk-forward: only {wf.positive_folds}/{len(wf.fold_results)} "
-                       "folds positive")
+    else:
+        # F-021: robustness is measured by folds that BEAT THE BENCHMARK, not
+        # merely folds with positive absolute returns (a bull-market beta run
+        # clears the latter without any demonstrated edge). benchmark_folds is
+        # the currency-consistent excess-fold count; -1 means the caller supplied
+        # no benchmark comparison, which is itself a fail-closed refusal.
+        need = len(wf.fold_results) // 2 + 1
+        if wf.benchmark_folds < 0:
+            reasons.append("walk-forward has no benchmark comparison — a "
+                           "benchmark-relative fold count is required (F-021)")
+        elif wf.benchmark_folds < need:
+            reasons.append(f"walk-forward: only {wf.benchmark_folds}/"
+                           f"{len(wf.fold_results)} folds beat the benchmark "
+                           f"(need {need})")
     if not oos_untouched_attested:
         reasons.append("OOS holdout not attested as untouched during development")
+    # F-024: a FAILED mandatory gate (e.g. a pre-committed kill trial) is
+    # terminal — approval cannot proceed on failed-kill evidence, and no signed
+    # override may be represented here as a gate PASS (a governance waiver, if it
+    # exists, is a separate explicit artifact, never an 'approve' verdict).
+    for name, passed in (mandatory_gates or {}).items():
+        if not passed:
+            reasons.append(f"mandatory gate {name!r} FAILED — refusing approval "
+                           "(F-024: failed-kill evidence cannot approve)")
     return ApprovalDecision(approved=not reasons, reasons=reasons)
 
 
@@ -158,19 +182,23 @@ def require_signed_validation_artifact(session: Session, strategy_id: str) -> No
     # (a legacy unstamped report cannot lift a research_shadow row).
     checklist = report["checklist"] if isinstance(report["checklist"], dict) else {}
     stamped = checklist.get("_identity")
-    if row["shadowed_at"] is not None and not stamped:
+    # F-022: identity verification is UNCONDITIONAL — every promotion (not only a
+    # re-promotion of a previously-shadowed strategy) must carry a stamped
+    # identity that matches the strategy's CURRENT executable. Previously the
+    # stamp requirement was gated on shadowed_at, so a never-shadowed strategy
+    # could be promoted on an UNSTAMPED report whose executable was never checked.
+    if not stamped:
         raise ValueError(
-            "re-promotion of a research_shadow strategy requires an "
-            "identity-stamped validation artifact (ADR-0018) — the report does "
-            "not pin code_sha/version/spec")
-    if stamped is not None:
-        current = strategy_identity(session, strategy_id)
-        if stamped != current:
-            raise ValueError(
-                "validation artifact identity does not match the strategy's "
-                f"current identity (artifact={stamped}, strategy={current}) — the "
-                "artifact validated a different code/version/config; refusing "
-                "promotion")
+            "promotion requires an identity-stamped validation artifact "
+            "(ADR-0018) — the report does not pin code_sha/version/spec; a "
+            "legacy unstamped report cannot promote any strategy")
+    current = strategy_identity(session, strategy_id)
+    if stamped != current:
+        raise ValueError(
+            "validation artifact identity does not match the strategy's "
+            f"current identity (artifact={stamped}, strategy={current}) — the "
+            "artifact validated a different code/version/config; refusing "
+            "promotion")
 
 
 def transition_to_paper(session: Session, audit: PostgresAuditLog, *,

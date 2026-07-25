@@ -78,7 +78,9 @@ def test_engine_stop_exit_at_20_bar_low_golden():
     t = r.trades[0]
     assert (t.entry_i, t.exit_i, t.reason) == (61, 65, "stop")
     assert t.entry == pytest.approx(101.0 * 1.001)
-    assert t.exit == pytest.approx(99.0 * 0.999)
+    # F-004: the crash bar OPENS at 98.0 — below the stop 99 — so the fill is
+    # the obtainable open, not the unobtainable stop (was 99.0 * 0.999).
+    assert t.exit == pytest.approx(98.0 * 0.999)
 
 
 def test_engine_reeval_refreshes_trailing_stop_golden():
@@ -97,7 +99,9 @@ def test_engine_reeval_refreshes_trailing_stop_golden():
     assert [(t.entry_i, t.exit_i, t.reason) for t in r.trades] == \
         [(61, 81, "time"), (82, 83, "stop")]
     assert r.trades[0].exit == pytest.approx(105.2 * 0.999)   # close of bar 81
-    assert r.trades[1].exit == pytest.approx(100.4 * 0.999)   # refreshed stop
+    # F-004: the crash bar OPENS at 100.0 — below the refreshed stop 100.4 — so
+    # the fill is the obtainable open, not the stop (was 100.4 * 0.999).
+    assert r.trades[1].exit == pytest.approx(100.0 * 0.999)
 
 
 def test_no_look_ahead_is_structural():

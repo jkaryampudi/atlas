@@ -39,6 +39,8 @@ from sqlalchemy.orm import Session
 from atlas.core.clock import Clock
 from atlas.dcp.indicators.core import rsi, sma
 from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.benchmark import (benchmark_reporting_series,
+                                             reporting_close_series)
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.market_data.fundamentals import _get, _number
 from atlas.dcp.market_data.models import Bar, Split
@@ -263,23 +265,35 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
     WRITE-ONCE (WHERE ... IS NULL, so a graded outcome is a fact, never
     revised). excess = pick_return - SPY_return over the pick's own priceable
     sessions from the recommendation anchor, the scorecard's rule (excess > 0 =
-    OUTperformed). Fail-closed: a pick whose instrument or SPY series can't
-    anchor is skipped, not guessed."""
+    OUTperformed).
+
+    F-006: BOTH legs are on the fund's AUD TOTAL-RETURN basis, from the ONE
+    authoritative service (market_data/benchmark.py) — a pick in INR is no longer
+    differenced against SPY in USD. Fail-closed: a pick whose instrument or SPY
+    series can't anchor (or can't be priced in AUD) is skipped, not guessed."""
     on = clock.now().date()
-    spy_iid = session.execute(text(
-        "SELECT id FROM market.instruments WHERE symbol = 'SPY' "
-        "ORDER BY is_active DESC, id LIMIT 1")).scalar()
-    spy = _adjusted_closes(session, spy_iid, on) if spy_iid is not None else []
+    try:
+        spy = sorted(benchmark_reporting_series(session, through=on).items())
+    except RuntimeError:                  # benchmark unpriceable in AUD -> fail closed
+        spy = []
     spy_dates = [d for d, _ in spy]
     graded = immature = 0
-    cols = ", ".join(f"excess_{h}" for h in PICK_HORIZONS)
-    null_any = " OR ".join(f"excess_{h} IS NULL" for h in PICK_HORIZONS)
+    cols = ", ".join(f"sp.excess_{h}" for h in PICK_HORIZONS)
+    null_any = " OR ".join(f"sp.excess_{h} IS NULL" for h in PICK_HORIZONS)
     rows = session.execute(text(
-        f"SELECT id, instrument_id, recommendation_date, {cols} "
-        "FROM research.source_picks "
-        f"WHERE ({null_any}) AND instrument_id IS NOT NULL")).all()
+        f"SELECT sp.id, sp.instrument_id, sp.recommendation_date, {cols}, "
+        "       i.symbol AS symbol, i.currency AS currency "
+        "FROM research.source_picks sp "
+        "JOIN market.instruments i ON i.id = sp.instrument_id "
+        f"WHERE ({null_any}) AND sp.instrument_id IS NOT NULL")).all()
     for r in rows:
-        series = _adjusted_closes(session, r.instrument_id, on)
+        try:
+            series = sorted(reporting_close_series(
+                session, instrument_id=r.instrument_id, symbol=r.symbol,
+                currency=r.currency, through=on).items())
+        except RuntimeError:              # unpriceable in AUD -> fail closed
+            immature += 1
+            continue
         dates = [d for d, _ in series]
         a = anchor_index(dates, r.recommendation_date)
         sa = anchor_index(spy_dates, r.recommendation_date)
@@ -297,8 +311,8 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
             if series[a + h][1] <= 0 or spy[sa + h][1] <= 0:
                 immature += 1
                 continue
-            pick_ret = Decimal(str(series[a + h][1] / series[a][1] - 1.0))
-            spy_ret = Decimal(str(spy[sa + h][1] / spy[sa][1] - 1.0))
+            pick_ret = series[a + h][1] / series[a][1] - 1
+            spy_ret = spy[sa + h][1] / spy[sa][1] - 1
             excess = (pick_ret - spy_ret).quantize(_RET6)
             updates[col] = excess
         if updates:

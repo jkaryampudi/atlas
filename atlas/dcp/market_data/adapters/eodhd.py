@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 
+from atlas.core.secrets import RedactingError
 from atlas.dcp.market_data.models import (EARNINGS_WHEN_TIMES, Bar, Dividend,
                                            EarningsEvent, Split)
 
@@ -87,11 +88,32 @@ class EodhdAdapter:
             raise ValueError(f"symbol {symbol!r} not in vendor symbol map — "
                              "refusing bare pass-through") from None
 
+    def _request(self, path: str, **params: str) -> object:
+        """The ONE secret-safe EODHD transport (F-013). EODHD accepts the token
+        ONLY as a query param, so it is on the wire — but it must NEVER escape
+        into an exception/log/audit/alert payload. httpx embeds the full URL
+        (incl. api_token) in HTTPStatusError and RequestError alike; we catch
+        every httpx error and re-raise a message scrubbed of the key, with
+        `from None` so the token-bearing original is not chained into a
+        traceback. EVERY EODHD call — list or object shaped — goes through here;
+        `self._client` is touched nowhere else (enforced by
+        tests/unit/test_eodhd_secret_safe.py's AST guard)."""
+        try:
+            r = self._client.get(f"{BASE}{path}",
+                                 params={"api_token": self._key, "fmt": "json", **params})
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            scrubbed = RedactingError(f"EODHD GET {path} failed: {exc}", self._key)
+        else:
+            return r.json()
+        # Raised OUTSIDE the except handler so the token-bearing httpx error is not
+        # chained onto it (neither __cause__ nor __context__) — nothing that walks
+        # the exception chain can reach the key.
+        raise scrubbed
+
     def _get(self, path: str, **params: str) -> list[dict[str, object]]:
-        r = self._client.get(f"{BASE}{path}",
-                             params={"api_token": self._key, "fmt": "json", **params})
-        r.raise_for_status()
-        data = r.json()
+        """List-shaped endpoints (/eod, /splits, /div, FOREX)."""
+        data = self._request(path, **params)
         return data if isinstance(data, list) else []
 
     def fetch_bars(self, symbol: str, start: date, end: date) -> list[Bar]:
@@ -151,13 +173,10 @@ class EodhdAdapter:
         whose report_date does not parse as an ISO date is vendor noise and
         is dropped. A flag outside EARNINGS_WHEN_TIMES becomes None — never
         stored, never rendered."""
-        r = self._client.get(f"{BASE}/calendar/earnings",
-                             params={"api_token": self._key, "fmt": "json",
-                                     "symbols": self._sym(symbol),
-                                     "from": start.isoformat(),
-                                     "to": end.isoformat()})
-        r.raise_for_status()
-        data = r.json()
+        data = self._request("/calendar/earnings",
+                             **{"symbols": self._sym(symbol),
+                                "from": start.isoformat(),
+                                "to": end.isoformat()})
         rows = data.get("earnings") if isinstance(data, dict) else None
         out: list[EarningsEvent] = []
         for row in rows if isinstance(rows, list) else []:
@@ -178,10 +197,7 @@ class EodhdAdapter:
         Highlights / Valuation / ... for stocks; ETF_Data for ETFs). Raises
         LookupError when EODHD has nothing — a missing document must be a
         recorded failure upstream, never a silent empty snapshot."""
-        r = self._client.get(f"{BASE}/fundamentals/{self._sym(symbol)}",
-                             params={"api_token": self._key, "fmt": "json"})
-        r.raise_for_status()
-        data = r.json()
+        data = self._request(f"/fundamentals/{self._sym(symbol)}")
         if not isinstance(data, dict) or not data:
             raise LookupError(f"EODHD has no fundamentals for {symbol!r}")
         return dict(data)

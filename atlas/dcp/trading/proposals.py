@@ -114,6 +114,7 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
+from atlas.core.locks import acquire_trading_lifecycle_lock
 from atlas.dcp.execution.paper import PRICE_SOURCE, Broker, Fill, OrderTicket, PaperBroker, fx_to_aud
 from atlas.dcp.portfolio.snapshot import Holding, compute_snapshot
 from atlas.dcp.risk.approval_recheck import recheck_at_approval
@@ -141,6 +142,19 @@ PROPOSAL_TTL = timedelta(hours=24)  # Doc 05 §5: expires_at = created + 24h
 _CENT = Decimal("0.01")
 _PCT = Decimal("0.0001")
 _QTY6 = Decimal("0.000001")
+
+# M35: execution-time price collar. Risk sizes a proposal at its APPROVED decision
+# price; the order carries a FIXED qty, so if the fill lands materially away from
+# that price the executed notional (qty × fill) no longer matches the notional
+# risk cleared — the trade is not the one that was approved. A BUY whose fill
+# drifts beyond this collar from its decision price is REFUSED fail-closed (voided,
+# no capital deployed); the human may re-propose at the new price. Symmetric on
+# |drift|, so it also fires as a price-sanity gate at execution (a vendor glitch —
+# e.g. a 34,000× bar — blows it). Sells are intentionally EXEMPT: a sell reduces
+# risk (stops/rebalance/close), and refusing to exit is the greater hazard than a
+# bad exit price. Conservative default; a tunable RISK parameter that should
+# graduate into the governed limit_set (M38) rather than stay a code constant.
+EXECUTION_PRICE_COLLAR_BPS = Decimal("1000")   # 10% max fill-vs-decision drift
 
 
 # ------------------------------------------------------------------- results
@@ -214,8 +228,7 @@ def _lifecycle_lock(session: Session) -> None:
     entrypoint: without it, two concurrent approvals each re-check against a
     book that excludes the other's order (a race-shaped L3/L5/L9 bypass), and
     two settle runs can double-fill an order."""
-    session.execute(text(
-        "SELECT pg_advisory_xact_lock(hashtext('atlas.trading.lifecycle'))"))
+    acquire_trading_lifecycle_lock(session)  # F-018: audit lock first (canonical order)
 
 
 def _india_exposed(market: str, economic_exposure: Sequence[str] | None) -> bool:
@@ -586,7 +599,10 @@ MOMENTUM_FAMILIES: tuple[str, ...] = ("xsmom-pit-tr",)
 _MOMENTUM_SIGNALS = ("ARRAY(SELECT s.id FROM quant.signals s "
                      "JOIN quant.strategies st ON st.id = s.strategy_id "
                      "WHERE st.family = ANY(:fams) "
-                     "  AND st.state IN ('MUTANT_no_such_state'))")
+                     "  AND st.state IN ('paper','live'))")  # F-011: authoritative
+# states only (matches bridge.py momentum-signal join). A surviving mutation-test
+# artifact ('MUTANT_no_such_state') previously made this always-empty, silently
+# disabling the §12 momentum-factor overlay.
 
 
 def _momentum_symbols(session: Session) -> frozenset[str]:
@@ -618,7 +634,7 @@ def _proposal_is_momentum(session: Session, signal_refs: Sequence[str]) -> bool:
         "SELECT 1 FROM quant.signals s "
         "JOIN quant.strategies st ON st.id = s.strategy_id "
         "WHERE s.id = ANY(:ids) AND st.family = ANY(:fams) "
-        "  AND st.state IN ('MUTANT_no_such_state') LIMIT 1"),
+        "  AND st.state IN ('paper','live') LIMIT 1"),  # F-011: authoritative states
         {"ids": [UUID(r) for r in signal_refs],
          "fams": list(MOMENTUM_FAMILIES)}).first() is not None
 
@@ -1107,6 +1123,76 @@ def cancel_order(session: Session, clock: Clock, *, order_id: str,
 
 # ------------------------------------------------------------- settlement (§5)
 
+def _buy_lineage_authoritative(session: Session, proposal_id: object) -> bool:
+    """F-026: a BUY's signal lineage must resolve ONLY to authoritative
+    (paper/live) strategies at settle time. A proposal with NO signal lineage is
+    discretionary/core — authoritative by construction. Any signal that resolves
+    to a research_shadow/suspended/other non-authoritative strategy makes the buy
+    stale (its approval predates a downgrade) and it must not deploy capital."""
+    states = session.execute(text(
+        "SELECT DISTINCT st.state FROM trading.trade_proposals tp "
+        "JOIN quant.signals sig ON sig.id = ANY(tp.signal_ids) "
+        "JOIN quant.strategies st ON st.id = sig.strategy_id "
+        "WHERE tp.id = :p AND tp.signal_ids IS NOT NULL"),
+        {"p": proposal_id}).scalars().all()
+    return all(s in ("paper", "live") for s in states)
+
+
+def _void_stale_order(session: Session, clock: Clock, r: Any) -> None:
+    """Cancel a stale non-authoritative buy order and void its proposal, releasing
+    its committed capital; both transitions land on the audit chain (F-026)."""
+    now = clock.now()
+    audit = _audit(session, clock)
+    session.execute(text(
+        "UPDATE trading.orders SET state = 'cancelled', closed_at = :t "
+        "WHERE id = :o AND state = 'pending_submit'"), {"t": now, "o": r.id})
+    session.execute(text(
+        "UPDATE trading.trade_proposals SET state = 'voided' WHERE id = :p"),
+        {"p": r.proposal_id})
+    audit.append(event_type="order.state_changed", entity_type="order",
+                 entity_id=str(r.id), actor_type="dcp", actor_id="settle",
+                 payload={"from": "pending_submit", "to": "cancelled",
+                          "reason": "F-026: signal lineage no longer authoritative at settle"})
+    audit.append(event_type="proposal.voided", entity_type="proposal",
+                 entity_id=str(r.proposal_id), actor_type="dcp", actor_id="settle",
+                 payload={"reason": "F-026: stale pre-downgrade buy refused; no capital deployed"})
+
+
+def _fill_price_drift_bps(fill: Fill) -> Decimal:
+    """M35: absolute fill-vs-decision price drift, in bps and UNSIGNED — a
+    favourable gap or a vendor glitch trips the collar as readily as an adverse
+    one. `decision_price` is a proposal entry price (schema CHECK > 0)."""
+    return (abs(fill.fill_price - fill.decision_price) * Decimal(10_000)
+            / fill.decision_price)
+
+
+def _void_collar_breach(session: Session, clock: Clock, r: Any, fill: Fill,
+                        drift_bps: Decimal) -> None:
+    """M35: refuse a BUY whose fill breached the execution price collar — cancel
+    the order and void its proposal fail-closed (no capital deployed at an
+    untrusted/adverse price), releasing the committed capital; both transitions
+    land on the audit chain. The human may re-propose at the new price."""
+    now = clock.now()
+    audit = _audit(session, clock)
+    reason = (
+        f"M35: fill {fill.fill_price} drifted {drift_bps.quantize(_PCT)} bps from "
+        f"decision {fill.decision_price} (collar {EXECUTION_PRICE_COLLAR_BPS} bps) "
+        "— buy refused, no capital deployed")
+    session.execute(text(
+        "UPDATE trading.orders SET state = 'cancelled', closed_at = :t "
+        "WHERE id = :o AND state = 'pending_submit'"), {"t": now, "o": r.id})
+    session.execute(text(
+        "UPDATE trading.trade_proposals SET state = 'voided' WHERE id = :p"),
+        {"p": r.proposal_id})
+    audit.append(event_type="order.state_changed", entity_type="order",
+                 entity_id=str(r.id), actor_type="dcp", actor_id="settle",
+                 payload={"from": "pending_submit", "to": "cancelled",
+                          "reason": reason})
+    audit.append(event_type="proposal.voided", entity_type="proposal",
+                 entity_id=str(r.proposal_id), actor_type="dcp", actor_id="settle",
+                 payload={"reason": reason})
+
+
 def settle_orders(session: Session, clock: Clock,
                   broker: Broker | None = None) -> tuple[FillReport, ...]:
     """Fill every 'pending_submit' order whose next-session bar now exists.
@@ -1151,6 +1237,14 @@ def settle_orders(session: Session, clock: Clock,
                 "reference a PASS approval-time check on an approved proposal, "
                 "or a PASS order-time check on an executed entry proposal "
                 "(stop exit) (Doc 04 §2.3)")
+        # F-026: a BUY deploys capital, so its signal lineage must STILL resolve
+        # to an authoritative (paper/live) strategy at settle time. A stale
+        # approval whose strategy was downgraded to research_shadow AFTER approval
+        # must not fill — void it fail-closed and record it, never deploy. (A SELL
+        # / stop-exit closes an existing position and is always allowed.)
+        if r.side == "buy" and not _buy_lineage_authoritative(session, r.proposal_id):
+            _void_stale_order(session, clock, r)
+            continue
         fill = b.submit(session, OrderTicket(
             order_id=str(r.id), instrument_id=r.iid, market=r.market,
             currency=r.currency, side=r.side, qty=int(r.qty),
@@ -1158,6 +1252,15 @@ def settle_orders(session: Session, clock: Clock,
             decision_date=r.created_at.astimezone(UTC).date()), as_of=as_of)
         if fill is None:
             continue
+        # M35: execution-time price collar. A BUY that fills materially away from
+        # its risk-approved decision price is no longer the trade risk cleared —
+        # refuse it fail-closed rather than deploy capital at an untrusted price.
+        # Sells (risk-reducing exits) are exempt: refusing to close is worse.
+        if r.side == "buy":
+            drift = _fill_price_drift_bps(fill)
+            if drift > EXECUTION_PRICE_COLLAR_BPS:
+                _void_collar_breach(session, clock, r, fill, drift)
+                continue
         reports.append(_record_fill(session, clock, r, fill))
     return tuple(reports)
 

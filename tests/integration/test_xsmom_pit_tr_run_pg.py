@@ -114,6 +114,15 @@ def _seed(s, *, spy_dividends: bool = True) -> None:
     _dividend(s, "ZPT9", date(2012, 9, 21), "1.50")
     _dividend(s, DEAD, date(2013, 9, 15), "9.99")   # after final bar: dropped
     _dividend(s, "ZPT8", date(2010, 6, 1), "9.99")  # before inception: dropped
+    # F-001: resolved single-issuer identity per instrument so the panel's identity
+    # gate keeps each member's legitimate same-issuer pre-era history (valid_from =
+    # first stored bar, set after bars are seeded).
+    from atlas.dcp.market_data.identity import refresh_identity
+    for k, r in enumerate(s.execute(text(
+            "SELECT DISTINCT instrument_id FROM market.price_bars_daily "
+            "ORDER BY instrument_id")).all()):
+        refresh_identity(s, str(r.instrument_id),
+                         {"General": {"ISIN": f"US{k:010d}"}}, known_from=FETCHED)
 
 
 def test_tr_panel_scales_series_and_counts_coverage(pg_session):

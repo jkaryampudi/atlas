@@ -179,6 +179,46 @@ def test_valuation_math_golden(pg_session):
     assert sm["verdict"] == "within our model range"
 
 
+def test_cross_currency_adr_fails_closed(pg_session):
+    """F-010: a non-USD-reporting ADR (statements in EUR, listed/priced in USD)
+    must NOT produce a fair value / upside / verdict from FX-mixed inputs — every
+    model value is None with a currency-mismatch note. Fails against pre-fix code
+    (which compared EUR-derived fair values to a USD price)."""
+    s = pg_session
+    iid = s.execute(text(
+        "INSERT INTO market.instruments (symbol, exchange, market, instrument_type,"
+        " name, currency, is_active, sector_gics) "
+        "VALUES ('ADRX','US','US','adr','ADRX','USD',true,'TestTech') RETURNING id")
+    ).scalar()
+    payload = json.loads(json.dumps(_VALU))
+    payload["General"] = {"CurrencyCode": "EUR"}    # statements EUR, listing USD
+    _fund(s, iid, date(2025, 12, 31), payload)
+    _bar(s, iid, date(2025, 12, 31), 100)
+
+    v = compute_valuation(s, iid, "ADRX", date(2026, 1, 1))
+    sm = v["summary"]
+    assert sm["valuation_basis"] == "currency_blocked"
+    assert (sm["fair_value_central"], sm["upside_to_central_pct"], sm["verdict"]) \
+        == (None, None, None)
+    assert v["cost_of_capital"]["wacc"] is None
+    assert v["epv"]["fair_value_per_share"] is None
+    assert v["dcf"]["fair_value_per_share"] is None
+    assert "EUR" in sm["note"] and "USD" in sm["note"]
+    assert v["price"] == 100.0                      # listing-currency price still shown
+
+
+def test_matching_currency_still_values_normally(pg_session):
+    """Control: a USD-reporting USD-listed name is unaffected — the guard only
+    fires on a genuine mismatch."""
+    s = pg_session
+    iid = _instrument(s, "USDU")
+    _fund(s, iid, date(2025, 12, 31), json.loads(json.dumps(_VALU)))  # General USD
+    _bar(s, iid, date(2025, 12, 31), 50)
+    v = compute_valuation(s, iid, "USDU", date(2026, 1, 1))
+    assert v["summary"]["valuation_basis"] != "currency_blocked"
+    assert v["cost_of_capital"]["wacc"] is not None
+
+
 def test_tax_normalized_and_net_cash(pg_session):
     s = pg_session
     iid = _instrument(s, "EDGE")

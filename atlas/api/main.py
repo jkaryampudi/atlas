@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+
+from atlas.core.config import get_settings
 
 from atlas.api.routers import (
     audit,
@@ -39,6 +41,19 @@ _DOSSIER = Path(__file__).resolve().parents[1] / "dashboard" / "dossier.html"
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # F-019/F-020: fail closed at startup. The audit-wall check is UNCONDITIONAL —
+    # the append-only / anchor triggers must be ENABLE ALWAYS (0044) so replica
+    # mode cannot suppress them even for a superuser. The runtime-role check
+    # (no superuser) additionally runs when least privilege is demanded (default).
+    from atlas.core.db import session_scope
+    from atlas.core.db_privilege import (
+        assert_audit_wall_enforced,
+        assert_least_privilege_runtime,
+    )
+    with session_scope() as _s:
+        assert_audit_wall_enforced(_s)
+        if get_settings().db_require_least_privilege:
+            assert_least_privilege_runtime(_s)
     task: asyncio.Task[None] | None = None
     if os.environ.get("ATLAS_INPROC_SCHEDULER") == "1":
         from atlas.ops.scheduler import scheduler_loop
@@ -58,8 +73,21 @@ def root() -> RedirectResponse:
 
 
 @app.get("/console", include_in_schema=False)
-def console() -> FileResponse:
-    return FileResponse(_CONSOLE, media_type="text/html")
+def console() -> HTMLResponse:
+    """Serve the console with the loopback operator token injected (F-016). The
+    token is read from the deployment env at serve time and never written to the
+    static file; substitution happens only for this same-origin loopback page."""
+    import json
+
+    from atlas.api.auth import console_token
+
+    html = _CONSOLE.read_text(encoding="utf-8")
+    token = console_token()
+    if token:
+        html = html.replace(
+            'window.__ATLAS_TOKEN__ = "";',
+            f"window.__ATLAS_TOKEN__ = {json.dumps(token)};", 1)
+    return HTMLResponse(html, media_type="text/html")
 
 
 @app.get("/console/dossier", include_in_schema=False)

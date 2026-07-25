@@ -23,10 +23,13 @@ from atlas.core.audit_repo import PostgresAuditLog
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.core.clock import FrozenClock
 from atlas.dcp.backtest.engine import CostModel, OBar, Result, run_backtest
-from atlas.dcp.backtest.registry import lineage_count, register_trial
+from atlas.dcp.backtest.registry import (
+    lineage_count, lineage_sr_dispersion, register_trial)
 from atlas.dcp.backtest.validation import GateReport, null_model_gate
 from atlas.dcp.backtest.walkforward import WalkForwardResult, walk_forward
 from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.bar_versions import load_bars_asof
+from atlas.dcp.market_data.corp_action_versions import load_splits_asof
 from atlas.dcp.market_data.models import Bar, Split
 from atlas.dcp.signals.momentum.v1 import SPEC, momentum_v1
 
@@ -54,8 +57,29 @@ class SymbolRun:
     lineage: str = LINEAGE
 
 
-def load_adjusted_obars(session: Session, symbol: str) -> tuple[list[OBar], list[date]]:
-    """Real bars (vendor-sourced only), split-adjusted on read."""
+def load_adjusted_obars(session: Session, symbol: str, *,
+                        known_by: datetime | None = None,
+                        ) -> tuple[list[OBar], list[date]]:
+    """Real bars (vendor-sourced only), split-adjusted on read.
+
+    F-007: with ``known_by`` set, the bars and splits are read AS THEY WERE KNOWN
+    at that instant (market.price_bars_versions / corporate_actions_versions), so
+    a registered run reproduces byte-identically even after a later correction.
+    ``known_by=None`` (the default) reads the head tables — the pre-versioning
+    behaviour, byte-identical to today."""
+    if known_by is not None:
+        iid = session.execute(text(
+            "SELECT id FROM market.instruments WHERE symbol = :s"),
+            {"s": symbol}).scalar()
+        # match the head reader's provenance filter (vendor bars only) so the
+        # as-of read is byte-identical to the head path at known_by=now.
+        bars = load_bars_asof(session, iid, known_by=known_by, symbol=symbol,
+                              source="EodhdAdapter")
+        splits = load_splits_asof(session, iid, known_by=known_by, symbol=symbol)
+        adjusted = adjust_for_splits(bars, splits)
+        obars = [OBar(open=float(b.open), high=float(b.high), low=float(b.low),
+                      close=float(b.close), volume=float(b.volume)) for b in adjusted]
+        return obars, [b.bar_date for b in adjusted]
     rows = session.execute(text(
         "SELECT pb.bar_date, pb.open, pb.high, pb.low, pb.close, pb.volume "
         "FROM market.price_bars_daily pb "
@@ -133,11 +157,13 @@ def run_symbol(session: Session, audit: PostgresAuditLog, symbol: str, *,
                  "max_drawdown": result.max_drawdown, "hit_rate": result.hit_rate,
                  "n_trades": float(result.n_trades)})
     n_trials = lineage_count(session, LINEAGE)
+    sr_dispersion = lineage_sr_dispersion(session, LINEAGE)  # F-005
 
     gate = null_model_gate(bars=obars, strategy=momentum_v1, result=result,
                            avg_stop_frac=AVG_STOP_FRAC, avg_target_frac=AVG_TARGET_FRAC,
                            time_stop=TIME_STOP, costs=COSTS, start_i=WARMUP, end_i=n,
-                           n_trials=n_trials, paths=paths, seed=seed)
+                           n_trials=n_trials, paths=paths, seed=seed,
+                           sr_dispersion_annual=sr_dispersion)
     wf = walk_forward(obars, lambda b, t: momentum_v1,
                       k=K_FOLDS, horizon=HORIZON, embargo=EMBARGO, warmup=WARMUP)
 

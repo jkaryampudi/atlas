@@ -16,6 +16,14 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+# F-019/F-020: the app now defaults db_require_least_privilege=True (secure by
+# default). The disposable test DB knowingly connects as the OWNER (superuser), so
+# tests opt out of the runtime-role assertion — the dedicated privilege tests
+# exercise the real enforcement against atlas_app directly. (The UNCONDITIONAL
+# audit-wall assertion still runs and passes: the test DB is migrated to head, so
+# the triggers are ENABLE ALWAYS.)
+os.environ.setdefault("ATLAS_DB_REQUIRE_LEAST_PRIVILEGE", "false")
+
 ROOT = Path(__file__).parents[1]
 ADMIN_URL = os.environ.get(
     "ATLAS_DATABASE_URL",
@@ -57,15 +65,66 @@ def _reachable() -> bool:
 requires_pg = pytest.mark.skipif(not _reachable(), reason="postgres not reachable")
 
 
+@pytest.fixture(autouse=True)
+def _api_auth_override():
+    """F-016: state-mutating API endpoints require ATLAS_API_TOKEN in production.
+    Existing endpoint tests call them without a token; override the auth
+    dependency to allow so those tests exercise the endpoint logic unchanged.
+    This is a TEST-scoped override (never shipped in production config). Real
+    enforcement (401/403/503/200) is proven by tests/integration/test_api_auth_pg
+    and tests/unit/test_api_auth, which pop this override."""
+    try:
+        from atlas.api import auth
+        from atlas.api.main import app
+    except Exception:  # API import optional for pure non-API test runs
+        yield
+        return
+    # Bypass EVERY role dependency (not just the trade-approver one) so ordinary
+    # endpoint tests exercise handler logic without a token. The dedicated auth
+    # tests pop these overrides to prove real 401/403/503/role-separation.
+    for dep in auth.AUTH_DEPENDENCIES:
+        app.dependency_overrides[dep] = lambda: None
+    yield
+    for dep in auth.AUTH_DEPENDENCIES:
+        app.dependency_overrides.pop(dep, None)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """M31 no-silent-skip guard. The ~745 Postgres-backed integration/constitution
+    tests carry `requires_pg`, which SKIPS when Postgres is unreachable — so a
+    PG-less CI (or a misconfigured full run) would report green having exercised
+    almost none of the fail-closed / audit / snapshot / PIT machinery.
+
+    When ATLAS_REQUIRE_PG=1 (the complete verification workflow and CI set it),
+    an unreachable Postgres is a hard ERROR, not a silent skip. A developer
+    running a deliberately unit-only subset simply leaves the variable unset, so
+    legitimate unit-only runs are unaffected."""
+    if os.environ.get("ATLAS_REQUIRE_PG") == "1" and not _reachable():
+        raise pytest.UsageError(
+            "ATLAS_REQUIRE_PG=1 but Postgres is not reachable at "
+            f"{ADMIN_URL.rsplit('@', 1)[-1]}: the integration suite would silently "
+            "skip. Refusing to report a green run that tested nothing structural. "
+            "Start the DB (docker compose up -d db) or unset ATLAS_REQUIRE_PG for a "
+            "deliberate unit-only run.")
+
+
+# Postgres caps a table at 1600 columns FOR ITS LIFETIME — a dropped column keeps
+# its slot (pg_attribute row, attisdropped) counting forever until a table rewrite.
+# The migration-cycle tests do downgrade->upgrade, adding a fresh slot each run, and
+# that pressure accumulates ACROSS runs on the shared atlas_test. Rebuild fresh well
+# before the cap so a full run can never die mid-suite with TooManyColumns (P7/P8).
+_COLUMN_PRESSURE_LIMIT = 1200
+
+
 def _ensure_test_db() -> None:
-    """Create atlas_test if missing and migrate it to head. Runs once per
-    session. SELF-HEALING: the migration-cycle tests burn Postgres's per-table
-    lifetime column budget a little every run (each downgrade/upgrade re-adds
-    columns, and dropped-column slots are never reclaimed — the 1600 limit
-    counts them forever), so after enough full-suite runs an upgrade dies with
-    TooManyColumns mid-flight. The test DB is disposable by design: on ANY
-    upgrade failure, drop it, recreate it, and migrate once from scratch —
-    a corrupted bootstrap must never require a human to remember the DROP."""
+    """Create atlas_test if missing and migrate it to head. Runs once per session.
+    SELF-HEALING, two ways, so a full-suite run is reliable from ANY accumulated
+    state with NO human DROP:
+      * PROACTIVE (P7/P8): if a prior run's migration-cycle tests have pushed any
+        table near the 1600-column lifetime cap, drop+recreate BEFORE this run —
+        the rot can no longer surface as a mid-suite TooManyColumns cascade.
+      * REACTIVE (backstop): on any upgrade failure (e.g. a bootstrap stranded at
+        an old revision), drop, recreate, and migrate once from scratch."""
     global _prepared
     if _prepared:
         return
@@ -82,14 +141,7 @@ def _ensure_test_db() -> None:
         finally:
             admin.dispose()
 
-    def _upgrade() -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "ATLAS_DATABASE_URL": URL}
-        return subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
-                              capture_output=True, text=True)
-
-    _create_if_missing()
-    r = _upgrade()
-    if r.returncode != 0:
+    def _drop() -> None:
         admin = create_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
         try:
             with admin.connect() as c:
@@ -97,6 +149,38 @@ def _ensure_test_db() -> None:
                                f"WITH (FORCE)"))
         finally:
             admin.dispose()
+
+    def _column_pressure() -> int:
+        """Worst-case per-table pg_attribute count (dropped slots included, since
+        they still count toward the 1600 cap), or 0 if the DB is fresh/unreadable."""
+        eng = create_engine(URL, isolation_level="AUTOCOMMIT")
+        try:
+            with eng.connect() as c:
+                return int(c.execute(text(
+                    "SELECT COALESCE(max(cnt), 0) FROM ("
+                    "  SELECT count(*) AS cnt FROM pg_attribute a "
+                    "  JOIN pg_class c ON c.oid = a.attrelid "
+                    "  JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "  WHERE c.relkind = 'r' AND a.attnum > 0 "
+                    "    AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                    "  GROUP BY a.attrelid) t")).scalar() or 0)
+        except Exception:
+            return 0
+        finally:
+            eng.dispose()
+
+    def _upgrade() -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "ATLAS_DATABASE_URL": URL}
+        return subprocess.run(["alembic", "upgrade", "head"], cwd=ROOT, env=env,
+                              capture_output=True, text=True)
+
+    _create_if_missing()
+    if _column_pressure() > _COLUMN_PRESSURE_LIMIT:      # proactive hermetic rebuild
+        _drop()
+        _create_if_missing()
+    r = _upgrade()
+    if r.returncode != 0:                                # reactive backstop
+        _drop()
         _create_if_missing()
         r = _upgrade()
         if r.returncode != 0:
@@ -122,7 +206,8 @@ def _scrub_committed_market_world() -> None:
     try:
         with engine.begin() as c:
             c.execute(text(
-                "TRUNCATE market.price_bars_daily, market.corporate_actions, "
+                "TRUNCATE market.price_bars_daily, market.price_bars_versions, "
+                "market.corporate_actions, market.corporate_actions_versions, "
                 "market.fx_rates_daily, market.data_quality_gates, "
                 "market.fundamentals, market.earnings_calendar, "
                 "market.earnings_surprises, market.estimate_snapshots, "
@@ -159,8 +244,8 @@ def pg_session():
 def clean_audit(pg_session):
     _assert_test_db(pg_session)
     pg_session.execute(text(
-        "TRUNCATE audit.decision_events, research.memos, research.agent_runs "
-        "RESTART IDENTITY CASCADE"))
+        "TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
+        "research.agent_runs, ops.cycle_runs RESTART IDENTITY CASCADE"))
     pg_session.commit()
     yield pg_session
 

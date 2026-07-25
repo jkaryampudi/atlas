@@ -50,8 +50,24 @@ def _at(session_date: date, hour: int = 21) -> datetime:
     return datetime.combine(session_date, time(hour, 0), tzinfo=UTC)
 
 
+def _seed_fx(s, *, base: str = "USD", rate: str = "1.0") -> None:
+    """F-006: the scorecard now grades on the AUD total-return basis, so both
+    legs pass through fx_to_aud. Seed a FLAT base->AUD rate before the first
+    session (fx_to_aud is carry-forward): a flat rate cancels in every return
+    ratio, so the hand-pinned excess/return numbers are unchanged while the code
+    exercises the real reporting-basis path. A dedicated test uses a MOVING rate
+    to prove the AUD conversion actually bites."""
+    s.execute(text(
+        "INSERT INTO market.fx_rates_daily (base, quote, rate_date, rate, source) "
+        "VALUES (:b, 'AUD', :d, :r, 'test') "
+        "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = :r"),
+        {"b": base, "d": SESSIONS[0] - timedelta(days=3), "r": rate})
+
+
 def _instrument(s, symbol: str, *, active: bool = True,
-                exchange: str = "XTEST") -> str:
+                exchange: str = "XTEST", currency: str = "USD",
+                market: str = "US") -> str:
+    _seed_fx(s)                                  # F-006: reporting basis needs FX
     existing = s.execute(text(
         "SELECT id FROM market.instruments WHERE symbol = :sym "
         "AND exchange = :ex"), {"sym": symbol, "ex": exchange}).scalar()
@@ -62,9 +78,10 @@ def _instrument(s, symbol: str, *, active: bool = True,
     return str(s.execute(text(
         "INSERT INTO market.instruments (symbol, exchange, market, "
         "instrument_type, name, sector_gics, currency, is_active) "
-        "VALUES (:sym, :ex, 'US', 'stock', :sym, 'Information Technology', "
-        "'USD', :act) RETURNING id"),
-        {"sym": symbol, "ex": exchange, "act": active}).scalar())
+        "VALUES (:sym, :ex, :mkt, 'stock', :sym, 'Information Technology', "
+        ":cur, :act) RETURNING id"),
+        {"sym": symbol, "ex": exchange, "act": active, "cur": currency,
+         "mkt": market}).scalar())
 
 
 def _benchmark(s) -> tuple[str, list[str]]:
@@ -412,7 +429,7 @@ def client(monkeypatch, clean_audit):
     # committed seeds -> explicit teardown. Pre-existing SPY rows belong to
     # other suites: their bars were never touched, and their is_active flags
     # are restored verbatim; the private XTEST SPY leaves with its bars.
-    s.execute(text("TRUNCATE audit.decision_events, research.memos, "
+    s.execute(text("TRUNCATE audit.decision_events, audit.chain_head, research.memos, "
                    "research.agent_runs RESTART IDENTITY CASCADE"))
     s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
                    "(SELECT id FROM market.instruments WHERE symbol LIKE 'ZSC%')"))
@@ -600,3 +617,54 @@ def test_t9_passes_the_topup_adapter_factory(clean_audit, monkeypatch):
     results = run_daily_cycle(s, clock, FixtureAdapter(FIXTURES))
     assert seen["adapter_for"] is vendor_adapter_for
     assert "scorecard: none matured" in results["t9_report"]
+
+
+def _fx(s, base: str, on: date, rate: str) -> None:
+    """A base->AUD rate on a specific date (fx_to_aud carries the latest forward)."""
+    s.execute(text(
+        "INSERT INTO market.fx_rates_daily (base, quote, rate_date, rate, source) "
+        "VALUES (:b, 'AUD', :d, :r, 'test') "
+        "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = :r"),
+        {"b": base, "d": on, "r": rate})
+
+
+def test_excess_is_aud_total_return_not_local_currency(clean_audit):
+    """F-006 REGRESSION: a non-USD memo whose local return and AUD return
+    disagree because its currency moved. The buggy code subtracted the USD SPY
+    return from the instrument's OWN-currency (INR) return; the fix grades both
+    legs in AUD. Here the AUD conversion FLIPS the sign of the excess, so a test
+    that passed under the old math is impossible under the new — the fix bites.
+
+    NDIA (INR): +10% local (100 -> 110). SPY (USD): flat (400 -> 400 => 0%).
+    INR/AUD depreciates 10% across the window (0.02 -> 0.018); USD/AUD flat 1.5.
+      naive (buggy) excess = +10% (INR) - 0% (USD)                = +0.10
+      correct AUD excess   = [(110*0.018)/(100*0.02) - 1] - 0     = -0.01
+    """
+    s = clean_audit
+    ndia = _instrument(s, "NDIA", exchange="XNSE", currency="INR", market="IN")
+    spy, _ = _benchmark(s)
+    _bars(s, ndia, {ANCHOR_IDX: "100", 25: "110"})
+    _bars(s, spy, {ANCHOR_IDX: "400", 25: "400"}, default="400")
+    # USD/AUD flat; INR/AUD 0.02 at anchor, 0.018 from the forward date onward.
+    _fx(s, "USD", SESSIONS[0] - timedelta(days=3), "1.5")
+    _fx(s, "INR", SESSIONS[0] - timedelta(days=3), "0.02")
+    _fx(s, "INR", SESSIONS[25], "0.018")
+    memo_id = _memo(s, "NDIA", "BUY", at=_at(SESSIONS[ANCHOR_IDX]))
+
+    # clock just past the 20-session horizon (index 25), before the 60s matures
+    clock = FrozenClock(_at(SESSIONS[26], hour=22))
+    rep = compute_memo_outcomes(s, clock)
+
+    written = {r.horizon_sessions: r for r in rep.written}
+    assert 20 in written, rep.skipped
+    r20 = written[20]
+    # The stored excess is the AUD total-return excess, NOT the naive +0.10.
+    assert r20.spy_return == Decimal("0.000000")
+    assert r20.fwd_return == Decimal("-0.010000")     # AUD, not the +0.10 local
+    assert r20.excess == Decimal("-0.010000")
+    assert r20.excess != Decimal("0.100000")          # the buggy value is impossible
+    # A BUY graded on AUD-excess < 0 is NOT vindicated (it lagged the passive core
+    # once the currency move is honestly counted) — the whole point of the fix.
+    from atlas.dcp.scorecard import vindicated
+    assert vindicated("BUY", r20.excess, shadow=False) is False
+    assert memo_id  # (silence unused)

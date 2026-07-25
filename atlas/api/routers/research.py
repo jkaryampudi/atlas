@@ -10,18 +10,20 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+
+from atlas.api.auth import require_operator
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from atlas.core.audit_repo import PostgresAuditLog
-from atlas.core.clock import SystemClock
+from atlas.core.clock import Clock, SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.research.autopsy import compute_autopsy
 from atlas.dcp.research.financials_panel import compute_financials
@@ -31,6 +33,14 @@ from atlas.dcp.research.valuation_models import compute_valuation
 from atlas.dcp.scorecard import dartboard_baseline, dissent_right, vindicated
 
 router = APIRouter()
+
+
+def _clock() -> Clock:
+    """Seam for tests (CLAUDE.md invariant 6: injectable time). Production reads
+    wall time; every present-tense 'as of now' date in this router flows through
+    here so a frozen clock makes the read-surface reproducible (M48)."""
+    return SystemClock()
+
 
 REVIEW_TARGET = 10  # Doc 08 Phase-2 gate: human reviews 10 memos
 SCORECARD_RECENT = 20  # last N matured outcome rows on the scorecard
@@ -100,7 +110,7 @@ def _bad_request(code: str, message: str) -> JSONResponse:
         "code": code, "message": message, "details": None}})
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_operator)])
 def analyze(body: AnalyzeBody) -> Any:
     """Queue one on-demand desk analysis. `symbol` is upcased then validated;
     `source` is the optional external-origin tag (e.g. 'investing.com'),
@@ -144,7 +154,7 @@ class ScreenBody(BaseModel):
     top_n: int = 25
 
 
-@router.post("/opportunities/run")
+@router.post("/opportunities/run", dependencies=[Depends(require_operator)])
 def opportunities_run(body: ScreenBody) -> Any:
     """Queue the whole-universe opportunity screen (no command line). Pure DCP
     research — health composite + valuation + fragility, ZERO model spend; the
@@ -174,7 +184,7 @@ class TrackBody(BaseModel):
     top_k: int = 20
 
 
-@router.post("/opportunities/track")
+@router.post("/opportunities/track", dependencies=[Depends(require_operator)])
 def opportunities_track(body: TrackBody) -> Any:
     """Record the board's top-K into research.source_picks (source
     'atlas-opportunity-screen') so the existing grade/edge machinery measures the
@@ -212,7 +222,7 @@ class PickIngestBody(BaseModel):
     run_desk: bool = False
 
 
-@router.post("/source-picks/ingest")
+@router.post("/source-picks/ingest", dependencies=[Depends(require_operator)])
 def source_picks_ingest(body: PickIngestBody) -> Any:
     """Queue a monthly source-pick list (no command line). Each ticker gets a
     point-in-time feature snapshot; nothing becomes a trade (invariant 2 —
@@ -227,7 +237,7 @@ def source_picks_ingest(body: PickIngestBody) -> Any:
                             f"source is required, max {ANALYZE_SOURCE_MAX} chars")
     try:
         rec_date = (datetime.strptime(body.date, "%Y-%m-%d").date() if body.date
-                    else datetime.now(UTC).date())
+                    else _clock().now().date())        # M48: injectable seam
     except ValueError:
         return _bad_request("INVALID_DATE", "date must be YYYY-MM-DD")
     seen: set[str] = set()
@@ -259,7 +269,7 @@ def source_picks_ingest_status() -> dict[str, object]:
     return ingest_status()
 
 
-@router.post("/source-picks/grade")
+@router.post("/source-picks/grade", dependencies=[Depends(require_operator)])
 def source_picks_grade() -> dict[str, object]:
     """Grade every matured pick (excess vs SPY at 20/60 sessions, write-once)
     and return the per-source edge — outperform-rate against the dartboard.
@@ -267,7 +277,7 @@ def source_picks_grade() -> dict[str, object]:
     from atlas.dcp.research.source_picks import grade_picks, source_edge_report
 
     with session_scope() as s:
-        g = grade_picks(s, SystemClock())
+        g = grade_picks(s, _clock())
         edge = [{"source": e.source, "horizon": e.horizon,
                  "n_matured": e.n_matured, "outperform_rate": e.outperform_rate,
                  "dartboard": e.dartboard, "edge": e.edge}
@@ -325,7 +335,7 @@ def _compose_dossier(s: Any, instrument_id: Any, ticker: str, *,
     flags, and a cross-check. Works WITH a source pick (external suggestion: adds
     its PIT features + SPY-relative outcome) or WITHOUT one (an Atlas suggestion —
     a memo/signal/proposal name — viewed present-tense)."""
-    today = SystemClock().now().date()
+    today = _clock().now().date()
     has_iid = instrument_id is not None
     models = compute_models(s, instrument_id, ticker, models_as_of) if has_iid else None
     financials = compute_financials(s, instrument_id, ticker, today) if has_iid else None
@@ -416,7 +426,7 @@ def ticker_dossier(symbol: str) -> Any:
             "WHERE ticker = :s ORDER BY recommendation_date DESC LIMIT 1"),
             {"s": sym}).mappings().first()
         return _compose_dossier(s, iid, sym, pick=pick,
-                                models_as_of=SystemClock().now().date())
+                                models_as_of=_clock().now().date())
 
 
 @router.get("/source-picks/{pick_id}/dossier")
@@ -585,7 +595,7 @@ class ReviewBody(BaseModel):
     notes: str = ""
 
 
-@router.post("/memos/{memo_id}/review")
+@router.post("/memos/{memo_id}/review", dependencies=[Depends(require_operator)])
 def review_memo(memo_id: str, body: ReviewBody) -> dict[str, object]:
     """Record the Principal's judgement on a memo (upsert; audited as a human
     action). This is deliberately the only write on the read surface."""
@@ -600,7 +610,7 @@ def review_memo(memo_id: str, body: ReviewBody) -> dict[str, object]:
             "ON CONFLICT (memo_id) DO UPDATE SET verdict=:v, notes=:notes, "
             " reviewed_at=now()"),
             {"i": memo_id, "v": body.verdict, "notes": body.notes})
-        PostgresAuditLog(s, SystemClock()).append(
+        PostgresAuditLog(s, _clock()).append(
             event_type="memo.review.recorded", entity_type="memo",
             entity_id=memo_id, actor_type="human", actor_id="principal",
             payload={"verdict": body.verdict, "notes": body.notes[:500]})

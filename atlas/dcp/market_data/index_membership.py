@@ -139,6 +139,45 @@ def member_in_window(row: MembershipRow, window_start: date,
             and (row.end_date is None or row.end_date > window_start))
 
 
+def series_overlaps_membership(row: MembershipRow, dates: Sequence[date]) -> bool:
+    """F-001 fail-closed guard: does a stored price series carry AT LEAST ONE bar
+    inside the ticker's membership era? A series with ZERO member-era bars cannot
+    belong to this membership row — it is either a wrong-era artifact or (with no
+    issuer identity in the system, F-002) a DIFFERENT company that reused the
+    ticker after the member left the index (the reviewed ADT/VAL/MNK cases, whose
+    bars begin after their end_date). Such a series must never enter the
+    point-in-time validation panel. Returns False when the row is unusable.
+
+    This does NOT clip a member's own pre-index price history (legitimately used
+    by the momentum lookback); distinguishing same-issuer pre-index bars from a
+    reused-ticker's bars for a held position requires the F-002 issuer identity
+    and is out of scope here."""
+    if not usable(row):
+        return False
+    return any(is_member_on(row, d) for d in dates)
+
+
+def clip_after_membership_end(row: MembershipRow,
+                              dates: Sequence[date]) -> list[int]:
+    """F-001: indices of ``dates`` to KEEP — every bar on/before the membership
+    ``end_date``, dropping bars STRICTLY AFTER it. A member that DEPARTED the
+    index must not be held or daily-marked against post-removal bars (its own
+    stale post-index tail, or — with no issuer identity, F-002 — a different
+    company that reused the ticker); clipping the tail lets the delisting-aware
+    engine force-liquidate the name at its removal date instead of marking it for
+    up to a rebalance period past departure. A still-open membership
+    (``end_date`` None) keeps everything. Pre-index bars are deliberately NOT
+    clipped HERE — they are the legitimate momentum-formation lookback. Telling a
+    same-issuer pre-index bar from a reused-ticker's is now done by the panel's
+    issuer-identity gate (identity.admit_pre_era_bars_by_issuer, wired into
+    load_pit_panel): a pre-era bar survives only if it resolves to the member's
+    issuer, else it is dropped fail-closed. This clip owns the post-removal tail;
+    that gate owns the pre-era issuer check."""
+    if row.end_date is None:
+        return list(range(len(dates)))
+    return [i for i, d in enumerate(dates) if d <= row.end_date]
+
+
 @dataclass(frozen=True)
 class MembershipPartition:
     usable: tuple[MembershipRow, ...]

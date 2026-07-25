@@ -14,19 +14,52 @@ _ND = NormalDist()
 _EULER = 0.5772156649
 
 
-def deflated_sharpe(sr_annual: float, n_days: int, n_trials: int) -> float:
-    """Probability the observed Sharpe exceeds the expected max of n_trials noise
-    strategies (simplified Bailey/López de Prado; normal-returns assumption noted)."""
+def deflated_sharpe(sr_annual: float, n_days: int, n_trials: int, *,
+                    sr_dispersion_annual: float | None = None,
+                    skew: float = 0.0, kurtosis: float = 3.0) -> float:
+    """Deflated Sharpe (Bailey/López de Prado): P(true SR > 0) after deflating for
+    the expected maximum Sharpe of ``n_trials`` and for the non-normality of the
+    Sharpe estimator.
+
+    F-005 corrections:
+      * **cross-trial dispersion** — the expected-maximum term scales by the
+        standard deviation of the trial Sharpe ESTIMATES. Pass
+        ``sr_dispersion_annual`` = std of the lineage's annualised trial Sharpes.
+        When omitted we fall back to the null-theoretical minimum
+        ``sqrt(1/n_days)`` (daily), which is a LOWER BOUND on the true dispersion
+        and therefore INFLATES the DSR — callers approving capital must supply the
+        empirical lineage dispersion. (Previously the minimum was ALWAYS used with
+        no way to pass the real value.)
+      * **fail-closed floor** — a supplied dispersion is clamped UP to that same
+        ``sqrt(1/n_days)`` minimum. This is not a convenience: the cross-trial std
+        of Sharpe ESTIMATES decomposes as Var[true SR across trials] + Var[single-
+        estimate noise], and the noise term alone is ≈ 1/n_days, so the true
+        dispersion of estimates cannot lie below ``sqrt(1/n_days)``. An empirical
+        value under the floor is a small-sample artefact; using the floor is both
+        the statistically-honest value and a guarantee that supplying a dispersion
+        can only LOWER (never raise) the DSR versus the fallback — no gate a
+        below-floor estimate would otherwise have loosened is ever weakened.
+      * **estimator variance** — the z-denominator now uses the PSR estimator
+        standard deviation with skewness/kurtosis, ``(1 - γ3·SR + (γ4-1)/4·SR²) /
+        (T-1)``. For normal returns (γ3=0, γ4=3) this is ``(1 + 0.5·SR²)/(T-1)`` —
+        the correct form; the previous code omitted the ``0.5·SR²`` term.
+    """
     if n_days < 30:
         return 0.0
     sr_daily = sr_annual / math.sqrt(252)
     if n_trials <= 1:
         e_max = 0.0
     else:
-        e_max = math.sqrt(1.0 / n_days) * (
+        floor = math.sqrt(1.0 / n_days)
+        sigma = (max(sr_dispersion_annual / math.sqrt(252), floor)
+                 if sr_dispersion_annual is not None else floor)
+        e_max = sigma * (
             (1 - _EULER) * _ND.inv_cdf(1 - 1.0 / n_trials)
             + _EULER * _ND.inv_cdf(1 - 1.0 / (n_trials * math.e)))
-    z = (sr_daily - e_max) * math.sqrt(n_days - 1)
+    est_var = (1.0 - skew * sr_daily + (kurtosis - 1.0) / 4.0 * sr_daily ** 2) / (n_days - 1)
+    if est_var <= 0:
+        return 0.0
+    z = (sr_daily - e_max) / math.sqrt(est_var)
     return _ND.cdf(z)
 
 
@@ -77,7 +110,8 @@ def null_model_gate(*, bars: list[OBar], strategy: Strategy, result: Result,
                     avg_stop_frac: float, avg_target_frac: float, time_stop: int,
                     costs: CostModel, start_i: int, end_i: int,
                     n_trials: int, paths: int = 200, seed: int = 7,
-                    p_max: float = 0.05, dsr_min: float = 0.90) -> GateReport:
+                    p_max: float = 0.05, dsr_min: float = 0.90,
+                    sr_dispersion_annual: float | None = None) -> GateReport:
     nulls = null_distribution(
         bars, Intent(stop=1 - avg_stop_frac, target=1 + avg_target_frac,
                      time_stop=time_stop),
@@ -85,7 +119,8 @@ def null_model_gate(*, bars: list[OBar], strategy: Strategy, result: Result,
         start_i=start_i, end_i=end_i)
     p = sum(1 for x in nulls if x >= result.total_return) / len(nulls)
     bh = buy_and_hold_return(bars, costs, start_i, end_i)
-    dsr = deflated_sharpe(result.sharpe, end_i - start_i, n_trials)
+    dsr = deflated_sharpe(result.sharpe, end_i - start_i, n_trials,
+                          sr_dispersion_annual=sr_dispersion_annual)
     reasons: list[str] = []
     if p > p_max:
         reasons.append(f"null-model: p={p:.3f} > {p_max} (random entries do as well)")

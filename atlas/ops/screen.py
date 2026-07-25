@@ -14,12 +14,12 @@ full gauntlet + a signature first (see opportunity_screen.py)."""
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime
+from datetime import UTC
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from atlas.core.clock import Clock
+from atlas.core.clock import Clock, SystemClock
 from atlas.core.db import session_scope
 from atlas.dcp.research.opportunity_screen import (
     SCREEN_SOURCE,
@@ -36,31 +36,33 @@ _snap_status: dict[str, object] = {"phase": "idle", "started_at": None,
                                    "finished_at": None, "detail": None, "result": None}
 
 
-def _run_screen(top_n: int) -> None:
-    started = datetime.now(UTC)
-    as_of = started.date()
+def _run_screen(top_n: int, clock: Clock) -> None:
+    started = clock.now()           # M48: injected — as_of drives the PIT filter
+    as_of = started.date()          #        (which names/factors are ranked)
     with session_scope() as s:
         out = screen_opportunities(s, as_of, top_n=top_n)
-    _status.update(phase="done", finished_at=datetime.now(UTC).isoformat(),
+    _status.update(phase="done", finished_at=clock.now().isoformat(),
                    detail=(f"ranked {out['ranked_n']} of {out['universe_n']} names "
                            f"as of {out['as_of']}"),
                    board=out)
 
 
-def start_screen(top_n: int = 25) -> bool:
+def start_screen(top_n: int = 25, *, clock: Clock | None = None) -> bool:
     """Console trigger. Returns False when a screen is already running — one at a
-    time; the caller reports 'busy' honestly, nothing runs twice."""
+    time; the caller reports 'busy' honestly, nothing runs twice. `clock`
+    defaults to SystemClock; tests inject FrozenClock (M48)."""
     if not _screen_lock.acquire(blocking=False):
         return False
-    _status.update(phase="running", started_at=datetime.now(UTC).isoformat(),
+    clk = clock if clock is not None else SystemClock()
+    _status.update(phase="running", started_at=clk.now().isoformat(),
                    finished_at=None, detail="ranking the universe", board=None)
 
     def _target() -> None:
         try:
-            _run_screen(top_n)
+            _run_screen(top_n, clk)
         except Exception as e:  # noqa: BLE001 — the ops layer survives anything
             _status.update(phase="failed",
-                           finished_at=datetime.now(UTC).isoformat(),
+                           finished_at=clk.now().isoformat(),
                            detail=str(e)[:300])
         finally:
             _screen_lock.release()
@@ -87,15 +89,16 @@ def screen_status() -> dict[str, object]:
 
 # ---- snapshot the board's top-K into MEASURED source-pick tracking ----------
 
-def _run_snapshot(top_k: int) -> None:
-    rec_date = datetime.now(UTC).date()
+def _run_snapshot(top_k: int, clock: Clock) -> None:
+    rec_date = clock.now().date()     # M48: injected — persisted cohort/record
+    #        date (research.source_picks.recommendation_date), must be replayable
     with session_scope() as s:            # commits the recorded picks
         rows = snapshot_board_picks(s, rec_date, top_k=top_k)
     rec = sum(1 for _sym, o in rows if o == "recorded")
     dup = sum(1 for _sym, o in rows if o == "duplicate")
     nod = sum(1 for _sym, o in rows if o == "no-data")
     _snap_status.update(
-        phase="done", finished_at=datetime.now(UTC).isoformat(),
+        phase="done", finished_at=clock.now().isoformat(),
         detail=(f"top {len(rows)} of the board recorded as '{'atlas-opportunity-screen'}' "
                 f"picks for {rec_date} — recorded {rec}, duplicate {dup}, no-data {nod}; "
                 f"tracked vs SPY, edge shows once matured (~20 sessions)"),
@@ -104,22 +107,24 @@ def _run_snapshot(top_k: int) -> None:
                 "rows": [{"symbol": sym, "outcome": o} for sym, o in rows]})
 
 
-def start_snapshot(top_k: int = 20) -> bool:
+def start_snapshot(top_k: int = 20, *, clock: Clock | None = None) -> bool:
     """Console trigger: record the current board's top-K into research.source_picks
     for edge measurement. One at a time; 'busy' is an honest answer. MEASURED,
-    NEVER APPLIED — the picks are scored vs SPY, never bridged to capital."""
+    NEVER APPLIED — the picks are scored vs SPY, never bridged to capital.
+    `clock` defaults to SystemClock; tests inject FrozenClock (M48)."""
     if not _snapshot_lock.acquire(blocking=False):
         return False
-    _snap_status.update(phase="running", started_at=datetime.now(UTC).isoformat(),
+    clk = clock if clock is not None else SystemClock()
+    _snap_status.update(phase="running", started_at=clk.now().isoformat(),
                         finished_at=None, detail="ranking + snapshotting features",
                         result=None)
 
     def _target() -> None:
         try:
-            _run_snapshot(top_k)
+            _run_snapshot(top_k, clk)
         except Exception as e:  # noqa: BLE001 — the ops layer survives anything
             _snap_status.update(phase="failed",
-                                finished_at=datetime.now(UTC).isoformat(),
+                                finished_at=clk.now().isoformat(),
                                 detail=str(e)[:300])
         finally:
             _snapshot_lock.release()

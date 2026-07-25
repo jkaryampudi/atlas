@@ -600,6 +600,41 @@ def test_discretionary_close_full_flow(clean_audit):
     assert "position.stop_hit" not in evs
 
 
+def test_sell_fill_beyond_price_collar_still_fills(clean_audit):
+    """M35 scoping: the execution price collar is BUY-only. A SELL that gaps far
+    from its decision price (here a discretionary exit decided at close 103, next
+    open 60 → ~42% drift, far past the 10% collar) MUST still fill — trapping a
+    position because its exit gapped is a worse hazard than a bad exit price. The
+    same drift on a buy would be voided (test_buy_fill_beyond_price_collar_*)."""
+    s = clean_audit
+    memo_id = _seed(s)
+    clock = FrozenClock(T0)
+    _, position_id = _entered_position(s, clock, memo_id)
+
+    clock.advance_to(datetime(2026, 7, 14, 23, 0, tzinfo=UTC))
+    res = close_position(s, clock, position_id=position_id, reason="thesis broken")
+    assert res.verdict == "PASS"                             # decision price = close 103
+    clock.advance_to(datetime(2026, 7, 14, 23, 30, tzinfo=UTC))
+    outcome = approve(s, clock, proposal_id=res.proposal_id, acknowledged_risks=True)
+    assert outcome.status == "approved"
+
+    # next open gaps DOWN to 60 vs the 103 exit-decision price — a buy at this
+    # drift would be collar-voided; this risk-reducing exit fills anyway
+    _bar(s, _ztla_id(s), STOP_SESSION, open_=60, low=59, close=Decimal("61"))
+    _fx(s, day=STOP_SESSION)
+    clock.advance_to(datetime(2026, 7, 15, 22, 0, tzinfo=UTC))
+    fills = settle_orders(s, clock)
+
+    assert len(fills) == 1                                   # the exit FILLED
+    pos = s.execute(text(
+        "SELECT qty, closed_at FROM trading.positions WHERE id = :p"),
+        {"p": position_id}).one()
+    assert pos.qty == 0 and pos.closed_at is not None        # closed, not trapped
+    assert s.execute(text(
+        "SELECT state FROM trading.trade_proposals WHERE id = :p"),
+        {"p": res.proposal_id}).scalar() == "executed"       # not 'voided'
+
+
 def test_pending_exit_order_blocks_stop_scan(clean_audit):
     """Idempotency: an exit already in flight (any state) blocks the stop
     scan — the same shares must never be sold twice."""

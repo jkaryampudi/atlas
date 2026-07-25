@@ -13,6 +13,7 @@ from statistics import fmean
 from typing import Callable
 
 from atlas.dcp.backtest.engine import CostModel, OBar, Result, Strategy, run_backtest
+from atlas.dcp.backtest.validation import buy_and_hold_return
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,9 @@ class WalkForwardResult:
     mean_sharpe: float
     worst_fold_return: float
     positive_folds: int
+    # F-021: folds whose NET strategy return beat the benchmark (buy-and-hold of
+    # the same instrument over the same window). -1 means not computed.
+    benchmark_folds: int = -1
 
 
 StrategyFactory = Callable[[list[OBar], list[int]], Strategy]
@@ -61,16 +65,21 @@ def walk_forward(bars: list[OBar], factory: StrategyFactory, *,
                  k: int, horizon: int, embargo: int, warmup: int,
                  costs: CostModel = CostModel()) -> WalkForwardResult:
     results: list[Result] = []
+    bench: list[float] = []
     for fold in purged_folds(len(bars), k=k, horizon=horizon, embargo=embargo,
                              warmup=warmup):
         assert leakage_free(fold, horizon=horizon, embargo=embargo)
         strat = factory(bars, fold.train_days)
         results.append(run_backtest(bars, strat, costs,
                                     start_i=fold.test_start, end_i=fold.test_end))
+        # F-021 benchmark: buy-and-hold the same instrument over the same window,
+        # net of the same costs — the honest alternative to trading the fold.
+        bench.append(buy_and_hold_return(bars, costs, fold.test_start, fold.test_end))
     rets = [r.total_return for r in results]
     return WalkForwardResult(
         fold_results=results,
         mean_return=fmean(rets),
         mean_sharpe=fmean(r.sharpe for r in results),
         worst_fold_return=min(rets),
-        positive_folds=sum(1 for x in rets if x > 0))
+        positive_folds=sum(1 for x in rets if x > 0),
+        benchmark_folds=sum(1 for r, b in zip(rets, bench) if r > b))
