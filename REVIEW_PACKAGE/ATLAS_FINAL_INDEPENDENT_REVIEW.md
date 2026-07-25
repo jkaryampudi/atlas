@@ -1,5 +1,14 @@
 # Atlas Existing Application — Final Independent Remediation Review
 
+> **CLOSURE (P2.30–P2.36, branch `p2-critical-high-remediation`):** every finding
+> this review returned as REQUEST CHANGES — F-001, F-006, F-010, F-013, F-016,
+> F-019, F-020 — is now **FIXED through the real production path**, with the bypass
+> reproduced and a regression test. Completion gate met (unresolved Critical/High
+> = 0); full `pytest` green from a from-scratch DB, ruff + mypy clean. See
+> `ATLAS_FINAL_GATE_REMEDIATION.md`, `ATLAS_FINAL_GATE_EVIDENCE.md`, and the
+> 23-vector `ATLAS_FINAL_GATE_SELF_REVIEW.md`. The read-only findings below are
+> preserved verbatim as the record of what was wrong.
+
 **Read-only, hostile.** Verdict is based on the ACTUAL production decision/write paths on the current
 branch, not on the remediation report. Where a "FIXED" label rested on a mechanism that is not wired
 into the real path, it is marked PARTIAL or OPEN. No production code was altered.

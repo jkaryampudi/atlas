@@ -397,3 +397,56 @@ Critical/High finding is closed in code with a pre-fix-failing regression test.
 Gates: **1773 passed from a clean DB unattended**, ruff clean, mypy clean (138
 files), migration 0042 round-trips.
 (**3.12** target, 138 files), `uv lock --check` clean.
+
+---
+
+## Round — Final merge-blocking gate (P2.30–P2.36, branch `p2-critical-high-remediation`)
+
+The final independent review (`ATLAS_FINAL_INDEPENDENT_REVIEW.md`, verdict REQUEST
+CHANGES) re-opened seven findings that prior rounds had marked closed: the earlier
+fixes were **partial or bypassable**. Each is now closed through the *real
+production path*, with the bypass itself reproduced and a regression test:
+
+- **F-016 (HIGH)** — prior "loopback bind" was the only control; mutators were
+  unauthenticated. FIXED: central deny-by-default role-based auth on every mutator
+  (`atlas/api/auth.py`), route-inventory conformance, console loopback-token
+  injection. 17 tests. Commit P2.30 (`f8fd8ba`).
+- **F-013 (HIGH)** — `_get` redacted, but `fetch_earnings_calendar` +
+  `fetch_fundamentals` (and a SECOND path, `fxlab/ingest.py`) bypassed it, leaking
+  the query-string token in httpx errors. FIXED: one `_request` transport per
+  client, scrubbed error raised outside the handler (chain severed), AST guard +
+  35 canary cases. Commit P2.31 (`f4eec27`).
+- **F-006 (HIGH)** — bands + attribution were AUD-converted, but the **scorecard**
+  and the **source-pick edge** still subtracted a USD SPY price return from an
+  own-currency price return. FIXED: ONE authoritative AUD total-return service
+  (`market_data/benchmark.py`); scorecard/bands/attribution/source-picks all
+  delegate; conformance test + a sign-flipping regression. Commits P2.32
+  (`1b9557b`), P2.36 (`08db195`).
+- **F-010 (HIGH)** — valuation + health_score were fixed, but
+  `financials_panel.fcf_yield` still divided statement-currency FCF by
+  listing-currency market cap, emitted as a silent number. FIXED: shared
+  `research/ratios.py` normalisation layer; fcf_yield fails closed with an explicit
+  `fcf_yield_currency_blocked` flag; the three modules delegate. Commit P2.33
+  (`3c52b50`).
+- **F-001 (CRITICAL)** — post-removal clip landed, but pre-index formation bars
+  were still admitted with NO issuer check (reused-ticker splice into momentum
+  formation). FIXED: `identity.admit_pre_era_bars_by_issuer` keeps a pre-era bar
+  only if it resolves to the member's issuer, else drops it fail-closed; a coverage
+  floor RAISES the panel below 50 % resolved (no ticker-only history). Commit P2.34
+  (`3687911`).
+- **F-019 / F-020 (HIGH)** — the 0042 append-only + monotonic-anchor triggers are
+  real only against a non-superuser runtime, but production connected as the
+  superuser owner `atlas` (bypass via `SET session_replication_role='replica'`,
+  reproduced). FIXED: migration 0043 provisions the least-privilege `atlas_app`
+  role; `db_privilege.assert_least_privilege_runtime` fails the API startup closed
+  and marks `/health` degraded; docker-compose points the app at `atlas_app`. 12
+  privilege tests connecting AS atlas_app prove every bypass vector refused.
+  Commit P2.35 (`92c0270`).
+
+**Completion gate MET:** all 7 FIXED; unresolved Critical/High application-code
+findings = 0. Gates from a **from-scratch** `atlas_test` (incl. migration 0043):
+`pytest` green exit 0 (~1868 tests), `ruff` clean, `mypy` strict clean (141 files).
+23-vector hostile self-review in `ATLAS_FINAL_GATE_SELF_REVIEW.md` — no survivors.
+Full write-up: `ATLAS_FINAL_GATE_REMEDIATION.md` / `ATLAS_FINAL_GATE_EVIDENCE.md`.
+External conditions unchanged: EODHD key rotation (ops), WORM/signed audit anchor
+(infra). No push / merge / tag; no orders placed.

@@ -142,3 +142,31 @@ xsmom-pit-tr is research_shadow; correct on re-promotion). **All Critical/High a
 resolved in code;** the only outstanding items are the non-code residuals in
 §6 (F-002 vendor), §7 (F-007 Principal-scope), and §8 (F-005 registry purge).
 See `ATLAS_FINAL_REMEDIATION_EVIDENCE.md` for the current per-finding status.
+
+---
+
+## Deployment actions for the final gate (P2.30–P2.36)
+
+These are configuration/ops steps a real deployment must take; the app code is
+done and fails closed if they are skipped.
+
+1. **API auth tokens (F-016).** Set `ATLAS_API_TOKEN` (single-Principal: grants
+   every role) OR per-role `ATLAS_API_TOKEN_<ROLE>` for separation of duty. With
+   NO token set, every mutator returns 503 (fail closed) and the console cannot
+   mutate. **Role:** operator. **Restart:** yes (env).
+2. **Least-privilege DB runtime (F-019/F-020).** Run migrations as the owner
+   (`alembic upgrade head` — provisions `atlas_app` via 0043), then
+   `ALTER ROLE atlas_app PASSWORD '<real secret>';`, point `ATLAS_DATABASE_URL` at
+   `atlas_app`, and set `ATLAS_DB_REQUIRE_LEAST_PRIVILEGE=true`. The API then
+   refuses to start (and `/health` reports `degraded`) if it ever finds itself
+   connected as a superuser. docker-compose already encodes this posture.
+   **Role:** operator/DBA. **Restart:** yes.
+3. **EODHD key rotation (F-013).** The app no longer leaks the key, but the
+   previously-exposed key should be rotated out-of-band. **Role:** operator.
+4. **Instrument-identity feed (F-001).** The definitive panel refuses to run below
+   50 % issuer-identity coverage. Daily ingest's `refresh_identity` populates it
+   from vendor ISIN; ensure a fundamentals backfill has run before a gauntlet.
+   **Role:** operator. **Restart:** no.
+
+External conditions unchanged: WORM/signed audit anchor (infra, §ADR); non-USD
+equity onboarding would extend the AUD-TR treatment to dossier beta/RS (forward).
