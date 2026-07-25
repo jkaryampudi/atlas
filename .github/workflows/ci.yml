@@ -29,13 +29,17 @@ jobs:
       - run: uv sync --locked --extra dev
       - run: uv run ruff check atlas tests
       - run: uv run mypy
-      - run: uv run pytest
-      - name: migration check
-        # raw-SQL migrations (no ORM metadata), so `alembic check` cannot apply;
-        # the meaningful assertion is: apply cleanly from zero and land on head
+      # Migrate the app-default DB to head BEFORE pytest. Several API unit tests boot
+      # TestClient(app), which connects to ATLAS_DATABASE_URL (the `atlas` service DB).
+      # Since the F-019/F-020 hardening the app fail-closes / reports "degraded" against
+      # an unmigrated DB (missing ENABLE-ALWAYS audit triggers + trading tables), so
+      # pytest must see a migrated `atlas`. This also preserves the original assertion:
+      # raw-SQL migrations (no ORM metadata) apply cleanly from zero and land on head.
+      - name: migrate app DB to head (before pytest)
         run: |
           uv run alembic upgrade head
           uv run alembic current | grep -q "(head)"
+      - run: uv run pytest
 
   # F-019/F-020 CI hardening: the `checks` job runs everything as the OWNER role.
   # This job proves the DEPLOYED posture end to end — migrations as the owner, the
