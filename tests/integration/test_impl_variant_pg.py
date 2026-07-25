@@ -117,6 +117,20 @@ def _seed(s) -> None:
         _bars(s, iid, -0.0004 + 0.0002 * k, volume=(k + 1) * 1_000_000)
         _member_row(s, sym)
         _surprises(s, iid, beats=(k % 2 == 0))
+    seed_all_identities(s)
+
+
+def seed_all_identities(s) -> None:
+    """F-001: give every seeded instrument a resolved single-issuer identity so
+    the PIT panel's identity gate keeps each member's legitimate same-issuer
+    pre-era history (valid_from = first stored bar). Shared by every pit-panel
+    fixture world (recipe / factory / low-vol / pead / quality)."""
+    from atlas.dcp.market_data.identity import refresh_identity
+    for k, r in enumerate(s.execute(text(
+            "SELECT DISTINCT instrument_id FROM market.price_bars_daily "
+            "ORDER BY instrument_id")).all()):
+        refresh_identity(s, str(r.instrument_id),
+                         {"General": {"ISIN": f"US{k:010d}"}}, known_from=FETCHED)
 
 
 # ------------------------------------------------ dollar-volume basis pin ---

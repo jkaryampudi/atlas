@@ -25,6 +25,7 @@ resolves identity and refuses when it cannot.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -148,6 +149,60 @@ def resolve_by_symbol(session: Session, symbol: str, *,
     symbol is absent or ambiguous."""
     iid = _instrument_id_for_symbol(session, symbol)
     return resolve_identity(session, iid, as_of=as_of) if iid is not None else None
+
+
+def instrument_id_for_symbol(session: Session, symbol: str) -> str | None:
+    """Public: the single instrument id for a symbol, or None when absent OR
+    ambiguous (ambiguity fails closed — never first-row-wins)."""
+    return _instrument_id_for_symbol(session, symbol)
+
+
+@dataclass(frozen=True)
+class IssuerAdmission:
+    """Which bars of a series may enter the definitive panel, by issuer identity."""
+    keep: list[int]                # indices of the input `dates` admitted
+    wrong_issuer: int              # pre-era bars resolving to a DIFFERENT issuer
+    unresolved: int                # pre-era bars whose issuer cannot be vouched
+    member_resolved: bool          # did the member's OWN issuer resolve?
+
+
+def admit_pre_era_bars_by_issuer(
+        session: Session, instrument_id: str, dates: Sequence[date],
+        *, is_in_era: Callable[[date], bool]) -> IssuerAdmission:
+    """F-001: resolve every bar to an issuer identity before it may enter the
+    definitive momentum panel.
+
+    Every IN-ERA bar is admitted — index membership IS the point-in-time
+    attestation that this instrument was the member across that span. A PRE-era
+    bar (formation lookback) is admitted ONLY when it resolves to the SAME issuer
+    as the member; a pre-era bar that resolves to a DIFFERENT issuer (a ticker
+    reused before the member joined) or that cannot be vouched at all is EXCLUDED
+    fail-closed — reused-ticker history must never enter momentum formation. The
+    member's issuer is taken from the earliest in-era bar; if the member itself is
+    unresolved, every pre-era bar fails closed (and ``member_resolved`` is False so
+    the panel can apply its coverage-safety gate).
+
+    Callers pass the series AFTER post-removal clipping, so a non-in-era date here
+    is always PRE-era; the function never re-admits a clipped post-removal bar."""
+    ds = list(dates)
+    era = [d for d in ds if is_in_era(d)]
+    member = (resolve_identity(session, instrument_id, as_of=min(era))
+              if era else None)
+    keep: list[int] = []
+    wrong = unresolved = 0
+    for i, d in enumerate(ds):
+        if is_in_era(d):
+            keep.append(i)
+            continue
+        bar = resolve_identity(session, instrument_id, as_of=d)
+        if same_issuer(member, bar):
+            keep.append(i)
+        elif bar is not None:
+            wrong += 1
+        else:
+            unresolved += 1
+    return IssuerAdmission(keep=keep, wrong_issuer=wrong, unresolved=unresolved,
+                           member_resolved=member is not None)
 
 
 # --------------------------------------------------------------------------- #

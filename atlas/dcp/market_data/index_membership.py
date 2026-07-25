@@ -167,9 +167,12 @@ def clip_after_membership_end(row: MembershipRow,
     engine force-liquidate the name at its removal date instead of marking it for
     up to a rebalance period past departure. A still-open membership
     (``end_date`` None) keeps everything. Pre-index bars are deliberately NOT
-    clipped — they are the legitimate momentum-formation lookback, and telling a
-    same-issuer pre-index bar from a reused-ticker's needs the F-002 identity feed
-    (the documented data-blocked residual)."""
+    clipped HERE — they are the legitimate momentum-formation lookback. Telling a
+    same-issuer pre-index bar from a reused-ticker's is now done by the panel's
+    issuer-identity gate (identity.admit_pre_era_bars_by_issuer, wired into
+    load_pit_panel): a pre-era bar survives only if it resolves to the member's
+    issuer, else it is dropped fail-closed. This clip owns the post-removal tail;
+    that gate owns the pre-era issuer check."""
     if row.end_date is None:
         return list(range(len(dates)))
     return [i for i, d in enumerate(dates) if d <= row.end_date]

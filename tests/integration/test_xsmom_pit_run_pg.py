@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from datetime import UTC, date, datetime
 
+import pytest
 from sqlalchemy import text
 
 from atlas.core.audit_repo import PostgresAuditLog
@@ -97,6 +98,21 @@ def _seed(s) -> None:
     # not active) — it must never enter the panel's ranked universe
     _bars(s, _instrument(s, NULLDEAD, active=False), 0.0010)
     _member_row(s, NULLDEAD, None, date(2013, 6, 2), active=False, delisted=True)
+    _seed_identities(s)
+
+
+def _seed_identities(s) -> None:
+    """F-001: give every seeded instrument a resolved, single-issuer identity so
+    the panel's identity gate keeps each member's legitimate (same-issuer) pre-era
+    formation history. Called AFTER bars so valid_from = the first stored bar,
+    covering the whole series."""
+    from atlas.dcp.market_data.identity import refresh_identity
+    ids = [str(r.instrument_id) for r in s.execute(text(
+        "SELECT DISTINCT instrument_id FROM market.price_bars_daily "
+        "ORDER BY instrument_id")).all()]
+    for k, iid in enumerate(ids):
+        refresh_identity(s, iid, {"General": {"ISIN": f"US{k:010d}"}},
+                         known_from=FETCHED)
 
 
 def test_pit_runner_full_path(pg_session):
@@ -188,3 +204,23 @@ def test_pit_panel_keeps_dead_series_and_gates_membership(pg_session):
     assert NULLDEAD not in uni.members
     assert uni.window_members == len(MEMBERS) + 2
     assert uni.missing_series == []
+
+
+def test_identity_coverage_gate_refuses_ticker_only_panel(pg_session):
+    """F-001 coverage-safety: with the instrument-identity feed empty, the panel
+    must refuse to run rather than grade on ticker-only history."""
+    s = pg_session
+    _seed(s)
+    s.execute(text("DELETE FROM market.instrument_identity"))    # wipe the feed
+    with pytest.raises(RuntimeError, match="identity coverage"):
+        load_pit_panel(s)
+
+
+def test_identity_resolved_panel_reports_full_coverage(pg_session):
+    """With identities seeded (the _seed default), every member resolves and the
+    panel reports full identity coverage with no forced bar drops."""
+    s = pg_session
+    _seed(s)
+    uni = load_pit_panel(s)
+    assert uni.identity_members_total > 0
+    assert uni.identity_members_resolved == uni.identity_members_total

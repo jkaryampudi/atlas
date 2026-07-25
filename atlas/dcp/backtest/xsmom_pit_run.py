@@ -72,6 +72,7 @@ import argparse
 import random
 import statistics
 from bisect import bisect_left, bisect_right
+from functools import partial
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -125,6 +126,10 @@ from atlas.dcp.backtest.xsmom_run import (
     total_trial_count,
 )
 from atlas.dcp.market_data.calendars import trading_days_between
+from atlas.dcp.market_data.identity import (
+    admit_pre_era_bars_by_issuer,
+    instrument_id_for_symbol,
+)
 from atlas.dcp.market_data.index_membership import (
     INDEX_CODE,
     WINDOW_START,
@@ -145,6 +150,13 @@ from atlas.dcp.signals.xsmom.v1 import LOOKBACK, SEASONING, SKIP, SPEC, TOP_N
 
 ROOT = Path(__file__).resolve().parents[3]
 BENCHMARK = "SPY"
+
+# F-001 coverage-safety gate: the definitive panel must NOT run when issuer
+# identity could not be verified for most of the ranked universe (a broken or
+# unpopulated identity feed => the panel would be graded on ticker-only history,
+# exactly the defect this gate closes). Below this fraction of member symbols with
+# a RESOLVED issuer identity, load_pit_panel fails closed.
+IDENTITY_COVERAGE_FLOOR = 0.5
 FAMILY = "xsmom-pit"
 # ADR-0016: every xsmom-pit* family is one research line — deflated Sharpe
 # counts the full momentum LINEAGE, so renaming can never reset the penalty.
@@ -475,6 +487,9 @@ class PitUniverse:
     missing_series: list[PitExclusion]    # member tickers with NO stored bars
     excluded: list[PitExclusion]          # stored but failed completeness rules
     tr: TrCoverage | None = None          # set only in total-return mode
+    identity_exclusions: tuple[PitExclusion, ...] = ()  # F-001 pre-era bar drops
+    identity_members_resolved: int = 0    # F-001 coverage: members with issuer id
+    identity_members_total: int = 0       # F-001 coverage: members gated on identity
 
     @property
     def window_members(self) -> int:
@@ -535,6 +550,8 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
                             "(backfill failed or vendor never served it)")
                for sym in sorted(members) if sym not in stored]
     excluded: list[PitExclusion] = []
+    identity_exclusions: list[PitExclusion] = []   # F-001 bar-level drops (counted)
+    member_syms = member_syms_resolved = 0         # F-001 coverage-safety gate
     series: dict[str, tuple[list[float], list[float], list[date]]] = {}
     tr_with = tr_without = tr_applied = 0
     tr_before = tr_after = tr_rolled = tr_spy = 0
@@ -561,11 +578,36 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
             # F-001: clip bars strictly after the removal date so a departed
             # member is never marked/held on post-removal bars (its own stale tail
             # or a reused ticker's) — the delisting-aware engine liquidates it at
-            # end_date. Pre-index formation bars are kept (F-002 data-blocked).
+            # end_date.
             keep = clip_after_membership_end(mrow, ds)
             if len(keep) < len(ds):
                 obars = [obars[i] for i in keep]
                 ds = [ds[i] for i in keep]
+            # F-001: resolve every remaining PRE-era formation bar to an issuer
+            # identity. In-era bars are attested by membership; a pre-era bar is
+            # kept ONLY if it resolves to the SAME issuer as the member, else it is
+            # a reused-ticker (or unvouchable) splice and is dropped fail-closed.
+            iid = instrument_id_for_symbol(session, sym)
+            if iid is None:
+                excluded.append(PitExclusion(
+                    sym, _delisted(sym),
+                    "F-001 identity: symbol does not resolve to a single "
+                    "instrument id (absent/ambiguous) — cannot verify issuer, "
+                    "excluded fail-closed"))
+                continue
+            adm = admit_pre_era_bars_by_issuer(
+                session, iid, ds, is_in_era=partial(is_member_on, mrow))
+            member_syms += 1
+            member_syms_resolved += 1 if adm.member_resolved else 0
+            if len(adm.keep) < len(ds):
+                obars = [obars[i] for i in adm.keep]
+                ds = [ds[i] for i in adm.keep]
+            if adm.wrong_issuer or adm.unresolved:
+                identity_exclusions.append(PitExclusion(
+                    sym, _delisted(sym),
+                    f"F-001 identity: dropped {adm.wrong_issuer} wrong-issuer + "
+                    f"{adm.unresolved} unresolved pre-era bar(s) from formation "
+                    f"(kept {len(adm.keep)} identity-verified / in-era bars)"))
         expected = trading_days_between("US", ds[0], ds[-1])
         have = set(ds)
         gaps = [d for d in expected if d not in have]
@@ -599,6 +641,17 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
     if BENCHMARK not in series:
         raise RuntimeError(f"benchmark {BENCHMARK} failed the completeness "
                            "rules — fix its series before evaluating")
+    # F-001 coverage-safety gate: refuse to grade the definitive panel when the
+    # issuer identity of most ranked members could not be resolved — a sparse or
+    # unpopulated identity feed means the panel would rest on ticker-only history,
+    # the exact defect the per-bar gate above closes.
+    if member_syms and member_syms_resolved / member_syms < IDENTITY_COVERAGE_FLOOR:
+        raise RuntimeError(
+            f"F-001 identity coverage {member_syms_resolved}/{member_syms} member "
+            f"symbols resolved (< floor {IDENTITY_COVERAGE_FLOOR:.0%}) — the "
+            "instrument-identity feed is too sparse to grade the definitive panel; "
+            "refusing to run on ticker-only history. Populate "
+            "market.instrument_identity (daily ingest's refresh_identity) first.")
     tr_cov: TrCoverage | None = None
     if total_return:
         if tr_spy == 0:
@@ -634,7 +687,10 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
         partition=part, window_rows=window_rows,
         included_living=sum(1 for s in in_panel if not members[s].is_delisted),
         included_delisted=sum(1 for s in in_panel if members[s].is_delisted),
-        missing_series=missing, excluded=excluded, tr=tr_cov)
+        missing_series=missing, excluded=excluded, tr=tr_cov,
+        identity_exclusions=tuple(identity_exclusions),
+        identity_members_resolved=member_syms_resolved,
+        identity_members_total=member_syms)
 
 
 # ---------------------------------------------------------------------------

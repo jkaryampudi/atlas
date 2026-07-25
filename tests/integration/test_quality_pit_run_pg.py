@@ -133,6 +133,8 @@ def _seed(s) -> None:
     _bars(s, fin, 0.0002)
     _fundamentals(s, fin, 3.0)
     _member_row(s, FIN, date(2005, 1, 3), None, active=True, delisted=False)
+    from tests.integration.test_impl_variant_pg import seed_all_identities
+    seed_all_identities(s)                     # F-001 panel identity gate
 
 
 def test_quality_runner_full_path(pg_session):
