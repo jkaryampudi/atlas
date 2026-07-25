@@ -531,6 +531,41 @@ def _dupont(payload: dict[str, object], as_of: date) -> dict[str, object]:
 # Top level
 # ---------------------------------------------------------------------------
 
+def _ccy(value: object) -> str | None:
+    s = str(value).strip().upper() if value is not None else ""
+    return s or None
+
+
+def _currency_blocked_valuation(as_of: date, snapshot_as_of: str | None,
+                                price: float | None, reporting_cur: str,
+                                listing_cur: str) -> dict[str, object]:
+    """F-010 fail-closed panel: same shape as a normal valuation, but every
+    model value that would divide statement-currency financials by a
+    listing-currency price/market-cap is None, with an explicit note. Never a
+    currency-mixed fair value / upside / verdict."""
+    note = (f"Currency mismatch: financial statements are reported in "
+            f"{reporting_cur} while the listing price is in {listing_cur}. The "
+            "EV/EPV/DCF/WACC and comparables methods divide statement-currency by "
+            "listing-currency inputs, so a fair value would be fabricated by the "
+            "FX ratio — reported None (fail closed) rather than a mixed signal.")
+    none_method = {"fair_value_per_share": None, "upside_pct": None,
+                   "applicable": None, "currency_blocked": True}
+    return {
+        "as_of": as_of.isoformat(), "snapshot_as_of": snapshot_as_of,
+        "price": price, "shares_outstanding": None, "net_debt": None,
+        "cost_of_capital": {"wacc": None, "currency_blocked": True},
+        "epv": dict(none_method), "dcf": dict(none_method),
+        "comparables": {"multiples": {}, "blended_fair_value": None,
+                        "currency_blocked": True},
+        "dupont": {"net_margin": None, "asset_turnover": None,
+                   "equity_multiplier": None, "roe": None},
+        "summary": {"price": price, "valuation_basis": "currency_blocked",
+                    "methods": [], "fair_value_low": None,
+                    "fair_value_central": None, "fair_value_high": None,
+                    "verdict": None, "upside_to_central_pct": None, "note": note},
+    }
+
+
 def compute_valuation(session: Session, instrument_id: str, symbol: str,
                       as_of: date) -> dict[str, object]:
     """Atlas's mechanical valuation panel for one stock at `as_of` (see module
@@ -555,9 +590,22 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     # current EV multiples used (held constant) as the DCF exit-multiple terminals
     exit_ev_ebitda = _num(_get(payload, ("Valuation", "EnterpriseValueEbitda")))
     exit_ev_revenue = _num(_get(payload, ("Valuation", "EnterpriseValueRevenue")))
-    sector = session.execute(text(
-        "SELECT sector_gics FROM market.instruments WHERE id = :i"),
-        {"i": instrument_id}).scalar()
+    inst = session.execute(text(
+        "SELECT sector_gics, currency FROM market.instruments WHERE id = :i"),
+        {"i": instrument_id}).first()
+    sector = inst.sector_gics if inst is not None else None
+    # F-010: the payload financials are in the issuer's REPORTING currency, while
+    # price/market_cap are in the LISTING currency (USD for a US-listed ADR).
+    # Every EV/EPV/DCF/WACC/comparables number divides one by the other, so a
+    # currency mismatch fabricates a fair value + upside/verdict from the FX
+    # ratio. Fail closed (mirror health_score's fcf_yield guard) when the two
+    # currencies are known and differ, rather than emit a currency-mixed signal.
+    reporting_cur = _ccy(_get(payload, ("General", "CurrencyCode")))
+    listing_cur = _ccy(inst.currency if inst is not None else None)
+    if (reporting_cur is not None and listing_cur is not None
+            and reporting_cur != listing_cur):
+        return _currency_blocked_valuation(as_of, snapshot_as_of, price,
+                                           reporting_cur, listing_cur)
     # a bank / broker / insurer / REIT is valued on equity multiples only — the
     # EV-based and free-cash-flow methods don't apply (see _EQUITY_ONLY_SECTORS).
     is_financial = sector in _EQUITY_ONLY_SECTORS

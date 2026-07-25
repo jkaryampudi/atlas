@@ -255,7 +255,10 @@ def test_excess_breach_demotes_once_126_sessions_exist(clean_audit, alerts):
     sid = _entered_sleeve(s, clock)
     _seed_spy(s, "130")
     prior = trading_days_between("US", date(2025, 12, 1), date(2026, 7, 14))[-126:]
-    _forge_prior(s, sid, prior, value="3600", peak="3600", spy="100")
+    # F-006: spy_tr_close is now AUD; the fixture FX is 1.5, so today's SPY TR is
+    # 130*1.5=195 AUD and the 126-session base is forged in AUD (100 USD * 1.5 =
+    # 150), preserving the +30% SPY return and the -30.625pp excess.
+    _forge_prior(s, sid, prior, value="3600", peak="3600", spy="150")
 
     report = check_bands(s, FrozenClock(T15))
     assert [st.action for st in report.statuses] == ["demoted"]
@@ -268,6 +271,37 @@ def test_excess_breach_demotes_once_126_sessions_exist(clean_audit, alerts):
     assert p["excess_126s_pp"] == pytest.approx(-30.625)
     assert _state(s, sid) == "suspended"
     assert len(alerts) == 1
+
+
+def test_fx_drift_alone_does_not_manufacture_excess(clean_audit, alerts):
+    """F-006 regression: a sleeve FLAT in USD graded against SPY FLAT in USD must
+    show ~0 excess even when USD/AUD moves — FX drift is not alpha. Pre-fix the
+    AUD sleeve leg was differenced against a USD SPY leg, so a 1.4->1.6 move alone
+    manufactured ~+14pp of spurious excess (and the mirror move a negative excess
+    able to trip the -25pp demotion band). Fails against pre-fix code."""
+    s = clean_audit
+    _clean(s)
+    clock = FrozenClock(T0)
+    sid = _entered_sleeve(s, clock)                 # 53 ZBDA, filled 7-14
+    # ZBDA flat in USD at 100 on 7-15 (override the fixture's crash bar), FX moves
+    # 1.4 (the base era) -> 1.6 (today).
+    s.execute(text("UPDATE market.price_bars_daily SET close = 100, open = 100, "
+                   "high = 100, low = 100 WHERE bar_date = '2026-07-15' "
+                   "AND instrument_id IN (SELECT id FROM market.instruments "
+                   "WHERE symbol = 'ZBDA')"))
+    s.execute(text("UPDATE market.fx_rates_daily SET rate = 1.6 WHERE base='USD' "
+                   "AND quote='AUD' AND rate_date = '2026-07-15'"))
+    _seed_spy(s, "200")                             # SPY flat in USD at 200
+    prior = trading_days_between("US", date(2025, 12, 1), date(2026, 7, 14))[-126:]
+    # base recorded at FX 1.4 (AUD): sleeve 53*100*1.4 = 7420, SPY 200*1.4 = 280
+    _forge_prior(s, sid, prior, value="7420", peak="7420", spy="280")
+
+    report = check_bands(s, FrozenClock(T15))
+    st = report.statuses[0]
+    # sleeve +14.29% (AUD) vs SPY +14.29% (AUD) -> excess ~ 0; FX cancelled
+    assert abs(st.excess_pp) < 0.5
+    assert st.action != "demoted" and _state(s, sid) == "paper"
+    assert not _demotions(s) and not alerts
 
 
 def test_excess_stays_dormant_below_126_sessions(clean_audit, alerts):
