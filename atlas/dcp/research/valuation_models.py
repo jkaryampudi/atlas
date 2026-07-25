@@ -64,6 +64,7 @@ from sqlalchemy.orm import Session
 
 from atlas.dcp.market_data.fundamentals import _get
 from atlas.dcp.research.financials_panel import _num, _period_date
+from atlas.dcp.research.ratios import currencies_incompatible, norm_currency
 
 # ---- declared assumptions (surfaced in the output; not tuned, feed no signal) ----
 RISK_FREE_RATE = 0.04            # long-run nominal risk-free proxy
@@ -531,11 +532,6 @@ def _dupont(payload: dict[str, object], as_of: date) -> dict[str, object]:
 # Top level
 # ---------------------------------------------------------------------------
 
-def _ccy(value: object) -> str | None:
-    s = str(value).strip().upper() if value is not None else ""
-    return s or None
-
-
 def _currency_blocked_valuation(as_of: date, snapshot_as_of: str | None,
                                 price: float | None, reporting_cur: str,
                                 listing_cur: str) -> dict[str, object]:
@@ -600,12 +596,11 @@ def compute_valuation(session: Session, instrument_id: str, symbol: str,
     # currency mismatch fabricates a fair value + upside/verdict from the FX
     # ratio. Fail closed (mirror health_score's fcf_yield guard) when the two
     # currencies are known and differ, rather than emit a currency-mixed signal.
-    reporting_cur = _ccy(_get(payload, ("General", "CurrencyCode")))
-    listing_cur = _ccy(inst.currency if inst is not None else None)
-    if (reporting_cur is not None and listing_cur is not None
-            and reporting_cur != listing_cur):
+    reporting_cur = norm_currency(_get(payload, ("General", "CurrencyCode")))
+    listing_cur = norm_currency(inst.currency if inst is not None else None)
+    if currencies_incompatible(reporting_cur, listing_cur):
         return _currency_blocked_valuation(as_of, snapshot_as_of, price,
-                                           reporting_cur, listing_cur)
+                                           str(reporting_cur), str(listing_cur))
     # a bank / broker / insurer / REIT is valued on equity multiples only — the
     # EV-based and free-cash-flow methods don't apply (see _EQUITY_ONLY_SECTORS).
     is_financial = sector in _EQUITY_ONLY_SECTORS

@@ -42,6 +42,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from atlas.dcp.research.ratios import currencies_confirmed_same
+
 VENDOR_SOURCE = "EodhdAdapter"
 _MOM_WINDOW_DAYS = 400          # bounded scan; ~1y of sessions plus slack
 _MOM_LAG = 252                  # trading sessions ~ 1 year
@@ -96,10 +98,9 @@ def _factors_from_row(r: object) -> dict[str, float | None]:
     # compute fcf_yield when the two currencies are known and equal; otherwise fail
     # closed (None) rather than emit a currency-mixed signal. (The margin ratios
     # below divide statement-currency by statement-currency, so they cancel.)
-    reporting_cur = getattr(r, "reporting_cur", None)
-    listing_cur = getattr(r, "listing_cur", None)
-    same_currency = (reporting_cur is not None and listing_cur is not None
-                     and str(reporting_cur) == str(listing_cur))
+    # F-010: the currency-compatibility rule lives in ONE shared layer (ratios.py).
+    same_currency = currencies_confirmed_same(
+        getattr(r, "reporting_cur", None), getattr(r, "listing_cur", None))
     return {
         "earnings_yield": _inv(_f(getattr(r, "pe"))),
         "ebitda_yield": _inv(_f(getattr(r, "evebitda"))),

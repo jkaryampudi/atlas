@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 from atlas.dcp.market_data.adjustment import cumulative_split_factor
 from atlas.dcp.market_data.earnings_basis import load_instrument_splits
 from atlas.dcp.market_data.fundamentals import _currency, _get, _number
+from atlas.dcp.research.ratios import cross_currency_ratio
 
 # Curated line items per statement (label -> vendor key), in render order. A
 # pro-research report shows the headline lines, not the vendor's full ~40-field
@@ -206,9 +207,17 @@ def _forward_estimates(session: Session, instrument_id: str,
     return out
 
 
-def _key_stats(payload: dict[str, object]) -> dict[str, object]:
+def _key_stats(payload: dict[str, object], *, statement_ccy: str | None,
+               listing_ccy: str | None) -> dict[str, object]:
     """The report's extra "Key Indicators" not already in the model panel — all
-    vendor facts, plus a single clearly-derived ratio (FCF yield)."""
+    vendor facts, plus a single clearly-derived ratio (FCF yield).
+
+    F-010: FCF comes from the cash-flow statement (issuer accounting currency)
+    while market cap is in the LISTING currency; dividing them across currencies
+    fabricates a yield scaled by FX. fcf_yield is therefore routed through the
+    shared currency-normalisation layer and is None + `fcf_yield_currency_blocked`
+    when the two currencies are not confirmed equal — an explicit exclusion, not a
+    silent zero the dossier would read as an honest 'vendor absent'."""
     beta = _num(_get(payload, ("Technicals", "Beta")))
     book_ps = _num(_get(payload, ("Highlights", "BookValue")))
     revenue_ttm = _num(_get(payload, ("Highlights", "RevenueTTM")))
@@ -231,8 +240,9 @@ def _key_stats(payload: dict[str, object]) -> dict[str, object]:
                 cand = _num(row.get("freeCashFlow"))
                 if cand is not None:
                     latest, fcf_ttm = pend, cand
-    fcf_yield = (100.0 * fcf_ttm / market_cap
-                 if (fcf_ttm is not None and market_cap) else None)
+    fcf_yield, fcf_blocked = cross_currency_ratio(
+        fcf_ttm, market_cap, num_ccy=statement_ccy, den_ccy=listing_ccy,
+        scale=100.0)
 
     return {
         "beta_5y": beta,
@@ -241,7 +251,8 @@ def _key_stats(payload: dict[str, object]) -> dict[str, object]:
         "market_cap": market_cap,
         "shares_outstanding": shares_out,
         "fcf": fcf_ttm,
-        "fcf_yield_pct": fcf_yield,           # derived: FCF / market cap
+        "fcf_yield_pct": fcf_yield,           # derived: FCF / market cap (AUD-safe)
+        "fcf_yield_currency_blocked": fcf_blocked,  # F-010 explicit exclusion flag
         "eps_estimate_current_year": eps_est_cy,
         "eps_estimate_next_year": eps_est_ny,
         "wall_street_target": ws_target,
@@ -263,16 +274,23 @@ def compute_financials(session: Session, instrument_id: str, symbol: str,
     # currency through the same ISO-4217 shape guard as agent evidence — honours
     # the module's "only numbers and ISO dates leave here" contract (a hostile
     # General.CurrencyCode free-text string is dropped, not displayed).
-    currency = _currency(payload)
+    currency = _currency(payload)                     # issuer accounting currency
+    # F-010: the LISTING currency (what market cap / price are quoted in), so a
+    # cross-currency FCF yield fails closed instead of being FX-fabricated.
+    listing_ccy = session.execute(text(
+        "SELECT currency FROM market.instruments WHERE id = :i"),
+        {"i": instrument_id}).scalar()
 
     return {
         "as_of": as_of.isoformat(),
         "snapshot_as_of": snapshot_as_of,
         "currency": currency,
+        "listing_currency": listing_ccy,
         "statements": _statements(payload, as_of),
         "earnings": {
             "history": _earnings_history(session, instrument_id, as_of),
             "estimates": _forward_estimates(session, instrument_id, as_of),
         },
-        "key_stats": _key_stats(payload),
+        "key_stats": _key_stats(payload, statement_ccy=currency,
+                                listing_ccy=listing_ccy),
     }

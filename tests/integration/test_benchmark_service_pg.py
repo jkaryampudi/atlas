@@ -80,11 +80,15 @@ def test_reporting_close_series_reinvests_dividends_total_return(pg_session):
 
 def test_reporting_close_series_fails_closed_without_fx(pg_session):
     s = pg_session
-    iid = _inst(s, "ZNOFX")
-    _bar(s, iid, D0, "100")                          # no FX seeded
+    # XTS is the ISO-4217 'reserved for testing' code — no suite ever seeds an
+    # XTS->AUD rate, so fx_to_aud is guaranteed to fail closed here regardless of
+    # what committed FX rows an earlier test file left behind.
+    s.execute(text("DELETE FROM market.fx_rates_daily WHERE base = 'XTS'"))
+    iid = _inst(s, "ZNOFX", currency="XTS")
+    _bar(s, iid, D0, "100")
     with pytest.raises(RuntimeError, match="rate"):
         reporting_close_series(s, instrument_id=iid, symbol="ZNOFX",
-                               currency="USD", through=D0)
+                               currency="XTS", through=D0)
 
 
 def test_benchmark_series_empty_when_spy_absent(pg_session):
