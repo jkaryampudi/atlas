@@ -70,18 +70,14 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock
-from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
+from atlas.dcp.execution.paper import fx_to_aud
 from atlas.dcp.learning.drift import CusumDetector
+from atlas.dcp.market_data.benchmark import benchmark_reporting_close
 from atlas.dcp.market_data.calendars import last_completed_session
-from atlas.dcp.market_data.total_return import (
-    load_adjusted_dividends,
-    total_return_series,
-)
 from atlas.dcp.trading.proposals import _latest_close
 from atlas.ops.alerts import notify
 
 BENCHMARK = "SPY"
-BENCHMARK_CURRENCY = "USD"                # SPY is USD-denominated (F-006)
 EXCESS_SESSIONS = 126                    # ADR-0010: trailing 126-session excess
 DD_BAND_KEY = "max_drawdown_from_sleeve_peak"
 EXCESS_BAND_KEY = "trailing_126_session_excess_vs_spy_tr_pp"
@@ -157,33 +153,18 @@ def _sleeve_lots(session: Session, strategy_id: UUID) -> tuple[
 
 
 def _spy_tr_close(session: Session, on: date) -> Decimal | None:
-    """SPY total-return close as of the last SPY vendor bar at or before `on`
-    (dividends reinvested at ex-date close — market_data/total_return.py); the
-    transform is prefix-causal so stored history never gets revised. None when
-    SPY bars are absent (excess stays dormant; DD still enforces).
+    """SPY total-return close in AUD as of the last SPY vendor bar at or before
+    `on`. Delegates to the ONE authoritative benchmark service
+    (market_data/benchmark.py) so the demotion band and the memo scorecard grade
+    against the SAME AUD total-return SPY (F-006) — dividends reinvested at the
+    ex-date close, PIT FX applied, transform prefix-causal. None when SPY bars are
+    absent (excess stays dormant; DD still enforces).
 
-    F-006: the SPY TR close is returned in **AUD** (PIT FX at `on`), because the
-    sleeve leg it is differenced against (`check_bands`) is marked in AUD. Grading
-    an AUD sleeve return against a USD benchmark return let pure USD/AUD FX drift
-    masquerade as alpha/excess — a flat-in-USD sleeve vs a flat-in-USD SPY would
-    show a non-zero excess equal to the FX move, able to trip the −25pp demotion
-    band. Converting the benchmark to AUD makes both legs share the AUD base, so
-    the FX cancels in the difference and the excess is true single-currency alpha."""
-    rows = session.execute(text(
-        "SELECT pb.bar_date, pb.close FROM market.price_bars_daily pb "
-        "JOIN market.instruments i ON i.id = pb.instrument_id "
-        "WHERE i.symbol = :sym AND pb.source = :src AND pb.bar_date <= :on "
-        "  AND pb.close IS NOT NULL ORDER BY pb.bar_date"),
-        {"sym": BENCHMARK, "src": PRICE_SOURCE, "on": on}).all()
-    if not rows:
-        return None
-    closes = [float(r.close) for r in rows]
-    trs = total_return_series(
-        dates=[r.bar_date for r in rows], opens=list(closes),
-        closes=closes,
-        dividends=[d for d in load_adjusted_dividends(session, BENCHMARK)
-                   if d.ex_date <= on])
-    return Decimal(str(trs.closes[-1])) * fx_to_aud(session, BENCHMARK_CURRENCY, on)
+    Why AUD: the sleeve leg it is differenced against (`check_bands`) is marked in
+    AUD; grading an AUD sleeve return against a USD benchmark let pure USD/AUD FX
+    drift masquerade as excess, able to trip the −25pp demotion band. Both legs on
+    the AUD base => the FX cancels in the difference => true single-currency alpha."""
+    return benchmark_reporting_close(session, on)
 
 
 def _prior_rows(session: Session, strategy_id: UUID, before: date,

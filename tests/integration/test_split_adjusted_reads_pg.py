@@ -28,6 +28,14 @@ pytestmark = requires_pg
 
 
 def _instrument(s, symbol: str, *, active: bool = True) -> str:
+    # F-006: the scorecard grades on the AUD total-return basis. A FLAT USD->AUD
+    # rate seeded before all bars (fx_to_aud carries forward) cancels in every
+    # return ratio, so the split-adjustment assertions here are unchanged while
+    # the reporting-basis path is exercised.
+    s.execute(text(
+        "INSERT INTO market.fx_rates_daily (base, quote, rate_date, rate, source) "
+        "VALUES ('USD','AUD', DATE '2025-01-01', '1.0', 'test') "
+        "ON CONFLICT (base, quote, rate_date) DO UPDATE SET rate = '1.0'"))
     return str(s.execute(text(
         "INSERT INTO market.instruments (symbol, exchange, market, "
         "instrument_type, name, sector_gics, currency, is_active) "

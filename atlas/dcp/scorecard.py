@@ -47,11 +47,17 @@ MECHANICS:
   OWN priceable session sequence (vendor bars with a non-NULL close), never
   calendar days. No bar that far out yet => the outcome is immature, skipped
   with a reason, retried next cycle.
-- fwd_return = fwd_close/anchor_close - 1; spy_return over the same
-  anchor->fwd dates from SPY closes; excess = fwd_return - spy_return. All
-  three are quantized to the 6dp column quantum (fwd/spy first, so excess is
-  exact). Fail-closed skips: SPY missing either exact date, no resolvable
-  instrument, no anchor bar, non-positive close at either end.
+- REPORTING BASIS (F-006): both legs are on the fund's AUD TOTAL-RETURN basis,
+  from the ONE authoritative service (market_data/benchmark.py) — split-adjusted
+  prices, dividends reinvested at the ex-date close, converted to AUD at each
+  session's PIT FX. fwd_return = fwd_close/anchor_close - 1 and spy_return over
+  the same anchor->fwd dates are therefore BOTH AUD total returns; excess =
+  fwd_return - spy_return is true single-currency alpha, never a USD/AUD FX move
+  masquerading as excess (the review's currency-inconsistency defect). All three
+  are quantized to the 6dp column quantum (fwd/spy first, so excess is exact).
+  Fail-closed skips: SPY missing either exact date, no resolvable instrument, a
+  symbol unpriceable in AUD (no FX for its currency), no anchor bar, non-positive
+  close at either end.
 - INSTRUMENT RESOLUTION (desk-review 2026-07 item 5): exactly one ACTIVE
   instrument for the symbol wins — the bridge's rule. With no active row,
   exactly one row of ANY activity resolves too: grading needs bars, not
@@ -116,11 +122,11 @@ from atlas.core.config import get_settings
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.adapters.eodhd import EodhdAdapter, vendor_symbol
 from atlas.dcp.market_data.adapters.fixture import FixtureAdapter
-from atlas.dcp.market_data.adjustment import adjust_for_splits
+from atlas.dcp.market_data.benchmark import (benchmark_reporting_series,
+                                             reporting_close_series)
 from atlas.dcp.market_data.daily import incremental_sessions
 from atlas.dcp.market_data.bar_versions import set_knowledge_date
 from atlas.dcp.market_data.ingest import record_split, upsert_bar
-from atlas.dcp.market_data.models import Bar, Split
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -328,6 +334,7 @@ class ResolvedInstrument:
     exchange: str
     market: str
     is_active: bool
+    currency: str                      # F-006: reporting-basis conversion needs it
 
 
 def _resolve_instrument(session: Session, symbol: str) -> ResolvedInstrument | None:
@@ -336,7 +343,7 @@ def _resolve_instrument(session: Session, symbol: str) -> ResolvedInstrument | N
     docstring): grading needs bars, not tradability, and analyze-box memos
     live on analysis-only is_active=FALSE rows. Ambiguity fails closed."""
     rows = session.execute(text(
-        "SELECT id, exchange, market, is_active FROM market.instruments "
+        "SELECT id, exchange, market, is_active, currency FROM market.instruments "
         "WHERE symbol = :s"), {"s": symbol}).all()
     active = [r for r in rows if r.is_active]
     if len(active) == 1:
@@ -346,34 +353,23 @@ def _resolve_instrument(session: Session, symbol: str) -> ResolvedInstrument | N
     else:
         return None
     return ResolvedInstrument(instrument_id=str(pick.id), exchange=pick.exchange,
-                              market=pick.market, is_active=bool(pick.is_active))
+                              market=pick.market, is_active=bool(pick.is_active),
+                              currency=str(pick.currency))
 
 
-def _load_series(session: Session, instrument_id: str,
-                 through: date) -> list[tuple[date, Decimal]]:
-    """The instrument's priceable session sequence: ascending vendor bars with
-    a non-NULL close, hard-capped at the clock's date (no look-ahead), and
-    SPLIT-ADJUSTED on read (module docstring) using only splits recorded with
-    action_date <= `through`. Degenerate OHLC below exists solely to satisfy
-    the Bar invariant; only close is read back."""
-    rows = session.execute(text(
-        "SELECT bar_date, close FROM market.price_bars_daily "
-        "WHERE instrument_id = :iid AND source = :src "
-        "  AND close IS NOT NULL AND bar_date <= :d ORDER BY bar_date"),
-        {"iid": instrument_id, "src": VENDOR_SOURCE, "d": through}).all()
-    splits = [Split(symbol=instrument_id, action_date=r.action_date,
-                    ratio=Decimal(r.ratio))
-              for r in session.execute(text(
-                  "SELECT action_date, ratio FROM market.corporate_actions "
-                  "WHERE instrument_id = :iid AND action_type = 'split' "
-                  "  AND action_date <= :d ORDER BY action_date"),
-                  {"iid": instrument_id, "d": through}).all()]
-    if not splits:
-        return [(r.bar_date, r.close) for r in rows]
-    bars = [Bar(symbol=instrument_id, bar_date=r.bar_date, open=r.close,
-                high=r.close, low=r.close, close=r.close, volume=0)
-            for r in rows]
-    return [(b.bar_date, b.close) for b in adjust_for_splits(bars, splits)]
+def _aud_tr_series(session: Session, inst: ResolvedInstrument, symbol: str,
+                   through: date) -> list[tuple[date, Decimal]]:
+    """The instrument's priceable session sequence on the FUND'S REPORTING BASIS
+    (F-006): ascending (bar_date, AUD total-return close), hard-capped at the
+    clock's date (no look-ahead). Split-adjusted, dividends reinvested, converted
+    to AUD at each session's PIT FX — the SAME basis the SPY leg is graded on, so
+    a non-USD memo's return is honest instead of being differenced against a USD
+    benchmark. Delegates entirely to market_data/benchmark.py (the ONE authoritative
+    reporting-return service); raises if the instrument is unpriceable in AUD."""
+    series = reporting_close_series(
+        session, instrument_id=inst.instrument_id, symbol=symbol,
+        currency=inst.currency, through=through)
+    return sorted(series.items())
 
 
 def vendor_adapter_for(symbol: str, exchange: str) -> MarketDataAdapter:
@@ -487,13 +483,24 @@ def compute_memo_outcomes(
         topups = _top_up_inactive_bars(session, clock, adapter_for,
                                        awaiting, instruments)
 
-    series = {symbol: _load_series(session, inst.instrument_id, today)
-              for symbol, inst in instruments.items()}
+    # Both legs on the fund's AUD total-return reporting basis (F-006). A symbol
+    # that cannot be priced in AUD (no FX for its currency) is OMITTED here, so
+    # its memos skip fail-closed at "no instrument" — a return that cannot be
+    # stated in the reporting currency is never graded against the benchmark.
+    series: dict[str, list[tuple[date, Decimal]]] = {}
+    for symbol, inst in instruments.items():
+        try:
+            series[symbol] = _aud_tr_series(session, inst, symbol, today)
+        except RuntimeError:           # fx_to_aud fail-closed for this currency
+            continue
 
-    spy: dict[date, Decimal] = {}
-    spy_inst = _resolve_instrument(session, BENCHMARK_SYMBOL)
-    if spy_inst is not None:           # no SPY => every horizon skips fail-closed
-        spy = dict(_load_series(session, spy_inst.instrument_id, today))
+    # SPY on the SAME basis, from the ONE authoritative benchmark service. A
+    # missing benchmark FX fails closed like a missing benchmark bar (every
+    # horizon skips) rather than crashing the night.
+    try:
+        spy: dict[date, Decimal] = benchmark_reporting_series(session, through=today)
+    except RuntimeError:
+        spy = {}
 
     rows, skips, already = plan_outcomes(memos, series, spy, existing)
 

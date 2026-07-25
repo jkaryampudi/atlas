@@ -103,12 +103,9 @@ from sqlalchemy.orm import Session
 
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import Clock, FrozenClock, SystemClock
-from atlas.dcp.execution.paper import PRICE_SOURCE, fx_to_aud
+from atlas.dcp.execution.paper import fx_to_aud
+from atlas.dcp.market_data.benchmark import reporting_return_between
 from atlas.dcp.market_data.calendars import last_completed_session
-from atlas.dcp.market_data.total_return import (
-    load_adjusted_dividends,
-    total_return_series,
-)
 from atlas.dcp.portfolio.attribution import (
     Attribution,
     assert_authoritative_book,
@@ -298,37 +295,19 @@ def _flows(lots: list[_Lot], start: datetime | None,
 def _tr_ret(session: Session, symbol: str, on: date,
             prev: date) -> Decimal | None:
     """TOTAL-RETURN close-to-close return of `symbol` between the two exact
-    session dates, IN THE PORTFOLIO'S AUD BASE (F-006), via the one prefix-causal
-    transform in market_data/total_return.py. None unless BOTH dates have vendor
-    bars.
+    session dates, IN THE PORTFOLIO'S AUD BASE (F-006). Delegates to the ONE
+    authoritative reporting-basis return service (market_data/benchmark.py) so
+    daily attribution's alpha, the demotion bands, and the memo scorecard are all
+    graded against numbers from the same place — no third inline copy of the
+    AUD/total-return/PIT-FX math to drift.
 
-    F-006 currency policy: the sleeve return (_mark_value) is AUD — it marks USD
-    holdings through fx_to_aud, so it carries the USD/AUD FX move. A USD benchmark
-    return would NOT, so differencing them (the alpha) was FX-polluted. Here the
-    benchmark total return is converted to AUD with point-in-time FX on both
-    dates, so BOTH legs share the same FX basis and it cancels in the excess. For
-    an AUD-denominated instrument fx_to_aud returns 1 (no-op). Missing FX fails
-    closed (fx_to_aud raises), exactly like the marking path."""
-    rows = session.execute(text(
-        "SELECT pb.bar_date, pb.close, i.currency FROM market.price_bars_daily pb "
-        "JOIN market.instruments i ON i.id = pb.instrument_id "
-        "WHERE i.symbol = :sym AND pb.source = :src AND pb.bar_date <= :on "
-        "  AND pb.close IS NOT NULL ORDER BY pb.bar_date"),
-        {"sym": symbol, "src": PRICE_SOURCE, "on": on}).all()
-    dates = [r.bar_date for r in rows]
-    if not dates or dates[-1] != on or prev not in dates:
-        return None
-    cur = str(rows[0].currency)
-    closes = [float(r.close) for r in rows]
-    trs = total_return_series(
-        dates=dates, opens=list(closes), closes=closes,
-        dividends=[d for d in load_adjusted_dividends(session, symbol)
-                   if d.ex_date <= on])
-    tr_on = Decimal(str(trs.closes[-1])) * fx_to_aud(session, cur, on)
-    tr_prev = Decimal(str(trs.closes[dates.index(prev)])) * fx_to_aud(session, cur, prev)
-    if tr_prev <= 0:
-        return None
-    return tr_on / tr_prev - 1
+    F-006 currency policy (enforced in the service): the sleeve return
+    (_mark_value) is AUD — it marks USD holdings through fx_to_aud, carrying the
+    USD/AUD move. A USD benchmark return would not, so differencing them was
+    FX-polluted; the service converts the benchmark TR to AUD on BOTH dates, the
+    FX cancels in the excess, an AUD instrument is a no-op, and missing FX fails
+    closed exactly like the marking path."""
+    return reporting_return_between(session, symbol=symbol, on=on, prev=prev)
 
 
 # ------------------------------------------------------- the daily attribution
