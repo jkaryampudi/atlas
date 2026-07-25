@@ -151,12 +151,15 @@ from atlas.dcp.signals.xsmom.v1 import LOOKBACK, SEASONING, SKIP, SPEC, TOP_N
 ROOT = Path(__file__).resolve().parents[3]
 BENCHMARK = "SPY"
 
-# F-001 coverage-safety gate: the definitive panel must NOT run when issuer
-# identity could not be verified for most of the ranked universe (a broken or
-# unpopulated identity feed => the panel would be graded on ticker-only history,
-# exactly the defect this gate closes). Below this fraction of member symbols with
-# a RESOLVED issuer identity, load_pit_panel fails closed.
-IDENTITY_COVERAGE_FLOOR = 0.5
+# F-001 coverage-safety gate: the definitive panel must NOT run when the issuer
+# identity of the ranked universe could not be resolved (a broken or unpopulated
+# identity feed). Below this fraction of member symbols with a RESOLVED issuer
+# identity, load_pit_panel fails closed. NOTE: resolution alone no longer vouches
+# pre-membership history — admit_pre_era_bars_by_issuer additionally requires the
+# era to be ATTESTED (history_complete or a recorded issuer break), else pre-era
+# formation bars are dropped. This floor is the feed-health backstop; the per-bar
+# attestation is the false-continuity guard.
+IDENTITY_COVERAGE_FLOOR = 0.9
 FAMILY = "xsmom-pit"
 # ADR-0016: every xsmom-pit* family is one research line — deflated Sharpe
 # counts the full momentum LINEAGE, so renaming can never reset the penalty.
@@ -602,12 +605,13 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
             if len(adm.keep) < len(ds):
                 obars = [obars[i] for i in adm.keep]
                 ds = [ds[i] for i in adm.keep]
-            if adm.wrong_issuer or adm.unresolved:
+            if adm.wrong_issuer or adm.unresolved or adm.unattested:
                 identity_exclusions.append(PitExclusion(
                     sym, _delisted(sym),
                     f"F-001 identity: dropped {adm.wrong_issuer} wrong-issuer + "
-                    f"{adm.unresolved} unresolved pre-era bar(s) from formation "
-                    f"(kept {len(adm.keep)} identity-verified / in-era bars)"))
+                    f"{adm.unresolved} unresolved + {adm.unattested} unattested "
+                    f"pre-era bar(s) from formation (kept {len(adm.keep)} "
+                    "attested / in-era bars)"))
         expected = trading_days_between("US", ds[0], ds[-1])
         have = set(ds)
         gaps = [d for d in expected if d not in have]

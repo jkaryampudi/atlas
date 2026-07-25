@@ -139,14 +139,23 @@ def test_pit_runner_full_path(pg_session):
                    if f.symbol == DEAD)
     assert dead_day == date(2013, 9, 3)      # first session without a bar
 
-    # point-in-time eligibility on the loaded panel: LATE ranks only once a
-    # member; DEAD disappears with its series
+    # point-in-time eligibility on the loaded panel. LATE is a member only from
+    # 2013-03, and its PRE-membership formation history is UNATTESTED under the
+    # single-snapshot identity model — so F-001 drops those bars fail-closed and
+    # LATE cannot rank until it accrues enough IN-index (attested) history, which
+    # this short window never reaches. It remains in the panel as a member; it is
+    # simply immature. DEAD disappears with its series.
     panel, members = run.universe.panel, run.universe.members
     feb2013 = panel.dates.index(date(2013, 2, 28))
     mar2013 = panel.dates.index(date(2013, 3, 28))
     oct2013 = panel.dates.index(date(2013, 10, 31))
-    assert LATE not in pit_eligible(PanelView(panel, feb2013), members)
-    assert LATE in pit_eligible(PanelView(panel, mar2013), members)
+    assert LATE in members                                        # still a panel member
+    assert LATE not in pit_eligible(PanelView(panel, feb2013), members)  # not yet a member
+    assert LATE not in pit_eligible(PanelView(panel, mar2013), members)  # unattested pre-index -> immature
+    assert LATE not in pit_eligible(PanelView(panel, oct2013), members)  # still accruing attested history
+    # the fail-closed drop is recorded honestly as a structured exclusion
+    assert any(x.symbol == LATE and "unattested" in x.reason
+               for x in run.universe.identity_exclusions)
     assert DEAD in pit_eligible(PanelView(panel, feb2013), members)
     assert DEAD not in pit_eligible(PanelView(panel, oct2013), members)
 

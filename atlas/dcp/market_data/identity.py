@@ -12,13 +12,24 @@ identifier — EODHD serves no current fundamentals for a delisted ticker — so
 unresolved identity resolves to ``None`` and can never be silently trusted.
 
 Honest scope (see migration 0037): we hold ONE vendor snapshot, so there is one
-OPEN identity per instrument with a conservative ``valid_from`` (the first stored
-bar — the span we can attest) and ``history_complete = false``. ``resolve_identity``
-is therefore point-in-time correct at the interface — asked for a date before
-``valid_from`` it fails closed rather than pretending the current identity applied
-historically — but the *dated change-history* (multiple closed rows across a
-ticker's life) needs a vendor symbol-change feed we do not ingest. The schema
-accepts that history later without rework.
+OPEN identity per instrument with ``valid_from`` DEFAULTED to the first stored bar
+and ``history_complete = false``. Two consequences follow, stated plainly because
+they bound what this module can promise:
+
+  * ``resolve_identity`` resolves for any date at/after ``valid_from``; since
+    ``valid_from`` is the first stored bar, it resolves for EVERY stored bar. So a
+    single OPEN row does NOT actually attest the pre-membership era — it merely
+    assumes the current issuer back to the first bar. That assumption is exactly
+    the reused-ticker FALSE CONTINUITY it must not make. The definitive panel's
+    ``admit_pre_era_bars_by_issuer`` therefore treats such single-snapshot,
+    ``history_complete = false`` identities as UNATTESTED and drops pre-era
+    formation bars fail-closed (F-001) — real discrimination arrives only with a
+    recorded issuer break (a second closed row) or an attested history feed.
+  * ``resolve_identity`` does NOT yet filter on ``known_from`` (as-of-knowledge):
+    an identity learned after a historical decision date resolves that date
+    retroactively. The dated change-history + as-of-knowledge filter both need the
+    vendor symbol-change feed we do not ingest; the schema accepts them without
+    rework.
 
 This module is pure DCP: no agent imports, no sizing/pricing outputs — it only
 resolves identity and refuses when it cannot.
@@ -157,6 +168,33 @@ def instrument_id_for_symbol(session: Session, symbol: str) -> str | None:
     return _instrument_id_for_symbol(session, symbol)
 
 
+def _identity_attests_history(session: Session, instrument_id: str,
+                              member: IssuerIdentity | None) -> bool:
+    """Can the member's identity actually VOUCH for its pre-membership era?
+
+    Only when either (a) the vendor marked the history complete
+    (``history_complete``), or (b) a real issuer break has been recorded — more
+    than one resolved identity row — so ``resolve_identity(as_of=<past date>)``
+    genuinely discriminates the issuer that held the ticker then.
+
+    Under the shipped single-snapshot model there is exactly ONE open row per
+    instrument whose ``valid_from`` DEFAULTS to the first stored bar
+    (``refresh_identity``), so it does NOT attest the pre-membership era — it just
+    assumes the current issuer back to the first bar. That assumption is the
+    false-continuity the reused-ticker guard must NOT make (F-001): it returns
+    False here so pre-era bars fail closed until a dated symbol-change /
+    historical-ISIN feed provides real attestation."""
+    if member is None:
+        return False
+    if member.history_complete:
+        return True
+    n_resolved = session.execute(text(
+        "SELECT count(*) FROM market.instrument_identity "
+        "WHERE instrument_id = :iid AND is_resolved = true"),
+        {"iid": instrument_id}).scalar() or 0
+    return n_resolved > 1
+
+
 @dataclass(frozen=True)
 class IssuerAdmission:
     """Which bars of a series may enter the definitive panel, by issuer identity."""
@@ -164,23 +202,34 @@ class IssuerAdmission:
     wrong_issuer: int              # pre-era bars resolving to a DIFFERENT issuer
     unresolved: int                # pre-era bars whose issuer cannot be vouched
     member_resolved: bool          # did the member's OWN issuer resolve?
+    unattested: int = 0            # pre-era bars whose (same-issuer) era is NOT attested
+    history_attested: bool = False  # could the member vouch its pre-era at all?
 
 
 def admit_pre_era_bars_by_issuer(
         session: Session, instrument_id: str, dates: Sequence[date],
         *, is_in_era: Callable[[date], bool]) -> IssuerAdmission:
-    """F-001: resolve every bar to an issuer identity before it may enter the
-    definitive momentum panel.
+    """F-001: resolve every bar to an ATTESTED issuer identity before it may enter
+    the definitive momentum panel.
 
     Every IN-ERA bar is admitted — index membership IS the point-in-time
     attestation that this instrument was the member across that span. A PRE-era
-    bar (formation lookback) is admitted ONLY when it resolves to the SAME issuer
-    as the member; a pre-era bar that resolves to a DIFFERENT issuer (a ticker
-    reused before the member joined) or that cannot be vouched at all is EXCLUDED
-    fail-closed — reused-ticker history must never enter momentum formation. The
-    member's issuer is taken from the earliest in-era bar; if the member itself is
-    unresolved, every pre-era bar fails closed (and ``member_resolved`` is False so
-    the panel can apply its coverage-safety gate).
+    bar (formation lookback) is admitted ONLY when BOTH hold:
+      * it resolves to the SAME issuer as the member, AND
+      * the member's identity actually ATTESTS that era
+        (``_identity_attests_history`` — history_complete, or a recorded issuer
+        break, so resolution genuinely discriminates).
+
+    A pre-era bar that resolves to a DIFFERENT issuer (a reused ticker) is dropped
+    as ``wrong_issuer``; one whose issuer cannot be resolved at all is dropped as
+    ``unresolved``; and — the fail-closed core of F-001 — a pre-era bar that
+    resolves to the same single-snapshot identity whose history is NOT attested is
+    dropped as ``unattested``. Under the shipped data model (one open identity row
+    per instrument, ``valid_from`` defaulted to the first bar), this means
+    pre-membership formation history is admitted ONLY once a real symbol-change /
+    historical-ISIN feed attests it — so the current issuer's ISIN can never
+    silently vouch a prior issuer's bars (false continuity). Missing vendor
+    history fails CLOSED (bars dropped), never OPEN.
 
     Callers pass the series AFTER post-removal clipping, so a non-in-era date here
     is always PRE-era; the function never re-admits a clipped post-removal bar."""
@@ -188,20 +237,26 @@ def admit_pre_era_bars_by_issuer(
     era = [d for d in ds if is_in_era(d)]
     member = (resolve_identity(session, instrument_id, as_of=min(era))
               if era else None)
+    attested = _identity_attests_history(session, instrument_id, member)
     keep: list[int] = []
-    wrong = unresolved = 0
+    wrong = unresolved = unattested = 0
     for i, d in enumerate(ds):
         if is_in_era(d):
             keep.append(i)
             continue
         bar = resolve_identity(session, instrument_id, as_of=d)
         if same_issuer(member, bar):
-            keep.append(i)
+            if attested:
+                keep.append(i)          # same issuer AND the era is really vouched
+            else:
+                unattested += 1         # same single-snapshot ISIN, era NOT attested
         elif bar is not None:
             wrong += 1
         else:
             unresolved += 1
-    return IssuerAdmission(keep=keep, wrong_issuer=wrong, unresolved=unresolved,
+    return IssuerAdmission(keep=keep, wrong_issuer=wrong,
+                           unresolved=unresolved, unattested=unattested,
+                           history_attested=attested,
                            member_resolved=member is not None)
 
 
