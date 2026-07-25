@@ -17,9 +17,20 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 
-from tests.conftest import URL, requires_pg, reset_app_engine
+from tests.conftest import URL, _ensure_test_db, requires_pg, reset_app_engine
 
 pytestmark = requires_pg
+
+
+@pytest.fixture(autouse=True)
+def _bootstrap_test_db():
+    """Migrate atlas_test (creating the atlas_app role + ENABLE-ALWAYS audit
+    triggers) before each lifespan test, exactly as the sibling
+    test_db_least_privilege_pg does via its app_engine fixture. Without this the
+    file free-rides on an earlier-collected test having set conftest._prepared, so
+    it fails when run in isolation or under pytest-xdist (each worker starts with
+    its own _prepared=False and no atlas_app role). _ensure_test_db is idempotent."""
+    _ensure_test_db()
 
 # NB: URL.__str__ masks the password to '***'; render with hide_password=False so
 # the value we put in ATLAS_DATABASE_URL carries the real credential.
