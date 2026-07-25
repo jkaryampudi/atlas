@@ -141,13 +141,18 @@ def _forge_prior(s, strategy_id: str, sessions: list[date], *, value: str,
 
 
 def _seed_spy(s, close: str) -> None:
+    # F-006: the benchmark service resolves SPY to exactly one ACTIVE instrument.
+    # Park any pre-existing (committed) SPY inactive and grade against this file's
+    # private active XTEST SPY, so resolution is unambiguous in a full-suite run.
+    s.execute(text("UPDATE market.instruments SET is_active = false WHERE symbol = 'SPY'"))
     s.execute(text(
         "INSERT INTO market.instruments (symbol, exchange, market, "
-        "instrument_type, name, sector_gics, currency) "
-        "VALUES ('SPY', 'XTEST', 'US', 'etf', 'SPY', NULL, 'USD') "
-        "ON CONFLICT (symbol, exchange) DO NOTHING"))
+        "instrument_type, name, sector_gics, currency, is_active) "
+        "VALUES ('SPY', 'XTEST', 'US', 'etf', 'SPY', NULL, 'USD', true) "
+        "ON CONFLICT (symbol, exchange) DO UPDATE SET is_active = true"))
     iid = s.execute(text(
-        "SELECT id FROM market.instruments WHERE symbol = 'SPY' LIMIT 1")).scalar()
+        "SELECT id FROM market.instruments WHERE symbol = 'SPY' "
+        "AND exchange = 'XTEST'")).scalar()
     s.execute(text(
         "DELETE FROM market.price_bars_daily "
         "WHERE instrument_id = :iid AND bar_date = '2026-07-15'"), {"iid": iid})
