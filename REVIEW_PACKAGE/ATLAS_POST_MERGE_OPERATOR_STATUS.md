@@ -5,7 +5,33 @@ Status of external/operator actions after the merge. The repo can prove that the
 runtime/external mutation (rotating a vendor key, setting env secrets, mutating DB
 rows, cancelling live orders, procuring a vendor feed, deploying infra). Every such
 item is therefore `PENDING` or `NOT VERIFIABLE FROM LOCAL REPO`. No secret values are
-printed. **No external actions were performed.**
+printed. **No external mutations were performed** (no key rotation, no env secrets set,
+no DB rows changed, no orders cancelled, no vendor feed procured, no push/merge/tag).
+
+## 0. Actions performed this session (local, safe, reversible)
+
+Three *local* safety actions were taken and directly verified:
+
+1. **Stopped the stale unsafe API process.** The pre-merge API instance (pids
+   35500/35502) that was running on port 8001 as a **superuser** DB role was stopped.
+   Port 8001 is now free (`lsof -iTCP:8001` → no listener; no `uvicorn`/`atlas.api`
+   process). This removes the live superuser-runtime exposure; it does **not** by itself
+   deploy the safe runtime (see item #3, still pending).
+2. **Bounded `atlas_app` smoke test.** A short-lived API boot under the least-privilege
+   `atlas_app` runtime returned `/v1/system/health` = `status: ok`, `least_privilege:
+   true`, `audit_triggers_enable_always: true`, `is_superuser: false`. Confirms the
+   merged code runs correctly under the intended runtime role. The instance was then
+   stopped; nothing was left running.
+3. **CI-hardening branch created** (`ci-runtime-role-hardening`, `d8c8085`, not pushed)
+   — a CI job + lifespan tests proving the deployed least-privilege posture end to end.
+   See `ATLAS_CI_RUNTIME_ROLE_HARDENING.md`.
+
+Identity-coverage investigation (F-001): the definitive panel resolves **74.5% <
+90%** and the gap is unreachable from existing data (0 wireable identifiers, external
+dated feed required). The flagship rerun therefore remains **INSUFFICIENT EVIDENCE**;
+no rerun was performed and no gate was lowered. See
+`ATLAS_IDENTITY_COVERAGE_ANALYSIS.md`, `ATLAS_IDENTITY_RECOVERY_EVIDENCE.md`,
+`ATLAS_IDENTITY_DATA_REQUIREMENTS.md`.
 
 ## 1. External action status
 
@@ -13,7 +39,7 @@ printed. **No external actions were performed.**
 |---|---|---|---|---|
 | 1 | **Rotate + revoke exposed EODHD key** | F-013 | **PENDING (urgent)** | Code redaction landed (0 canary leaks); the key historically leaked into the audit chain/logs and must be rotated at the vendor. Not verifiable from repo. |
 | 2 | **Configure production `ATLAS_API_TOKEN`** (or per-role) | F-016 | **PENDING** | Mutators fail closed (503) without it; deny-by-default auth landed. Setting env secrets is runtime. |
-| 3 | **Deploy `atlas_app` least-privilege runtime** | F-019/F-020 | **PENDING — observed NOT done** | Migration 0043/0044 + secure-by-default landed. **Direct evidence it is not yet deployed:** the live `make api` (pid 35500) exports `ATLAS_DATABASE_URL=atlas` (superuser), overriding `.env`. Restart on `main@d6d871f` as `atlas_app` required. |
+| 3 | **Deploy `atlas_app` least-privilege runtime** | F-019/F-020 | **PENDING (unsafe process STOPPED this session)** | Migration 0043/0044 + secure-by-default landed. The stale superuser instance (pid 35500) was **stopped** this session (§0) and the merged code was **smoke-tested under `atlas_app`** (`/health` least_privilege:true). Still pending: the *durable* deployment — restart the production API on `main@d6d871f` as `atlas_app` with `ATLAS_DB_REQUIRE_LEAST_PRIVILEGE=true` and a real secret. Nothing is currently running. |
 | 4 | **WORM / signed audit anchor** | F-019/F-020 (infra) | **PENDING** | Audit is tamper-EVIDENT + now replica-proof at the DB layer; an external WORM/signed anchor is unchanged infra hardening. |
 | 5 | **Scheduler dead-man alert target `ATLAS_ALERT_URL` + hourly sweep** | F-025 | **PENDING** | Supervision code landed (0039 `ops.cycle_runs`, `ops/supervise.py`); the alert destination + cron are runtime config. |
 | 6 | **Source dated symbol-change / issuer-history feed** | F-002 / **F-001** | **PENDING (blocks the strategy)** | Principal vendor-procurement decision. Until procured, `history_complete=false` for all identities and delisted members have no ISIN → **the definitive panel refuses (INSUFFICIENT EVIDENCE, 74.5% < 90%)**. |
@@ -88,6 +114,10 @@ psql -c "ALTER ROLE atlas_app PASSWORD '<REAL-SECRET>'"
 # (6) issuer-history feed — Principal vendor procurement (no local command)
 ```
 
-**None of the above were executed.** The live instance was left running as-is (its
-scheduler continues to emit benign `audit.chain.verified` events); restarting it on
-the merged code as `atlas_app` is an operator decision.
+**None of §1's external mutations were executed.** The only actions taken this session
+were the local, reversible ones in §0: the stale superuser API process was **stopped**
+(port 8001 now free; nothing running), the merged code was **smoke-tested under
+`atlas_app`** and then stopped, and a CI-hardening branch was created (not pushed).
+Durably restarting the API on the merged code as `atlas_app` (item #3) remains an
+operator decision — the scheduler is currently **not running**, so the 23:30/00:30 UTC
+cycles are paused until the operator restarts the API with `.env` sourced.
