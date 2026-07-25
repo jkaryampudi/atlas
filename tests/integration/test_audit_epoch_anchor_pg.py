@@ -1,6 +1,13 @@
-"""F-019 (hash epoch covers actor/entity identity) and F-020 (protected tail
-anchor detects truncation). The UPDATE/DELETE statements simulate an
-attacker/bug in the disposable test database."""
+"""F-019 (identity is inside the hash) and F-020 (protected, monotonic tail anchor).
+
+Migration 0042 upgraded the guarantee from DETECT to PREVENT: audit.decision_events
+is append-only at the DB (no UPDATE/DELETE of any row, legacy or new), and the
+chain_head anchor is monotonic + undeletable regardless of the writer GUC. So the
+attacker's UPDATE/DELETE now RAISES at the database — the tamper cannot happen —
+rather than succeeding and being caught later. The detection layer (verify_chain +
+anchor) is retained as defense-in-depth and unit-tested in test_audit.py against
+in-memory chains.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -8,14 +15,15 @@ from datetime import UTC, datetime
 import psycopg
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
-from atlas.core.audit import ChainVerificationError
 from atlas.core.audit_repo import PostgresAuditLog
 from atlas.core.clock import FrozenClock
 from tests.conftest import URL, requires_pg
 
 pytestmark = requires_pg
 CLOCK = FrozenClock(datetime(2026, 7, 21, 12, tzinfo=UTC))
+_APPEND_ONLY = "append-only"
 
 
 def _append(s, n: int) -> None:
@@ -26,74 +34,74 @@ def _append(s, n: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# F-019 — actor / entity identity is inside the hash (epoch 2)
+# F-019 — identity columns are IMMUTABLE (append-only guard); a legacy or new
+# row's actor/entity can no longer be rewritten at all.
 # --------------------------------------------------------------------------- #
-def test_interior_actor_id_tamper_is_detected(clean_audit):
+def test_interior_actor_id_tamper_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("UPDATE audit.decision_events SET actor_id = 'mallory' WHERE seq = 2"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("UPDATE audit.decision_events SET actor_id='mallory' WHERE seq=2"))
 
 
-def test_interior_entity_id_tamper_is_detected(clean_audit):
+def test_interior_entity_id_tamper_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("UPDATE audit.decision_events SET entity_id = '999' WHERE seq = 2"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("UPDATE audit.decision_events SET entity_id='999' WHERE seq=2"))
 
 
-def test_tail_actor_tamper_is_caught_by_the_anchor(clean_audit):
-    """Rewriting the LAST event's actor breaks no interior prev_hash link (there
-    is no next event) — only the epoch-2 identity hash + the anchor catch it."""
+def test_legacy_hash_version_row_identity_tamper_is_refused(clean_audit):
+    """The exact F-019 hole: a legacy hash_version=1 row's identity columns were
+    outside the epoch-1 hash. They are now IMMUTABLE — even inserting a legacy-epoch
+    row and trying to rewrite its actor is refused by the append-only guard."""
+    s = clean_audit
+    _append(s, 2)
+    # force a row to look like a legacy epoch-1 event (DDL/INSERT is allowed) ...
+    s.execute(text(
+        "INSERT INTO audit.decision_events (event_type, entity_type, entity_id, "
+        " actor_type, actor_id, payload, payload_hash, prev_hash, created_at, "
+        " hash_version) SELECT event_type, entity_type, entity_id, actor_type, "
+        " actor_id, payload, payload_hash, prev_hash, created_at, 1 "
+        "FROM audit.decision_events ORDER BY seq DESC LIMIT 1"))
+    # ... but its identity can never be rewritten
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("UPDATE audit.decision_events SET actor_id='mallory' "
+                       "WHERE hash_version = 1"))
+
+
+def test_tail_actor_tamper_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("UPDATE audit.decision_events SET actor_id = 'mallory' "
-                   "WHERE seq = (SELECT max(seq) FROM audit.decision_events)"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("UPDATE audit.decision_events SET actor_id='mallory' "
+                       "WHERE seq=(SELECT max(seq) FROM audit.decision_events)"))
 
 
 # --------------------------------------------------------------------------- #
-# F-020 — tail truncation / terminal replacement detected via the anchor
+# F-020 — tail / interior deletion is IMPOSSIBLE (append-only guard), and the
+# anchor can neither be lowered nor deleted (monotonic guard).
 # --------------------------------------------------------------------------- #
-def test_tail_deletion_is_detected(clean_audit):
-    """The exact blind spot the review probed: deleting the FINAL event leaves the
-    surviving prefix internally valid, but the anchor mismatches."""
+def test_tail_deletion_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("DELETE FROM audit.decision_events "
-                   "WHERE seq = (SELECT max(seq) FROM audit.decision_events)"))
-    with pytest.raises(ChainVerificationError) as ei:
-        PostgresAuditLog(s, CLOCK).verify()
-    assert "tail" in str(ei.value).lower() or "mismatch" in str(ei.value).lower()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("DELETE FROM audit.decision_events "
+                       "WHERE seq=(SELECT max(seq) FROM audit.decision_events)"))
 
 
-def test_multi_tail_deletion_is_detected(clean_audit):
-    s = clean_audit
-    _append(s, 5)
-    s.execute(text("DELETE FROM audit.decision_events WHERE seq >= "
-                   "(SELECT max(seq) - 1 FROM audit.decision_events)"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
-
-
-def test_full_truncate_of_events_is_detected(clean_audit):
-    """Truncating the events but not the anchor is caught (count 0 vs anchor)."""
+def test_interior_deletion_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("DELETE FROM audit.decision_events"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("DELETE FROM audit.decision_events WHERE seq=2"))
 
 
-def test_interior_deletion_still_detected(clean_audit):
+def test_bulk_deletion_is_refused(clean_audit):
     s = clean_audit
     _append(s, 3)
-    s.execute(text("DELETE FROM audit.decision_events WHERE seq = 2"))
-    with pytest.raises(ChainVerificationError):
-        PostgresAuditLog(s, CLOCK).verify()
+    with pytest.raises(ProgrammingError, match=_APPEND_ONLY):
+        s.execute(text("DELETE FROM audit.decision_events"))
 
 
 def test_clean_chain_with_anchor_verifies(clean_audit):
@@ -102,23 +110,30 @@ def test_clean_chain_with_anchor_verifies(clean_audit):
     assert PostgresAuditLog(s, CLOCK).verify() == 4     # anchor matches the walk
 
 
-# --------------------------------------------------------------------------- #
-# F-020 — the anchor row is protected from ordinary writers
-# --------------------------------------------------------------------------- #
-def test_anchor_is_protected_from_outside_writers():
-    """A connection that has NOT set the audit-writer GUC cannot UPDATE or DELETE
-    the anchor row (the migration's BEFORE UPDATE/DELETE trigger). Uses a fresh
-    committed connection against the seeded anchor (empty-DB seed: count 0)."""
+def test_anchor_is_protected_and_monotonic():
+    """F-020: even a connection that SETS the writer GUC (any DB writer can) cannot
+    LOWER the anchor to match a truncated chain, nor delete it. Without the GUC it
+    cannot write it at all. Uses a fresh committed connection."""
     dsn = URL.replace("postgresql+psycopg://", "postgresql://")
     conn = psycopg.connect(dsn, autocommit=True)
     try:
-        # ensure a row exists to target (idempotent seed)
+        conn.execute("SET atlas.audit_writer = 'on'")
         conn.execute("INSERT INTO audit.chain_head (id,last_seq,last_chain_hash,"
-                     "event_count,epoch) VALUES (1,0,'"+"0"*64+"',0,1) "
-                     "ON CONFLICT (id) DO NOTHING")
+                     "event_count,epoch) VALUES (1,10,'" + "0" * 64 + "',10,2) "
+                     "ON CONFLICT (id) DO UPDATE SET last_seq=10, event_count=10")
+        # monotonic: lowering last_seq or event_count is refused EVEN with the GUC
         with pytest.raises(psycopg.errors.RaiseException):
-            conn.execute("UPDATE audit.chain_head SET last_seq = 999 WHERE id = 1")
+            conn.execute("UPDATE audit.chain_head SET last_seq=5 WHERE id=1")
         with pytest.raises(psycopg.errors.RaiseException):
-            conn.execute("DELETE FROM audit.chain_head WHERE id = 1")
+            conn.execute("UPDATE audit.chain_head SET event_count=3 WHERE id=1")
+        # deletion is refused unconditionally
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute("DELETE FROM audit.chain_head WHERE id=1")
+        # advancing (monotonic increase) is allowed for the writer
+        conn.execute("UPDATE audit.chain_head SET last_seq=11, event_count=11 WHERE id=1")
+        # a NON-writer (GUC unset) cannot write it at all
+        conn.execute("RESET atlas.audit_writer")
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute("UPDATE audit.chain_head SET last_seq=12 WHERE id=1")
     finally:
         conn.close()

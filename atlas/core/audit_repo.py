@@ -62,15 +62,18 @@ class PostgresAuditLog:
                         payload=payload, payload_hash=p_hash, prev_hash=prev,
                         created_at=created_at, hash_version=CHAIN_EPOCH)
         # F-020: advance the protected terminal anchor atomically with the append.
-        # event_count is the ACTUAL row count (the just-inserted event is visible in
-        # this transaction), so the anchor self-heals after any chain reset rather
-        # than drifting on a blind increment.
+        # event_count is a MONOTONIC +1, never count(*): a blind recompute would
+        # SELF-HEAL the anchor after a tail delete (delete N rows, append one, and
+        # count(*) matches the truncated chain again), masking truncation. The
+        # increment plus the migration-0042 monotonic guard mean a truncated walk
+        # can never re-match the anchor. The initial insert (fresh chain_head) uses
+        # the real count; deletes are DB-refused, so it cannot be gamed.
         s.execute(text(
             "INSERT INTO audit.chain_head (id, last_seq, last_chain_hash, event_count, "
             " epoch, updated_at) VALUES "
             "(1, :seq, :ch, (SELECT count(*) FROM audit.decision_events), :ep, :ts) "
             "ON CONFLICT (id) DO UPDATE SET last_seq = :seq, last_chain_hash = :ch, "
-            " event_count = (SELECT count(*) FROM audit.decision_events), "
+            " event_count = audit.chain_head.event_count + 1, "
             " epoch = :ep, updated_at = :ts"),
             {"seq": ev.seq, "ch": ev.chain_hash, "ep": CHAIN_EPOCH, "ts": created_at})
         return ev

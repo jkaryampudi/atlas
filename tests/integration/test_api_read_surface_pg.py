@@ -181,8 +181,16 @@ def test_chain_break_is_structured_state_not_500(client):
                    actor_type="scheduler", actor_id="t", payload={"i": i})
     s.commit()
     assert c.get("/v1/audit/events/verify").json()["chain"] == "ok"
+    # This test exercises the API's STRUCTURED response to a broken chain (not a
+    # 500). Migration 0042 makes the tamper impossible for an app role, so we
+    # briefly disable the append-only guard (a table owner can) to fabricate the
+    # break — the guard itself is tested in test_audit_epoch_anchor_pg.py.
+    s.execute(text("ALTER TABLE audit.decision_events "
+                   "DISABLE TRIGGER decision_events_append_only"))
     s.execute(text("UPDATE audit.decision_events SET payload = CAST(:p AS jsonb) "
                    "WHERE entity_id='0'"), {"p": '{"i": 9}'})
+    s.execute(text("ALTER TABLE audit.decision_events "
+                   "ENABLE TRIGGER decision_events_append_only"))
     s.commit()
     d = c.get("/v1/audit/events/verify").json()
     assert d["chain"] == "broken"
