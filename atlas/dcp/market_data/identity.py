@@ -186,6 +186,21 @@ def require_stable_issuer(session: Session, instrument_id: str, pinned_key: str,
             f"{pinned_key} (as_of={as_of}) — issuer drift, fail closed")
 
 
+def held_position_issuer_drifted(session: Session, instrument_id: str,
+                                 opened_at: datetime) -> bool:
+    """F-002 capital-safety: True when an instrument HELD since ``opened_at`` no
+    longer resolves to the same issuer it did at open — its ticker was reassigned
+    to a different company (a break refresh_identity versioned), or its identity
+    was lost. Fails closed only when the open-era issuer WAS resolvable; an
+    unassessable legacy position (no identity row covering its open date) is not
+    flagged, so the check never fires spuriously on pre-identity-system holdings.
+    Consumed by the daily reconciliation to halt the book on issuer drift."""
+    at_open = resolve_identity(session, instrument_id, as_of=opened_at.date())
+    if _permanent_key(at_open) is None:
+        return False
+    return not same_issuer(at_open, resolve_identity(session, instrument_id))
+
+
 def reused_ticker_is_identity_unvouched(session: Session, symbol: str, *,
                                         as_of: date) -> bool:
     """F-001/F-002 corroboration: a reused-ticker series excluded by the
@@ -227,11 +242,47 @@ def refresh_identity(session: Session, instrument_id: str,
                      source: str = IDENTITY_SOURCE) -> bool:
     """Upsert one instrument's OPEN identity from a fundamentals payload in hand
     (the ingest hook). ``valid_from`` = first stored bar, else the ingest date.
-    Returns is_resolved."""
+    Returns is_resolved.
+
+    F-002 identity-break versioning: if the instrument already has a RESOLVED open
+    identity and the fresh payload carries a DIFFERENT permanent key (the vendor
+    reassigned the ticker to another issuer — a reused-ticker splice), do NOT
+    silently overwrite the open row's ISIN while keeping its old ``valid_from``
+    (that mis-vouches the NEW issuer over the OLD issuer's era). Instead CLOSE the
+    old row at the break date and OPEN a new one from the break date. Bitemporally
+    correct: ``resolve_identity(as_of=<old era>)`` still returns the old issuer,
+    and the break is a durable, queryable multi-row history (``issuer_breaks``)."""
     gen = payload.get("General") if isinstance(payload, dict) else None
     gen = gen if isinstance(gen, dict) else {}
     isin, cusip = _clean(gen.get("ISIN")), _clean(gen.get("CUSIP"))
     resolved = bool(isin or cusip)
+    new_key = (f"ISIN:{isin}" if isin else f"CUSIP:{cusip}" if cusip else None)
+    fields = {"iid": instrument_id, "isin": isin, "cusip": cusip,
+              "prim": _clean(gen.get("PrimaryTicker")),
+              "ccy": _clean(gen.get("CurrencyCode")),
+              "ctry": _clean(gen.get("CountryISO")),
+              "fallback": known_from.date(), "known_from": known_from,
+              "source": source, "resolved": resolved}
+
+    cur = resolve_identity(session, instrument_id, as_of=None)   # current OPEN row
+    cur_key = _permanent_key(cur)
+    if cur_key is not None and new_key is not None and cur_key != new_key:
+        # IDENTITY BREAK — version, never overwrite.
+        break_date = known_from.date()
+        session.execute(text(
+            "UPDATE market.instrument_identity SET valid_to = :bd "
+            "WHERE instrument_id = :iid AND valid_to IS NULL"),
+            {"bd": break_date, "iid": instrument_id})
+        session.execute(text(
+            "INSERT INTO market.instrument_identity "
+            "(instrument_id, isin, cusip, figi, primary_ticker, identity_currency, "
+            " country_iso, valid_from, valid_to, known_from, identity_source, "
+            " history_complete, is_resolved) "
+            "VALUES (:iid, :isin, :cusip, NULL, :prim, :ccy, :ctry, :bd, NULL, "
+            " :known_from, :source, false, :resolved)"),
+            {**fields, "bd": break_date})
+        return resolved
+
     session.execute(text(f"""
         INSERT INTO market.instrument_identity
             (instrument_id, isin, cusip, figi, primary_ticker, identity_currency,
@@ -242,13 +293,18 @@ def refresh_identity(session: Session, instrument_id: str,
                       WHERE instrument_id = :iid), :fallback),
             NULL, :known_from, :source, false, :resolved)
         {_UPSERT_CONFLICT}
-    """), {"iid": instrument_id, "isin": isin, "cusip": cusip,
-           "prim": _clean(gen.get("PrimaryTicker")),
-           "ccy": _clean(gen.get("CurrencyCode")),
-           "ctry": _clean(gen.get("CountryISO")),
-           "fallback": known_from.date(), "known_from": known_from,
-           "source": source, "resolved": resolved})
+    """), fields)
     return resolved
+
+
+def issuer_break_count(session: Session, instrument_id: str) -> int:
+    """F-002: how many CLOSED (versioned) identity rows an instrument carries —
+    i.e. how many times its ticker was reassigned to a different issuer. 0 for a
+    clean instrument; >0 flags a reused-ticker splice for operator follow-up."""
+    return int(session.execute(text(
+        "SELECT count(*) FROM market.instrument_identity "
+        "WHERE instrument_id = :iid AND valid_to IS NOT NULL"),
+        {"iid": instrument_id}).scalar() or 0)
 
 
 def populate_identities(session: Session, *, known_from: datetime,

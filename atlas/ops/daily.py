@@ -130,6 +130,7 @@ from atlas.core.workflow import Node, WorkflowRunner
 from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.calendars import is_trading_day, session_close_utc
 from atlas.dcp.market_data.daily import DailyIngestReport, run_daily_ingest
+from atlas.dcp.market_data.identity import held_position_issuer_drifted
 from atlas.dcp.learning.loop import run_learning
 from atlas.dcp.reporting.attribution import compute_attribution_day
 from atlas.dcp.reporting.brief import persist_brief
@@ -237,7 +238,7 @@ def _reconcile(session: Session, clock: Clock) -> str:
     condition, not a warning)."""
     diffs: list[dict[str, object]] = []
     rows = session.execute(text(
-        "SELECT p.id, p.qty, p.closed_at, i.symbol, "
+        "SELECT p.id, p.instrument_id, p.qty, p.closed_at, p.opened_at, i.symbol, "
         "  COALESCE((SELECT sum(tl.qty) FROM trading.tax_lots tl "
         "            WHERE tl.position_id = p.id AND tl.disposed_at IS NULL), 0) "
         "  AS open_lot_qty "
@@ -249,6 +250,16 @@ def _reconcile(session: Session, clock: Clock) -> str:
             diffs.append({"position_id": str(r.id), "symbol": r.symbol,
                           "position_qty": expected,
                           "open_lot_qty": int(r.open_lot_qty)})
+        # F-002 capital-safety: an OPEN position whose ticker was reassigned to a
+        # different issuer since we opened it is a book we can no longer trust —
+        # break the reconciliation (fail closed) exactly like a lot-ledger diff.
+        if (r.closed_at is None and r.opened_at is not None
+                and held_position_issuer_drifted(session, str(r.instrument_id),
+                                                 r.opened_at)):
+            diffs.append({"position_id": str(r.id), "symbol": r.symbol,
+                          "issuer_drift": True,
+                          "detail": "instrument no longer resolves to the issuer "
+                                    "it did at position open (ticker reassigned)"})
     status = "break" if diffs else "clean"
     session.execute(text(
         "INSERT INTO trading.reconciliations (as_of, broker, status, diffs, "

@@ -12,7 +12,8 @@ import pytest
 from sqlalchemy import text
 
 from atlas.dcp.market_data.identity import (
-    IssuerDriftError, issuer_drifted, pin_issuer, populate_identities,
+    IssuerDriftError, held_position_issuer_drifted, issuer_break_count,
+    issuer_drifted, pin_issuer, populate_identities,
     refresh_identity, require_stable_issuer, resolve_by_symbol, resolve_identity,
     reused_ticker_is_identity_unvouched, same_issuer)
 from tests.conftest import requires_pg
@@ -149,6 +150,82 @@ def test_issuer_drift_under_held_position(pg_session):
     assert issuer_drifted(s, iid, pinned) is True
     with pytest.raises(IssuerDriftError):
         require_stable_issuer(s, iid, pinned)
+
+
+def test_identity_break_versions_not_overwrites(pg_session):
+    """F-002: a ticker reassigned to a different issuer VERSIONS the identity
+    (close the old era, open a new one) instead of overwriting — so the OLD era
+    still resolves to the OLD issuer, and the break is a durable multi-row history.
+    Fails against pre-fix code, which silently repointed the open row's ISIN over
+    the old valid_from (mis-vouching the new issuer historically)."""
+    s = pg_session
+    iid = _instrument(s, "SPLICE")
+    _fundamentals(s, iid, isin="US3333333333")
+    _bar(s, iid, date(2015, 1, 2))
+    populate_identities(s, known_from=KF)
+    assert issuer_break_count(s, iid) == 0
+
+    refresh_identity(s, iid, {"General": {"ISIN": "US4444444444"}}, known_from=KF)
+
+    old = resolve_identity(s, iid, as_of=date(2016, 1, 1))
+    now = resolve_identity(s, iid)
+    assert old is not None and old.isin == "US3333333333"   # old era, old issuer
+    assert now is not None and now.isin == "US4444444444"   # now, new issuer
+    assert not same_issuer(old, now)
+    assert issuer_break_count(s, iid) == 1
+    n_open = s.execute(text("SELECT count(*) FROM market.instrument_identity "
+                            "WHERE instrument_id=:i AND valid_to IS NULL"),
+                       {"i": iid}).scalar()
+    assert n_open == 1                                        # one OPEN row invariant
+
+
+def test_held_position_issuer_drift_helper(pg_session):
+    """F-002 capital-safety: a position opened in the OLD issuer's era is flagged
+    once the ticker is reassigned; a same-issuer refresh is not; an unassessable
+    pre-identity holding is not."""
+    s = pg_session
+    iid = _instrument(s, "HELD")
+    _fundamentals(s, iid, isin="US5555555555")
+    _bar(s, iid, date(2015, 1, 2))
+    populate_identities(s, known_from=KF)
+    opened = datetime(2016, 6, 1, tzinfo=timezone.utc)
+    assert held_position_issuer_drifted(s, iid, opened) is False
+    refresh_identity(s, iid, {"General": {"ISIN": "US5555555555"}}, known_from=KF)
+    assert held_position_issuer_drifted(s, iid, opened) is False       # same issuer
+    refresh_identity(s, iid, {"General": {"ISIN": "US6666666666"}}, known_from=KF)
+    assert held_position_issuer_drifted(s, iid, opened) is True        # reassigned
+    ghost = _instrument(s, "GHOST2", active=False)
+    assert held_position_issuer_drifted(s, ghost, opened) is False     # unassessable
+
+
+def test_reconciliation_breaks_on_held_position_issuer_drift(clean_audit):
+    """F-002 wiring: an OPEN position whose ticker was reassigned to a different
+    issuer since open makes the daily reconciliation BREAK (fail closed) — a book
+    we can no longer trust is halted, not silently marked. Control: no drift ->
+    clean. The lot-ledger leg is kept consistent so only the issuer-drift leg can
+    break it."""
+    from atlas.core.clock import FrozenClock
+    from atlas.ops.daily import _reconcile
+    s = clean_audit
+    iid = _instrument(s, "RECON")
+    _fundamentals(s, iid, isin="US7777777777")
+    _bar(s, iid, date(2015, 1, 2))
+    populate_identities(s, known_from=KF)
+    opened = datetime(2016, 6, 1, tzinfo=timezone.utc)
+    pid = s.execute(text(
+        "INSERT INTO trading.positions (instrument_id, qty, avg_cost, currency, "
+        " opened_at, current_stop, created_at) "
+        "VALUES (:i, 10, 100, 'USD', :o, 90, :o) RETURNING id"),
+        {"i": iid, "o": opened}).scalar()
+    s.execute(text(
+        "INSERT INTO trading.tax_lots (position_id, qty, cost_aud, acquired_at, "
+        " created_at) VALUES (:p, 10, 1500, :a, :a)"), {"p": pid, "a": opened})
+    clock = FrozenClock(KF)
+
+    assert _reconcile(s, clock) == "clean"                     # no drift yet
+    refresh_identity(s, iid, {"General": {"ISIN": "US8888888888"}}, known_from=KF)
+    with pytest.raises(RuntimeError, match="reconciliation BREAK"):
+        _reconcile(s, clock)                                   # reassigned -> halt
 
 
 def test_pin_refuses_unresolved_instrument(pg_session):
