@@ -15,8 +15,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+
+from atlas.api.auth import require_operator
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -108,7 +110,7 @@ def _bad_request(code: str, message: str) -> JSONResponse:
         "code": code, "message": message, "details": None}})
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(require_operator)])
 def analyze(body: AnalyzeBody) -> Any:
     """Queue one on-demand desk analysis. `symbol` is upcased then validated;
     `source` is the optional external-origin tag (e.g. 'investing.com'),
@@ -152,7 +154,7 @@ class ScreenBody(BaseModel):
     top_n: int = 25
 
 
-@router.post("/opportunities/run")
+@router.post("/opportunities/run", dependencies=[Depends(require_operator)])
 def opportunities_run(body: ScreenBody) -> Any:
     """Queue the whole-universe opportunity screen (no command line). Pure DCP
     research — health composite + valuation + fragility, ZERO model spend; the
@@ -182,7 +184,7 @@ class TrackBody(BaseModel):
     top_k: int = 20
 
 
-@router.post("/opportunities/track")
+@router.post("/opportunities/track", dependencies=[Depends(require_operator)])
 def opportunities_track(body: TrackBody) -> Any:
     """Record the board's top-K into research.source_picks (source
     'atlas-opportunity-screen') so the existing grade/edge machinery measures the
@@ -220,7 +222,7 @@ class PickIngestBody(BaseModel):
     run_desk: bool = False
 
 
-@router.post("/source-picks/ingest")
+@router.post("/source-picks/ingest", dependencies=[Depends(require_operator)])
 def source_picks_ingest(body: PickIngestBody) -> Any:
     """Queue a monthly source-pick list (no command line). Each ticker gets a
     point-in-time feature snapshot; nothing becomes a trade (invariant 2 —
@@ -267,7 +269,7 @@ def source_picks_ingest_status() -> dict[str, object]:
     return ingest_status()
 
 
-@router.post("/source-picks/grade")
+@router.post("/source-picks/grade", dependencies=[Depends(require_operator)])
 def source_picks_grade() -> dict[str, object]:
     """Grade every matured pick (excess vs SPY at 20/60 sessions, write-once)
     and return the per-source edge — outperform-rate against the dartboard.
@@ -593,7 +595,7 @@ class ReviewBody(BaseModel):
     notes: str = ""
 
 
-@router.post("/memos/{memo_id}/review")
+@router.post("/memos/{memo_id}/review", dependencies=[Depends(require_operator)])
 def review_memo(memo_id: str, body: ReviewBody) -> dict[str, object]:
     """Record the Principal's judgement on a memo (upsert; audited as a human
     action). This is deliberately the only write on the read surface."""

@@ -22,8 +22,10 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from atlas.api.auth import require_operator, require_risk_admin
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -132,7 +134,7 @@ class ClearanceRequestBody(BaseModel):
     reason: str
 
 
-@router.post("/breaker-clearances")
+@router.post("/breaker-clearances", dependencies=[Depends(require_risk_admin)])
 def request_breaker_clearance(body: ClearanceRequestBody) -> Any:
     """Confirmation A of the Doc 04 §5 resumption action. 409 INVALID_STATE
     when there is nothing to clear (breaker NONE/DD1) or a request is already
@@ -145,7 +147,7 @@ def request_breaker_clearance(body: ClearanceRequestBody) -> Any:
     return {"status": "pending_confirmation", "clearance_id": cid}
 
 
-@router.post("/breaker-clearances/{clearance_id}/confirm")
+@router.post("/breaker-clearances/{clearance_id}/confirm", dependencies=[Depends(require_risk_admin)])
 def confirm_breaker_clearance(clearance_id: str) -> Any:
     """Confirmation B. 409 DUAL_CONFIRM_TOO_SOON before requested_at + 1h
     (Doc 06 §3.3); 404 for an unknown id; 409 INVALID_STATE if already
@@ -194,7 +196,7 @@ _ADVISORY = ("advisory only — a real proposal re-checks fresh at approval "
              "time; a pre-flight PASS is never a pre-commitment")
 
 
-@router.post("/preflight")
+@router.post("/preflight", dependencies=[Depends(require_operator)])
 def preflight(body: PreflightBody) -> Any:
     """WHAT-IF RISK PRE-FLIGHT: a strictly READ-ONLY dry run of the proposal
     path — active limits, live worst-case pro-forma book, §4 sizing, and (when

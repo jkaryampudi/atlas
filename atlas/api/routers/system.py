@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from atlas.api.auth import require_system_internal
 from atlas.core.config import get_settings
 
 router = APIRouter()
@@ -67,7 +68,7 @@ def scheduler_status() -> dict[str, object]:
     return status()
 
 
-@router.post("/run-daily")
+@router.post("/run-daily", dependencies=[Depends(require_system_internal)])
 def run_daily() -> dict[str, object]:
     """One-click T0-T9 cycle from the console — the Principal's no-terminal
     path. Returns started=False (409-free, honest) when one is already

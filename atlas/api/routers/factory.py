@@ -16,8 +16,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, PlainTextResponse
+
+from atlas.api.auth import require_operator
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -76,7 +78,7 @@ def recipes_catalog() -> dict[str, object]:
     }
 
 
-@router.post("/recipes/run")
+@router.post("/recipes/run", dependencies=[Depends(require_operator)])
 def recipes_run(body: RecipeBody) -> Any:
     """Validate against the frozen grammar and start the gauntlet in the
     background. Refusals come back 400 with the grammar's message verbatim;

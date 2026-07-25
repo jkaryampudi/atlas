@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from atlas.api.routers import (
     audit,
@@ -58,8 +58,21 @@ def root() -> RedirectResponse:
 
 
 @app.get("/console", include_in_schema=False)
-def console() -> FileResponse:
-    return FileResponse(_CONSOLE, media_type="text/html")
+def console() -> HTMLResponse:
+    """Serve the console with the loopback operator token injected (F-016). The
+    token is read from the deployment env at serve time and never written to the
+    static file; substitution happens only for this same-origin loopback page."""
+    import json
+
+    from atlas.api.auth import console_token
+
+    html = _CONSOLE.read_text(encoding="utf-8")
+    token = console_token()
+    if token:
+        html = html.replace(
+            'window.__ATLAS_TOKEN__ = "";',
+            f"window.__ATLAS_TOKEN__ = {json.dumps(token)};", 1)
+    return HTMLResponse(html, media_type="text/html")
 
 
 @app.get("/console/dossier", include_in_schema=False)

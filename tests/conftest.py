@@ -66,14 +66,19 @@ def _api_auth_override():
     enforcement (401/403/503/200) is proven by tests/integration/test_api_auth_pg
     and tests/unit/test_api_auth, which pop this override."""
     try:
-        from atlas.api.auth import require_api_auth
+        from atlas.api import auth
         from atlas.api.main import app
     except Exception:  # API import optional for pure non-API test runs
         yield
         return
-    app.dependency_overrides[require_api_auth] = lambda: None
+    # Bypass EVERY role dependency (not just the trade-approver one) so ordinary
+    # endpoint tests exercise handler logic without a token. The dedicated auth
+    # tests pop these overrides to prove real 401/403/503/role-separation.
+    for dep in auth.AUTH_DEPENDENCIES:
+        app.dependency_overrides[dep] = lambda: None
     yield
-    app.dependency_overrides.pop(require_api_auth, None)
+    for dep in auth.AUTH_DEPENDENCIES:
+        app.dependency_overrides.pop(dep, None)
 
 
 def pytest_configure(config: pytest.Config) -> None:
