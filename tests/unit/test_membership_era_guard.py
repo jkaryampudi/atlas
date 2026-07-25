@@ -12,6 +12,7 @@ from datetime import date
 
 from atlas.dcp.market_data.index_membership import (
     MembershipRow,
+    clip_after_membership_end,
     is_member_on,
     series_overlaps_membership,
 )
@@ -98,3 +99,35 @@ def test_end_date_is_exclusive():
 # 10. empty series -> refused (nothing to admit)
 def test_empty_series_is_refused():
     assert series_overlaps_membership(_row(), []) is False
+
+
+# --- F-001 residual close: clip post-removal bars off an admitted straddle -----
+
+def test_clip_drops_bars_strictly_after_end_date():
+    """A straddling series is admitted, but its post-removal tail is now CLIPPED
+    (not merely bounded at ranking): keep bars on/before end_date, drop after."""
+    row = _row(start=date(2015, 1, 1), end=date(2018, 1, 1))
+    dates = [date(2016, 1, 1), date(2017, 6, 1), date(2018, 1, 1),   # <= end: kept
+             date(2018, 6, 1), date(2019, 1, 1), date(2020, 1, 1)]   # > end: dropped
+    keep = clip_after_membership_end(row, dates)
+    assert keep == [0, 1, 2]
+    assert [dates[i] for i in keep] == dates[:3]
+
+
+def test_clip_keeps_pre_index_formation_bars():
+    """Pre-start bars are NOT clipped (legitimate momentum-formation lookback);
+    only the post-removal tail goes."""
+    row = _row(start=date(2015, 1, 1), end=date(2018, 1, 1))
+    dates = [date(2013, 1, 1), date(2014, 6, 1),         # pre-index: kept
+             date(2016, 1, 1),                            # in-era: kept
+             date(2019, 1, 1)]                            # post-removal: dropped
+    keep = clip_after_membership_end(row, dates)
+    assert keep == [0, 1, 2]
+
+
+def test_clip_keeps_everything_for_an_open_membership():
+    row = MembershipRow(index_code="GSPC.INDX", ticker="AAPL", name="AAPL",
+                        start_date=date(2015, 1, 1), end_date=None,
+                        is_active_now=True, is_delisted=False)
+    dates = _days(date(2015, 1, 1), date(2024, 1, 1))
+    assert clip_after_membership_end(row, dates) == list(range(len(dates)))

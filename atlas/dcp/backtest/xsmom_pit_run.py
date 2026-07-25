@@ -130,6 +130,7 @@ from atlas.dcp.market_data.index_membership import (
     WINDOW_START,
     MembershipPartition,
     MembershipRow,
+    clip_after_membership_end,
     is_member_on,
     load_membership,
     member_in_window,
@@ -556,6 +557,15 @@ def load_pit_panel(session: Session, *, window_end: date | None = None,
                 f"era (start {mrow.start_date}, end {mrow.end_date}) — wrong-era / "
                 "reused-ticker splice, excluded fail-closed"))
             continue
+        if mrow is not None:
+            # F-001: clip bars strictly after the removal date so a departed
+            # member is never marked/held on post-removal bars (its own stale tail
+            # or a reused ticker's) — the delisting-aware engine liquidates it at
+            # end_date. Pre-index formation bars are kept (F-002 data-blocked).
+            keep = clip_after_membership_end(mrow, ds)
+            if len(keep) < len(ds):
+                obars = [obars[i] for i in keep]
+                ds = [ds[i] for i in keep]
         expected = trading_days_between("US", ds[0], ds[-1])
         have = set(ds)
         gaps = [d for d in expected if d not in have]

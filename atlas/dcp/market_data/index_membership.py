@@ -157,6 +157,24 @@ def series_overlaps_membership(row: MembershipRow, dates: Sequence[date]) -> boo
     return any(is_member_on(row, d) for d in dates)
 
 
+def clip_after_membership_end(row: MembershipRow,
+                              dates: Sequence[date]) -> list[int]:
+    """F-001: indices of ``dates`` to KEEP — every bar on/before the membership
+    ``end_date``, dropping bars STRICTLY AFTER it. A member that DEPARTED the
+    index must not be held or daily-marked against post-removal bars (its own
+    stale post-index tail, or — with no issuer identity, F-002 — a different
+    company that reused the ticker); clipping the tail lets the delisting-aware
+    engine force-liquidate the name at its removal date instead of marking it for
+    up to a rebalance period past departure. A still-open membership
+    (``end_date`` None) keeps everything. Pre-index bars are deliberately NOT
+    clipped — they are the legitimate momentum-formation lookback, and telling a
+    same-issuer pre-index bar from a reused-ticker's needs the F-002 identity feed
+    (the documented data-blocked residual)."""
+    if row.end_date is None:
+        return list(range(len(dates)))
+    return [i for i, d in enumerate(dates) if d <= row.end_date]
+
+
 @dataclass(frozen=True)
 class MembershipPartition:
     usable: tuple[MembershipRow, ...]
