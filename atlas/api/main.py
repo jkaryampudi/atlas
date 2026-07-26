@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from atlas.core.config import get_settings
 
@@ -72,16 +72,16 @@ def root() -> RedirectResponse:
     return RedirectResponse("/console")
 
 
-@app.get("/console", include_in_schema=False)
-def console() -> HTMLResponse:
-    """Serve the console with the loopback operator token injected (F-016). The
-    token is read from the deployment env at serve time and never written to the
-    static file; substitution happens only for this same-origin loopback page."""
+def _serve_with_token(path: Path) -> HTMLResponse:
+    """Serve a same-origin loopback console page with the operator token injected
+    at serve time (F-016). The token is read from the deployment env and never
+    written to the static file; the empty placeholder stays empty when no auth is
+    configured (mutators then fail closed 503)."""
     import json
 
     from atlas.api.auth import console_token
 
-    html = _CONSOLE.read_text(encoding="utf-8")
+    html = path.read_text(encoding="utf-8")
     token = console_token()
     if token:
         html = html.replace(
@@ -90,11 +90,20 @@ def console() -> HTMLResponse:
     return HTMLResponse(html, media_type="text/html")
 
 
+@app.get("/console", include_in_schema=False)
+def console() -> HTMLResponse:
+    """Serve the console with the loopback operator token injected (F-016)."""
+    return _serve_with_token(_CONSOLE)
+
+
 @app.get("/console/dossier", include_in_schema=False)
-def dossier() -> FileResponse:
-    """Standalone full-page stock dossier (reads ?id=<source_pick_id> and
-    fetches /v1/research/source-picks/{id}/dossier)."""
-    return FileResponse(_DOSSIER, media_type="text/html")
+def dossier() -> HTMLResponse:
+    """Standalone full-page stock dossier (reads ?id=<source_pick_id> and fetches
+    /v1/research/source-picks/{id}/dossier). Served with the operator token
+    injected (F-016) so its ANALYZE-WITH-DESK mutator can authenticate, exactly
+    like /console — the dossier POST previously sent no token and always 503'd
+    (mislabelled 'desk busy'). The token never lives in the static file."""
+    return _serve_with_token(_DOSSIER)
 app.include_router(system.router, prefix="/v1/system", tags=["system"])
 app.include_router(market.router, prefix="/v1/market", tags=["market"])
 app.include_router(portfolio.router, prefix="/v1/portfolio", tags=["portfolio"])
