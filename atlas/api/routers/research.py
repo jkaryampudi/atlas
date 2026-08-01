@@ -297,6 +297,18 @@ def source_picks_edge() -> list[dict[str, object]]:
                  "edge": e.edge} for e in source_edge_report(s)]
 
 
+@router.get("/source-picks/autopsy")
+def source_picks_autopsy() -> dict[str, object]:
+    """Read-only pick autopsy: winners-vs-losers feature comparison over every
+    graded pick + the registered filter hypotheses' cohort readings
+    (docs/specs/source-pick-filter-hypotheses.md). MEASURED ONLY — descriptive,
+    never a filter; grades accrue via the nightly cycle."""
+    from atlas.dcp.research.source_picks import pick_autopsy
+
+    with session_scope() as s:
+        return pick_autopsy(s)
+
+
 @router.get("/source-picks")
 def source_picks_list(source: str | None = None, limit: int = 200) -> list[dict[str, object]]:
     """Recorded picks, newest first, with their forward-return outcome and a

@@ -360,3 +360,134 @@ def source_edge_report(session: Session) -> list[SourceEdge]:
             out.append(SourceEdge(source, h, n, rate, dartf,
                                   (rate - dartf) if dartf is not None else None))
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Pick autopsy: winners-vs-losers feature comparison + pre-registered filter
+# hypotheses (docs/specs/source-pick-filter-hypotheses.md). MEASURED ONLY — a
+# hypothesis becomes a selection filter only after surviving out-of-sample at
+# the 20/60-session horizons AND a Principal-signed learning-loop Tier-1
+# activation. Nothing here eliminates a pick; nothing here feeds a signal.
+
+_AUTOPSY_FEATURES: tuple[str, ...] = (
+    "mom_12_1", "ret_20d", "ret_63d", "rsi_14", "vol_20d_ann",
+    "px_over_sma50", "px_over_sma200", "trailing_pe", "forward_pe",
+    "sessions_to_next_earnings")
+
+# H1 "falling knife", registered 2026-08-01 (see the spec for provenance and
+# verdict dates). The registration date is load-bearing: picks recommended ON or
+# BEFORE it are in-sample context; only later picks can confirm or refute.
+H1_NAME = "H1-falling-knife"
+H1_REGISTERED = date(2026, 8, 1)
+H1_RULE = "ret_20d < 0 AND px_over_sma50 < 0 (short-term downtrend at pick time)"
+
+
+def _feat_num(feats: dict[str, object], key: str) -> float | None:
+    v = feats.get(key)
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        f = float(v)
+    else:
+        try:
+            f = float(str(v))
+        except ValueError:
+            return None
+    return f if math.isfinite(f) else None
+
+
+def _h1_matches(feats: dict[str, object]) -> bool | None:
+    """True/False when both inputs exist; None = unknowable (missing features),
+    reported as `unknown`, never silently assigned to a cohort."""
+    r20 = _feat_num(feats, "ret_20d")
+    sma = _feat_num(feats, "px_over_sma50")
+    if r20 is None or sma is None:
+        return None
+    return r20 < 0 and sma < 0
+
+
+def _mean(xs: list[float]) -> float | None:
+    return statistics.fmean(xs) if xs else None
+
+
+def _cohort(excesses: list[float]) -> dict[str, object]:
+    return {"n": len(excesses), "mean_excess": _mean(excesses),
+            "win_rate": (sum(1 for e in excesses if e > 0) / len(excesses))
+                        if excesses else None}
+
+
+def pick_autopsy(session: Session) -> dict[str, object]:
+    """The daily winners-vs-losers read over every graded pick, from the
+    features frozen at recommendation time (no lookahead):
+
+      * win_loss  — per (source, horizon): wins / losses vs SPY;
+      * features  — per (horizon, feature): mean at pick time for winners vs
+        losers, so the losing profile stays legible as grades accrue;
+      * hypotheses — each registered hypothesis's IN vs OUT cohort per horizon,
+        split in-sample (recommended on/before registration — context only)
+        vs out-of-sample (after — the only rows that can ever confirm).
+
+    Purely descriptive; the router serves it verbatim to the console."""
+    cols = ", ".join(f"excess_{h}" for h in PICK_HORIZONS)
+    rows = session.execute(text(
+        f"SELECT source, ticker, recommendation_date, features, {cols} "
+        "FROM research.source_picks ORDER BY recommendation_date, ticker")).mappings().all()
+
+    win_loss: list[dict[str, object]] = []
+    feature_rows: list[dict[str, object]] = []
+    hyp_rows: list[dict[str, object]] = []
+    sources = sorted({str(r["source"]) for r in rows})
+
+    for h in PICK_HORIZONS:
+        col = f"excess_{h}"
+        graded = [r for r in rows if r[col] is not None]
+        if not graded:
+            continue
+        for source in sources:
+            g = [r for r in graded if r["source"] == source]
+            if not g:
+                continue
+            wins = sum(1 for r in g if float(r[col]) > 0)
+            win_loss.append({"source": source, "horizon": h,
+                             "wins": wins, "losses": len(g) - wins})
+        winners = [r for r in graded if float(r[col]) > 0]
+        losers = [r for r in graded if float(r[col]) <= 0]
+        for feat in _AUTOPSY_FEATURES:
+            w_vals = [v for r in winners
+                      if (v := _feat_num(dict(r["features"] or {}), feat)) is not None]
+            l_vals = [v for r in losers
+                      if (v := _feat_num(dict(r["features"] or {}), feat)) is not None]
+            if not w_vals and not l_vals:
+                continue
+            feature_rows.append({"horizon": h, "feature": feat,
+                                 "win_mean": _mean(w_vals), "n_win": len(w_vals),
+                                 "loss_mean": _mean(l_vals), "n_loss": len(l_vals)})
+        for sample, sample_rows in (
+                ("in_sample", [r for r in graded
+                               if r["recommendation_date"] <= H1_REGISTERED]),
+                ("out_of_sample", [r for r in graded
+                                   if r["recommendation_date"] > H1_REGISTERED])):
+            if not sample_rows:
+                continue
+            in_x: list[float] = []
+            out_x: list[float] = []
+            unknown = 0
+            for r in sample_rows:
+                m = _h1_matches(dict(r["features"] or {}))
+                if m is None:
+                    unknown += 1
+                elif m:
+                    in_x.append(float(r[col]))
+                else:
+                    out_x.append(float(r[col]))
+            hyp_rows.append({"name": H1_NAME, "registered": H1_REGISTERED.isoformat(),
+                             "rule": H1_RULE, "horizon": h, "sample": sample,
+                             "in_cohort": _cohort(in_x), "out_cohort": _cohort(out_x),
+                             "unknown": unknown})
+
+    return {"note": ("measured only — a hypothesis becomes a filter only after "
+                     "surviving out-of-sample at 20/60 sessions AND a "
+                     "Principal-signed Tier-1 activation "
+                     "(docs/specs/source-pick-filter-hypotheses.md)"),
+            "win_loss": win_loss, "features": feature_rows,
+            "hypotheses": hyp_rows}
