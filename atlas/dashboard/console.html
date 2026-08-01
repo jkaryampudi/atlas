@@ -249,6 +249,8 @@
         </div>
       </div>
       <div class="card" id="sp-edge"><div class="quiet">no matured picks yet — grade after a couple of monthly rounds mature (20+ sessions)</div></div>
+      <div class="note" style="margin:0 0 8px">Pick autopsy — what winners vs losers looked like ON THE DAY they were picked (features frozen at recommendation time), plus each pre-registered filter hypothesis's cohorts. Measured only: a hypothesis becomes a filter only after surviving out-of-sample at 20/60 sessions AND a signed Tier-1 activation.</div>
+      <div class="card" id="sp-autopsy"><div class="quiet">no graded picks yet — the autopsy fills in as grades accrue nightly</div></div>
       <div class="note" style="margin:0 0 8px">Click a ticker to open its full dossier (opens a new tab) — every statistic, the cross-check, and a Print/PDF.</div>
       <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
 
@@ -974,6 +976,7 @@ async function pollTrack(){
   if(s.phase === "done"){
     opShow(`✓ ${esc(s.detail||"recorded")}`, "var(--green)");
     if(typeof renderPickEdge === "function") renderPickEdge();   // refresh the edge card
+    if(typeof renderPickAutopsy === "function") renderPickAutopsy();
   }
 }
 document.getElementById("op-track").onclick = async()=>{
@@ -1015,6 +1018,46 @@ async function renderPickEdge(rows){
     </tr>`).join("")}
   </table>
   <div class="note" style="margin:10px 0 0">Edge = outperform-rate minus the dartboard's base rate. Near zero = the source has no skill a filter could exploit; a meaningfully positive edge is what would justify (later, through the gauntlet) filtering toward its outperformers.</div>`;
+}
+
+const AUTOPSY_PCT = new Set(["mom_12_1","ret_20d","ret_63d","vol_20d_ann","px_over_sma50","px_over_sma200"]);
+function apFmt(feat, v){
+  if(v===null||v===undefined) return "—";
+  return AUTOPSY_PCT.has(feat) ? (v*100).toFixed(1)+"%" : Number(v).toFixed(1);
+}
+async function renderPickAutopsy(){
+  const el = document.getElementById("sp-autopsy");
+  if(!el) return;
+  const r = await get("/v1/research/source-picks/autopsy");
+  if(r.err) return;
+  const d = r.data;
+  if(!d.win_loss || !d.win_loss.length){ return; }
+  const wl = `<div style="font-family:var(--mono);font-size:12px;margin-bottom:10px">${
+    d.win_loss.map(w=>`<span style="margin-right:18px">${esc(w.source)} @${w.horizon}s:
+      <span class="pill ${w.wins>=w.losses?"g":"r"}">${w.wins}W–${w.losses}L</span></span>`).join("")}</div>`;
+  const h = Math.max(...d.features.map(f=>f.horizon));
+  const feats = d.features.filter(f=>f.horizon===h);
+  const ft = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">FEATURE AT PICK TIME (@${h}s grades)</th><th>WINNERS</th><th>LOSERS</th></tr>
+    ${feats.map(f=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px">${esc(f.feature)}</td>
+      <td>${apFmt(f.feature,f.win_mean)} <span class="quiet">(n=${f.n_win})</span></td>
+      <td>${apFmt(f.feature,f.loss_mean)} <span class="quiet">(n=${f.n_loss})</span></td>
+    </tr>`).join("")}
+  </table>`;
+  const hyp = (d.hypotheses||[]);
+  const ht = !hyp.length ? "" : `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">HYPOTHESIS</th><th>SAMPLE</th><th>HORIZON</th><th>IN-COHORT vs SPY</th><th>OUT-COHORT vs SPY</th></tr>
+    ${hyp.map(x=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px" title="${esc(x.rule)}">${esc(x.name)} <span class="quiet">reg ${esc(x.registered)}</span></td>
+      <td style="color:${x.sample==="out_of_sample"?"var(--green)":"var(--dim)"}">${x.sample==="out_of_sample"?"OUT-OF-SAMPLE":"in-sample"}</td>
+      <td>${x.horizon}s</td>
+      <td><span class="pill ${spSign(x.in_cohort.mean_excess)}">${x.in_cohort.mean_excess===null?"—":(x.in_cohort.mean_excess>0?"+":"")+spPct(x.in_cohort.mean_excess)}</span> <span class="quiet">(n=${x.in_cohort.n})</span></td>
+      <td><span class="pill ${spSign(x.out_cohort.mean_excess)}">${x.out_cohort.mean_excess===null?"—":(x.out_cohort.mean_excess>0?"+":"")+spPct(x.out_cohort.mean_excess)}</span> <span class="quiet">(n=${x.out_cohort.n})</span></td>
+    </tr>`).join("")}
+  </table>
+  <div class="note" style="margin:10px 0 0">Only OUT-OF-SAMPLE rows (picks after registration) can confirm a hypothesis; in-sample rows are the data that suggested it. ${esc(d.note||"")}</div>`;
+  el.innerHTML = wl + ft + ht;
 }
 
 async function renderPickList(){
@@ -1207,7 +1250,7 @@ document.getElementById("sp-grade").onclick = async()=>{
   const d = document.getElementById("sp-date");
   if(d && !d.value) d.value = new Date().toISOString().slice(0,10);
 })();
-renderPickList(); renderPickEdge();
+renderPickList(); renderPickEdge(); renderPickAutopsy();
 (async()=>{
   const r = await get("/v1/research/source-picks/ingest/status");
   if(r.data && r.data.phase === "ingesting"){ if(!spTimer) spTimer = setInterval(pollPickIngest, 2000); pollPickIngest(); }
