@@ -70,6 +70,16 @@ def memos(symbol: str | None = None, limit: int = 25) -> list[dict[str, object]]
         params["sym"] = symbol
     q += " ORDER BY m.created_at DESC LIMIT :n"
     with session_scope() as s:
+        # Freshness is DERIVED, never stored (memos are append-only records):
+        # recomputed against the latest desk output on every read, so each new
+        # cycle automatically expires whatever it did not re-affirm.
+        latest_day = s.execute(text(
+            "SELECT max(created_at)::date FROM research.memos")).scalar()
+        latest_by_symbol = {r.sym: (r.at, r.rec) for r in s.execute(text(
+            "SELECT DISTINCT ON (instrument_symbol) instrument_symbol AS sym, "
+            "       created_at AS at, recommendation AS rec "
+            "FROM research.memos "
+            "ORDER BY instrument_symbol, created_at DESC"))}
         out: list[dict[str, object]] = []
         for r in s.execute(text(q), params).mappings():
             d = dict(r)
@@ -80,11 +90,44 @@ def memos(symbol: str | None = None, limit: int = 25) -> list[dict[str, object]]
                 "spy_return": float(spy),
                 "vindicated": vindicated(r["recommendation"], excess,
                                          shadow=bool(r["shadow"]))}
+            newest_at, newest_rec = latest_by_symbol.get(
+                r["instrument_symbol"], (r["created_at"], r["recommendation"]))
+            age_days = (latest_day - r["created_at"].date()).days if latest_day else 0
+            if r["created_at"].date() == latest_day:
+                fresh, sup_rec, sup_date = "current", None, None
+            elif newest_at > r["created_at"]:
+                fresh = "superseded"
+                sup_rec, sup_date = newest_rec, newest_at.date().isoformat()
+            else:
+                # the desk has run since (latest_day is newer) and did NOT
+                # re-affirm this symbol -> the call is expired, not standing
+                fresh, sup_rec, sup_date = "expired", None, None
+            d["freshness"] = fresh
+            d["age_days"] = age_days
+            d["superseded_by_rec"] = sup_rec
+            d["superseded_by_date"] = sup_date
             out.append({**d, "id": str(r["id"]),
                         "created_at": r["created_at"].isoformat(),
                         "reviewed_at": (r["reviewed_at"].isoformat()
                                         if r["reviewed_at"] else None)})
         return out
+
+
+@router.get("/memos/performance")
+def memos_performance() -> dict[str, object]:
+    """Live (unrealized) excess vs SPY for every non-shadow BUY memo, on the
+    AUD total-return reporting basis (same services as the scorecard, F-006).
+    Informal by design — the write-once 20/60-session scorecard outcomes are
+    the only decision-grade verdict; this is the always-current preview."""
+    from atlas.dcp.research.memo_performance import open_buy_calls
+
+    with session_scope() as s:
+        calls = open_buy_calls(s, _clock())
+    return {"note": ("unrealized, informal — the scorecard's 20/60-session "
+                     "grades are the verdict"),
+            "calls": [{"symbol": c.symbol, "memo_date": c.memo_date.isoformat(),
+                       "conviction": c.conviction, "sessions": c.sessions,
+                       "excess": c.excess} for c in calls]}
 
 
 def _memo_not_found(memo_id: str) -> JSONResponse:
