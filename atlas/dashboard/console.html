@@ -83,6 +83,7 @@
 
   .memo{background:var(--card);border:1px solid var(--line);padding:0;position:relative;overflow:hidden}
   .memo-head{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .memo.stale{opacity:0.6}
   .rec{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:0.06em;padding:5px 14px;border:1.5px solid}
   .rec.BUY{color:var(--green);border-color:var(--green)}
   .rec.WATCHLIST{color:var(--blue);border-color:var(--blue)}
@@ -284,11 +285,15 @@
       <div class="card" id="learning"><div class="quiet">awaiting data</div></div>
       </div>
       <div class="rsec" data-rsec="memos">
-      <h2 style="margin-top:0">Committee Memos</h2>
-      <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
+      <h2 style="margin-top:0">Open BUY Calls — Live vs SPY</h2>
+      <div class="note">Every non-shadow BUY memo, marked to market vs SPY since its memo day (AUD total-return basis — the scorecard's own arithmetic). <b>Unrealized and informal</b>: the write-once 20/60-session scorecard grades are the verdict; short windows are noise.</div>
+      <div class="card" id="open-calls" style="overflow-x:auto"><div class="quiet">no BUY memos yet</div></div>
+      <h2>Committee Memos</h2>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
         <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
         <span class="pill bl" id="review-progress">PHASE-2 REVIEW: — / 10</span>
       </div>
+      <div id="rec-filter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
       <div class="grid" id="memos"><div class="quiet">awaiting data</div></div>
       <h2>Agent Activity — The Flight Recorder</h2>
       <div class="note">Every model call, pass or fail. schema_fail = the cage killed a violation and retried or failed closed. Prompt hashes pin the exact template version per run.</div>
@@ -701,19 +706,63 @@ async function renderOverview(){
 }
 
 /* ---------- research ---------- */
+/* memo recommendation filter: BUYs surface first, one category per click —
+   the memo list had grown too long to read as one flat stream. */
+const REC_ORDER = ["BUY","WATCHLIST","HOLD","REJECT","INSUFFICIENT_EVIDENCE"];
+const REC_COLOR = {BUY:"var(--green)", WATCHLIST:"var(--blue)", HOLD:"var(--gold)",
+                   REJECT:"var(--red)", INSUFFICIENT_EVIDENCE:"var(--dim)"};
+let recFilter = "ALL";
+function _recRank(r){ const i = REC_ORDER.indexOf(r); return i < 0 ? REC_ORDER.length : i; }
+function _renderRecPills(data){
+  const holder = document.getElementById("rec-filter");
+  if(!holder) return;
+  const counts = {};
+  data.forEach(x=>{ counts[x.recommendation] = (counts[x.recommendation]||0) + 1; });
+  const recs = Object.keys(counts).sort((a,b)=>_recRank(a)-_recRank(b));
+  holder.innerHTML = [
+    `<button class="rchip ${recFilter==="ALL"?"active":""}" data-rec="ALL">ALL (${data.length})</button>`,
+    ...recs.map(r=>`<button class="rchip ${recFilter===r?"active":""}" data-rec="${esc(r)}"
+       style="${recFilter===r?"":`color:${REC_COLOR[r]||"var(--dim)"}`}">${esc(r)} (${counts[r]})</button>`)
+  ].join("");
+  holder.querySelectorAll("button.rchip").forEach(b=>b.onclick=()=>{
+    recFilter = (recFilter === b.dataset.rec) ? "ALL" : b.dataset.rec;   // click again = clear
+    renderResearch();
+  });
+}
 async function renderResearch(){
   const sym = document.getElementById("sym-filter").value.trim().toUpperCase();
   const m = await get(`/v1/research/memos?limit=25${sym?`&symbol=${encodeURIComponent(sym)}`:""}`);
   const el = document.getElementById("memos");
   if(m.err) return deg(el, m.err);
   if(!m.data.length) return el.innerHTML = `<div class="quiet">no memos yet — the desk hasn't run${sym?` for ${esc(sym)}`:""}</div>`;
-  el.innerHTML = m.data.map(x=>`
-    <article class="memo">
+  _renderRecPills(m.data);
+  let rows = m.data.filter(x=>recFilter==="ALL" || x.recommendation===recFilter);
+  if(!rows.length){ recFilter = "ALL"; rows = m.data; _renderRecPills(m.data); }  // filter emptied by refresh
+  // grouped view: category order first (BUY on top), newest first inside each
+  rows = [...rows].sort((a,b)=>(_recRank(a.recommendation)-_recRank(b.recommendation))
+                              || String(b.created_at).localeCompare(String(a.created_at)));
+  let lastRec = null;
+  const freshBadge = x=>{
+    if(x.freshness==="current") return `<span class="pill g" title="produced by the latest desk run">CURRENT</span>`;
+    if(x.freshness==="superseded") return `<span class="pill bl" title="a newer memo exists for this symbol">SUPERSEDED → ${esc(x.superseded_by_rec||"")} ${esc(x.superseded_by_date||"")}</span>`;
+    if(x.freshness==="expired") return `<span class="pill r" title="the desk has run since and did NOT re-affirm this call — do not action">EXPIRED — not re-affirmed (${x.age_days??"?"}d)</span>`;
+    return "";
+  };
+  el.innerHTML = rows.map(x=>{
+    const head = (recFilter==="ALL" && x.recommendation !== lastRec)
+      ? `<div style="grid-column:1/-1;font-family:var(--mono);font-size:10.5px;letter-spacing:0.2em;
+           color:${REC_COLOR[x.recommendation]||"var(--dim)"};border-bottom:1px solid var(--line);
+           padding:14px 0 6px">${esc(x.recommendation)} — ${rows.filter(y=>y.recommendation===x.recommendation).length}</div>`
+      : "";
+    lastRec = x.recommendation;
+    return head + `
+    <article class="memo${x.freshness==="expired"?" stale":""}">
       ${x.shadow?`<div class="shadow-ribbon">SHADOW — NON-ACTIONABLE</div>`:""}
       <div class="memo-head">
         <span class="rec ${esc(x.recommendation)}">${esc(x.recommendation)}</span>
         <span class="sym">${symLink(x.instrument_symbol)}</span>
         <span class="conv">CONVICTION ${esc(x.conviction)}</span>
+        ${freshBadge(x)}
         ${x.source?`<span class="chip" style="color:var(--gold);border-color:rgba(226,185,91,0.5)" title="external origin — tagged when the Principal queued this analysis">src: ${esc(x.source)}</span>`:""}
         ${x.outcome_20?`<span class="pill ${x.outcome_20.vindicated===true?"g":x.outcome_20.vindicated===false?"r":"gray"}" style="margin-left:auto" title="20-session outcome vs SPY (scorecard)">${esc(pctS(x.outcome_20.excess))} vs SPY @20s${x.outcome_20.vindicated===true?" ✓":x.outcome_20.vindicated===false?" ✗":""}</span>`:""}
       </div>
@@ -738,7 +787,7 @@ async function renderResearch(){
         <button class="df-btn" data-id="${esc(x.id)}" style="margin-left:auto;background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;padding:3px 10px;cursor:pointer">${flowOpen.has(x.id)?"COLLAPSE FLOW":"DECISION FLOW"}</button>
       </div>
       <div class="df-box" data-id="${esc(x.id)}"></div>
-    </article>`).join("");
+    </article>`;}).join("");
   el.querySelectorAll("button.rv").forEach(b=>b.onclick=async()=>{
     const notes = el.querySelector(`input.rv-notes[data-id="${b.dataset.id}"]`);
     const r = await post(`/v1/research/memos/${b.dataset.id}/review`,
@@ -2344,11 +2393,33 @@ document.getElementById("rc-btn").onclick = async()=>{
 
 /* allSettled + per-renderer isolation: one panel's throw must never freeze the
    rest (roundtable P0) */
+
+/* ---------- open BUY calls: live vs SPY (unrealized preview; scorecard = verdict) ---------- */
+async function renderOpenCalls(){
+  const el = document.getElementById("open-calls");
+  if(!el) return;
+  const r = await get("/v1/research/memos/performance");
+  if(r.err) return deg(el, r.err);
+  const calls = (r.data && r.data.calls) || [];
+  if(!calls.length){ el.innerHTML = `<div class="quiet">no BUY memos yet</div>`; return; }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>MEMO DATE</th><th>CONVICTION</th><th>SESSIONS</th><th>vs SPY (unrealized)</th></tr>
+    ${calls.map(c=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px">${symLink(c.symbol)}</td>
+      <td style="color:var(--dim)">${esc(c.memo_date)}</td>
+      <td style="color:var(--dim)">${esc(c.conviction||"—")}</td>
+      <td>${c.sessions}</td>
+      <td>${c.excess===null||c.excess===undefined?'<span class="quiet">unpriceable</span>':`<span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span>`}</td>
+    </tr>`).join("")}
+  </table>
+  <div class="note" style="margin:10px 0 0">${esc((r.data&&r.data.note)||"")}</div>`;
+}
+
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderJobs, renderAttribution, renderSleeveAttribution,
                    renderTradingBrief,
                    renderStrategy, renderTrading,
-                   renderResearch, renderScorecard, renderLearning,
+                   renderResearch, renderOpenCalls, renderScorecard, renderLearning,
                    renderProgress, renderRuns,
                    renderQuant, renderRecipeBoard, renderRisk, renderMarket];
 async function refreshAll(){
