@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import math
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -43,8 +44,11 @@ from atlas.dcp.market_data.benchmark import (benchmark_reporting_series,
                                              reporting_close_series)
 from atlas.dcp.market_data.calendars import trading_days_between
 from atlas.dcp.market_data.fundamentals import _get, _number
+from atlas.dcp.market_data.adapters.base import MarketDataAdapter
 from atlas.dcp.market_data.models import Bar, Split
-from atlas.dcp.scorecard import VENDOR_SOURCE, anchor_index, dartboard_baseline
+from atlas.dcp.scorecard import (VENDOR_SOURCE, _resolve_instrument,
+                                 _top_up_inactive_bars, anchor_index,
+                                 dartboard_baseline)
 from atlas.dcp.signals.regime.v1 import TREND_WINDOW, VOL_WINDOW, classify_series
 from atlas.dcp.backtest.engine import OBar
 
@@ -258,9 +262,12 @@ def record_pick(session: Session, *, source: str, ticker: str,
 class GradeReport:
     graded: int
     still_immature: int
+    topups: tuple[str, ...] = ()       # analysis-only bar top-up notes, one per symbol
 
 
-def grade_picks(session: Session, clock: Clock) -> GradeReport:
+def grade_picks(session: Session, clock: Clock,
+                adapter_for: Callable[[str, str], MarketDataAdapter] | None = None,
+                ) -> GradeReport:
     """Fill excess at every PICK_HORIZON for matured, ungraded picks —
     WRITE-ONCE (WHERE ... IS NULL, so a graded outcome is a fact, never
     revised). excess = pick_return - SPY_return over the pick's own priceable
@@ -270,8 +277,27 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
     F-006: BOTH legs are on the fund's AUD TOTAL-RETURN basis, from the ONE
     authoritative service (market_data/benchmark.py) — a pick in INR is no longer
     differenced against SPY in USD. Fail-closed: a pick whose instrument or SPY
-    series can't anchor (or can't be priced in AUD) is skipped, not guessed."""
+    series can't anchor (or can't be priced in AUD) is skipped, not guessed.
+
+    `adapter_for` enables the bounded analysis-only bar top-up (the scorecard's
+    `_top_up_inactive_bars`, same rules: only inactive instruments, only the
+    missing window, no backfill, fail-soft per symbol). Nightly ingest skips
+    inactive rows, so external picks on analysis-only instruments (e.g. a
+    non-index investing.com name) would otherwise freeze at their last analyzed
+    bar and NEVER mature — silently excluding them from the source's edge
+    verdict. None keeps grading a pure read."""
     on = clock.now().date()
+    topups: tuple[str, ...] = ()
+    if adapter_for is not None:
+        awaiting = {str(r.symbol) for r in session.execute(text(
+            "SELECT DISTINCT i.symbol FROM research.source_picks sp "
+            "JOIN market.instruments i ON i.id = sp.instrument_id "
+            f"WHERE {' OR '.join(f'sp.excess_{h} IS NULL' for h in PICK_HORIZONS)}"
+        )).all()}
+        instruments = {s: inst for s in awaiting
+                       if (inst := _resolve_instrument(session, s)) is not None}
+        topups = _top_up_inactive_bars(session, clock, adapter_for,
+                                       awaiting, instruments)
     try:
         spy = sorted(benchmark_reporting_series(session, through=on).items())
     except RuntimeError:                  # benchmark unpriceable in AUD -> fail closed
@@ -322,7 +348,7 @@ def grade_picks(session: Session, clock: Clock) -> GradeReport:
                 f"WHERE id = :id AND ({' OR '.join(c + ' IS NULL' for c in updates)})"),
                 {**{c: v for c, v in updates.items()}, "ts": clock.now(), "id": r.id})
             graded += len(updates)
-    return GradeReport(graded=graded, still_immature=immature)
+    return GradeReport(graded=graded, still_immature=immature, topups=topups)
 
 
 @dataclass(frozen=True)
