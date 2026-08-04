@@ -36,19 +36,28 @@ def _memo(s, sym: str, rec: str, at: datetime) -> None:
         {"sym": sym, "rec": rec, "at": at})
 
 
+def _wipe(s) -> None:
+    """This fixture COMMITS to the shared atlas_test, so it must remove
+    EVERYTHING it creates — a committed active instrument left behind breaks
+    unrelated tests' unique keys and symbol resolution (the ATLZ lesson)."""
+    s.execute(text("DELETE FROM research.memo_outcomes"))
+    s.execute(text("DELETE FROM research.memo_reviews"))
+    s.execute(text("DELETE FROM research.memos"))
+    s.execute(text("DELETE FROM market.price_bars_daily WHERE instrument_id IN "
+                   "(SELECT id FROM market.instruments WHERE symbol IN ('SPY','ZBUY'))"))
+    s.execute(text("DELETE FROM market.instruments WHERE symbol IN ('SPY','ZBUY')"))
+    s.execute(text("DELETE FROM market.fx_rates_daily WHERE base='USD' AND quote='AUD' "
+                   "AND rate_date = DATE '2020-01-01' AND source='test'"))
+    s.commit()
+
+
 @pytest.fixture
 def client(monkeypatch, clean_audit):
     monkeypatch.setenv("ATLAS_DATABASE_URL", URL)
     reset_app_engine()
-    clean_audit.execute(text("DELETE FROM research.memo_outcomes"))
-    clean_audit.execute(text("DELETE FROM research.memo_reviews"))
-    clean_audit.execute(text("DELETE FROM research.memos"))
-    clean_audit.commit()
+    _wipe(clean_audit)
     yield TestClient(app), clean_audit
-    clean_audit.execute(text("DELETE FROM research.memo_outcomes"))
-    clean_audit.execute(text("DELETE FROM research.memo_reviews"))
-    clean_audit.execute(text("DELETE FROM research.memos"))
-    clean_audit.commit()
+    _wipe(clean_audit)
     reset_app_engine()
 
 
