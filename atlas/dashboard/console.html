@@ -42,6 +42,16 @@
   .sub{color:var(--dim);font-size:13px;margin-bottom:26px}
   h2{font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:0.22em;color:rgba(140,185,255,0.72);margin:34px 0 12px;text-transform:uppercase}
 
+  /* research sub-nav: one working surface at a time instead of one long scroll */
+  .rsubnav{position:sticky;top:0;z-index:6;display:flex;gap:8px;flex-wrap:wrap;
+    background:linear-gradient(var(--bg) 84%,transparent);padding:10px 0 14px;margin:0 0 6px}
+  .rchip{font-family:var(--mono);font-size:10.5px;letter-spacing:0.14em;color:var(--dim);
+    border:1px solid var(--line-strong);padding:7px 14px;cursor:pointer;background:none}
+  .rchip:hover{color:var(--txt)}
+  .rchip.active{color:var(--blue);border-color:rgba(90,167,255,0.55);background:rgba(90,167,255,0.08)}
+  .rsec{display:none}
+  .rsec.on{display:block}
+
   .card{background:var(--card);border:1px solid var(--line);padding:18px 20px}
   .grid{display:grid;gap:14px}
 
@@ -208,6 +218,13 @@
     <section class="view" id="view-research">
       <h1>Research</h1>
       <div class="sub">Committee memos, with the dissent kept honest. The Principal's review desk.</div>
+      <div class="rsubnav">
+        <button class="rchip" data-rsec="memos">MEMOS &amp; DESK</button>
+        <button class="rchip" data-rsec="board">OPPORTUNITY BOARD</button>
+        <button class="rchip" data-rsec="picks">PICKS &amp; EDGE</button>
+        <button class="rchip" data-rsec="score">SCORECARD &amp; LEARNING</button>
+        <button class="rchip" data-rsec="all">ALL</button>
+      </div>
       <h2 style="margin-top:0">Analyze Any Ticker</h2>
       <div class="note">Type a ticker; the full desk analyzes it on demand through the complete cage. Tag the source if it came from outside. US only, one at a time.</div>
       <div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -220,7 +237,8 @@
         <button id="an-btn" style="background:none;border:1px solid rgba(90,167,255,0.5);color:var(--blue);font-family:var(--mono);font-size:11px;letter-spacing:0.12em;padding:8px 18px;cursor:pointer">ANALYZE</button>
         <span id="an-status" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
       </div>
-      <h2>Opportunity Board — The Whole Universe, Ranked</h2>
+      <div class="rsec" data-rsec="board">
+      <h2 style="margin-top:0">Opportunity Board — The Whole Universe, Ranked</h2>
       <div class="note">Atlas ranks every active US name by its own <b>health composite</b> — value · profitability · growth · cash-flow · momentum percentiles vs the S&amp;P 500 — then hangs Atlas's valuation verdict and fragility markers on the leaders. Deterministic, <b>zero model spend</b>. A research candidate board: <b>measured, never a path to capital</b> — any rule built on it must clear the gauntlet first. Click a ticker for its full dossier.</div>
       <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <label style="font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px">show top <input id="op-n" type="number" value="25" min="1" max="100" style="width:56px;font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:var(--fg);padding:5px 6px"></label>
@@ -230,7 +248,9 @@
       </div>
       <div class="card" id="op-board" style="overflow-x:auto"><div class="quiet">no screen run yet — press RUN SCREEN (ranks ~500 names in ~15s, no model cost)</div></div>
 
-      <h2>Source Picks — Monthly Lists</h2>
+      </div>
+      <div class="rsec" data-rsec="picks">
+      <h2 style="margin-top:0">Source Picks — Monthly Lists</h2>
       <div class="note">Paste a monthly list (e.g. investing.com). Each pick is logged with a point-in-time snapshot and tracked vs SPY. Measured, never traded. GRADE &amp; EDGE shows whether the source beats a dartboard.</div>
       <div class="card" style="margin-bottom:10px">
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -254,13 +274,17 @@
       <div class="note" style="margin:0 0 8px">Click a ticker to open its full dossier (opens a new tab) — every statistic, the cross-check, and a Print/PDF.</div>
       <div class="card" id="sp-list"><div class="quiet">no picks recorded yet</div></div>
 
-      <h2>Desk Scorecard — Graded Against SPY</h2>
+      </div>
+      <div class="rsec" data-rsec="score">
+      <h2 style="margin-top:0">Desk Scorecard — Graded Against SPY</h2>
       <div class="note">Every memo graded against what the stock did next, SPY-relative (ADR-0009). BUY wins by beating SPY; REJECT wins by dodging an underperformer. Rates show against the DART — a direction-blind throw at the same outcomes — so an always-REJECT desk in a down market reads zero edge. HOLD and shadow tracked, never rated; the dissent is graded as the call's complement.</div>
       <div class="card" id="scorecard"><div class="quiet">awaiting data</div></div>
       <h2>Learning Loop — Measured, Never Applied</h2>
       <div class="note">Each matured outcome is labeled nightly — the call, each specialist seat, and whether the red flags materialized. Brier-scored conviction weights (clipped 0.5–1.5) are computed and stored but NOT applied anywhere: activation is a Principal decision (Article 10, Tier 1). A measurement, not yet a behavior.</div>
       <div class="card" id="learning"><div class="quiet">awaiting data</div></div>
-      <h2>Committee Memos</h2>
+      </div>
+      <div class="rsec" data-rsec="memos">
+      <h2 style="margin-top:0">Committee Memos</h2>
       <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
         <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
         <span class="pill bl" id="review-progress">PHASE-2 REVIEW: — / 10</span>
@@ -269,6 +293,7 @@
       <h2>Agent Activity — The Flight Recorder</h2>
       <div class="note">Every model call, pass or fail. schema_fail = the cage killed a violation and retried or failed closed. Prompt hashes pin the exact template version per run.</div>
       <div class="card" style="overflow-x:auto" id="agent-runs"><div class="quiet">awaiting data</div></div>
+      </div>
     </section>
 
     <!-- QUANT -->
@@ -450,6 +475,20 @@ function show(v){
 }
 views.forEach(n=>n.onclick=()=>show(n.dataset.view));
 show(location.hash.replace("#","") || "overview");
+
+/* ---------- research sub-nav: one working surface at a time (ALL = the old
+   long scroll). Choice persists across visits; renderers keep filling hidden
+   cards, so switching is instant with no refetch. ---------- */
+const rchips = [...document.querySelectorAll(".rchip")];
+function rshow(t){
+  rchips.forEach(c=>c.classList.toggle("active", c.dataset.rsec===t));
+  document.querySelectorAll(".rsec").forEach(s=>s.classList.toggle("on", t==="all" || s.dataset.rsec===t));
+  try{ localStorage.setItem("atlas-research-tab", t); }catch(e){ /* private mode */ }
+}
+rchips.forEach(c=>c.onclick=()=>rshow(c.dataset.rsec));
+let rtab = "memos";
+try{ rtab = localStorage.getItem("atlas-research-tab") || "memos"; }catch(e){ /* private mode */ }
+rshow(rtab);
 
 /* ---------- status strip ---------- */
 async function renderStrip(){
