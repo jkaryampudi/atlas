@@ -285,10 +285,11 @@
       </div>
       <div class="rsec" data-rsec="memos">
       <h2 style="margin-top:0">Committee Memos</h2>
-      <div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
         <input id="sym-filter" placeholder="FILTER BY SYMBOL — blank for all" size="34">
         <span class="pill bl" id="review-progress">PHASE-2 REVIEW: — / 10</span>
       </div>
+      <div id="rec-filter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px"></div>
       <div class="grid" id="memos"><div class="quiet">awaiting data</div></div>
       <h2>Agent Activity — The Flight Recorder</h2>
       <div class="note">Every model call, pass or fail. schema_fail = the cage killed a violation and retried or failed closed. Prompt hashes pin the exact template version per run.</div>
@@ -701,13 +702,50 @@ async function renderOverview(){
 }
 
 /* ---------- research ---------- */
+/* memo recommendation filter: BUYs surface first, one category per click —
+   the memo list had grown too long to read as one flat stream. */
+const REC_ORDER = ["BUY","WATCHLIST","HOLD","REJECT","INSUFFICIENT_EVIDENCE"];
+const REC_COLOR = {BUY:"var(--green)", WATCHLIST:"var(--blue)", HOLD:"var(--gold)",
+                   REJECT:"var(--red)", INSUFFICIENT_EVIDENCE:"var(--dim)"};
+let recFilter = "ALL";
+function _recRank(r){ const i = REC_ORDER.indexOf(r); return i < 0 ? REC_ORDER.length : i; }
+function _renderRecPills(data){
+  const holder = document.getElementById("rec-filter");
+  if(!holder) return;
+  const counts = {};
+  data.forEach(x=>{ counts[x.recommendation] = (counts[x.recommendation]||0) + 1; });
+  const recs = Object.keys(counts).sort((a,b)=>_recRank(a)-_recRank(b));
+  holder.innerHTML = [
+    `<button class="rchip ${recFilter==="ALL"?"active":""}" data-rec="ALL">ALL (${data.length})</button>`,
+    ...recs.map(r=>`<button class="rchip ${recFilter===r?"active":""}" data-rec="${esc(r)}"
+       style="${recFilter===r?"":`color:${REC_COLOR[r]||"var(--dim)"}`}">${esc(r)} (${counts[r]})</button>`)
+  ].join("");
+  holder.querySelectorAll("button.rchip").forEach(b=>b.onclick=()=>{
+    recFilter = (recFilter === b.dataset.rec) ? "ALL" : b.dataset.rec;   // click again = clear
+    renderResearch();
+  });
+}
 async function renderResearch(){
   const sym = document.getElementById("sym-filter").value.trim().toUpperCase();
   const m = await get(`/v1/research/memos?limit=25${sym?`&symbol=${encodeURIComponent(sym)}`:""}`);
   const el = document.getElementById("memos");
   if(m.err) return deg(el, m.err);
   if(!m.data.length) return el.innerHTML = `<div class="quiet">no memos yet — the desk hasn't run${sym?` for ${esc(sym)}`:""}</div>`;
-  el.innerHTML = m.data.map(x=>`
+  _renderRecPills(m.data);
+  let rows = m.data.filter(x=>recFilter==="ALL" || x.recommendation===recFilter);
+  if(!rows.length){ recFilter = "ALL"; rows = m.data; _renderRecPills(m.data); }  // filter emptied by refresh
+  // grouped view: category order first (BUY on top), newest first inside each
+  rows = [...rows].sort((a,b)=>(_recRank(a.recommendation)-_recRank(b.recommendation))
+                              || String(b.created_at).localeCompare(String(a.created_at)));
+  let lastRec = null;
+  el.innerHTML = rows.map(x=>{
+    const head = (recFilter==="ALL" && x.recommendation !== lastRec)
+      ? `<div style="grid-column:1/-1;font-family:var(--mono);font-size:10.5px;letter-spacing:0.2em;
+           color:${REC_COLOR[x.recommendation]||"var(--dim)"};border-bottom:1px solid var(--line);
+           padding:14px 0 6px">${esc(x.recommendation)} — ${rows.filter(y=>y.recommendation===x.recommendation).length}</div>`
+      : "";
+    lastRec = x.recommendation;
+    return head + `
     <article class="memo">
       ${x.shadow?`<div class="shadow-ribbon">SHADOW — NON-ACTIONABLE</div>`:""}
       <div class="memo-head">
@@ -738,7 +776,7 @@ async function renderResearch(){
         <button class="df-btn" data-id="${esc(x.id)}" style="margin-left:auto;background:none;border:1px solid var(--line-strong);color:var(--dim);font-family:var(--mono);font-size:9.5px;letter-spacing:0.1em;padding:3px 10px;cursor:pointer">${flowOpen.has(x.id)?"COLLAPSE FLOW":"DECISION FLOW"}</button>
       </div>
       <div class="df-box" data-id="${esc(x.id)}"></div>
-    </article>`).join("");
+    </article>`;}).join("");
   el.querySelectorAll("button.rv").forEach(b=>b.onclick=async()=>{
     const notes = el.querySelector(`input.rv-notes[data-id="${b.dataset.id}"]`);
     const r = await post(`/v1/research/memos/${b.dataset.id}/review`,
