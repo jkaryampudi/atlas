@@ -174,3 +174,85 @@ def test_source_edge_report_scores_against_dartboard(pg_session):
 def _sym_id(s, sym):
     return s.execute(text("SELECT id FROM market.instruments WHERE symbol=:s"),
                      {"s": sym}).scalar()
+
+
+class EodhdAdapter:
+    """Stub named EodhdAdapter ON PURPOSE (test_scorecard_pg precedent): the
+    top-up stores bars under source=type(adapter).__name__, and the grading
+    loaders enforce the vendor-bar discipline (source = 'EodhdAdapter') — a
+    differently-named stub would store bars grading cannot see. Serves a
+    pre-built forward window; records every fetch so the test can assert
+    exactly which symbols were topped up."""
+    def __init__(self, bars):
+        self.bars = bars
+        self.calls: list[tuple[str, date, date]] = []
+
+    def fetch_bars(self, symbol, start, end):
+        self.calls.append((symbol, start, end))
+        return [b for b in self.bars if start <= b.bar_date <= end]
+
+    def fetch_splits(self, symbol, start, end):
+        return []
+
+
+def test_grade_tops_up_frozen_inactive_pick_bars(pg_session):
+    """The investing.com ARM/HIMX/... defect: a pick on an ANALYSIS-ONLY
+    (is_active=false) instrument freezes at its last analyzed bar — nightly
+    ingest skips inactive rows and grade_picks had no top-up — so the pick
+    never matures and is silently excluded from the source's edge verdict.
+    With `adapter_for`, grading first tops up exactly the missing window
+    (scorecard rules: inactive only, no backfill) and the pick then grades."""
+    from decimal import Decimal as D
+
+    from atlas.dcp.market_data.models import Bar
+
+    s = pg_session
+    _clean(s)
+    spy = _instrument(s, "SPY")
+    pick = _instrument(s, "PICKCO")
+    s.execute(text("UPDATE market.instruments SET is_active=false WHERE id=:i"),
+              {"i": pick})                       # analysis-only, like ARM/HIMX
+
+    start = date(2026, 4, 1)
+    closes = [100.0 * (1.004 ** i) for i in range(80)]
+    _seed_bars(s, spy, start, [400.0 * (1.001 ** i) for i in range(80)])
+    # PICKCO's stored series FREEZES after 50 bars (the frozen-at-07-17 shape)
+    pdates = _seed_bars(s, pick, start, closes[:50])
+    frozen_at = pdates[-1]
+    rd = pdates[47]                               # only 2 stored forward bars
+    record_pick(s, source="investing.com", ticker="PICKCO", instrument_id=pick,
+                recommendation_date=rd, as_of_session=rd)
+
+    # WITHOUT the adapter: cannot mature, and nothing is fetched (pure read)
+    g0 = grade_picks(s, CLOCK)
+    assert g0.topups == ()
+    assert s.execute(text("SELECT excess_5 FROM research.source_picks")).scalar() is None
+
+    # the un-stored tail of the same walk, on the same business-day grid
+    tail = []
+    d, i = start, 0
+    while i < 80:
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        if d > frozen_at:
+            tail.append(Bar(symbol="PICKCO", bar_date=d,
+                            open=D(str(round(closes[i], 6))),
+                            high=D(str(round(closes[i], 6))),
+                            low=D(str(round(closes[i], 6))),
+                            close=D(str(round(closes[i], 6))), volume=1000))
+        d += timedelta(days=1)
+        i += 1
+    stub = EodhdAdapter(tail)
+
+    g1 = grade_picks(s, CLOCK, adapter_for=lambda sym, exch: stub)
+    # exactly the inactive pick symbol was topped up, only its missing window
+    assert [c[0] for c in stub.calls] == ["PICKCO"]
+    assert stub.calls[0][1] > frozen_at
+    assert len(g1.topups) == 1 and "PICKCO" in g1.topups[0]
+    new_last = s.execute(text(
+        "SELECT max(bar_date) FROM market.price_bars_daily WHERE instrument_id=:i"),
+        {"i": pick}).scalar()
+    assert new_last > frozen_at                   # the freeze is over
+    # and the pick now actually matures (the whole point)
+    assert g1.graded >= 1
+    assert s.execute(text("SELECT excess_5 FROM research.source_picks")).scalar() is not None

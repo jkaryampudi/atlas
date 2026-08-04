@@ -563,9 +563,15 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
         # applied): a failure here can never touch the settled book.
         try:
             from atlas.dcp.research.source_picks import grade_picks
-            pg = grade_picks(session, clock)
+            # adapter_for: same bounded analysis-only top-up as the scorecard —
+            # external picks on inactive instruments would otherwise freeze at
+            # their last analyzed bar and never mature (never counted in the
+            # source's edge verdict).
+            pg = grade_picks(session, clock, adapter_for=vendor_adapter_for)
             picks_line = (f"source-picks graded {pg.graded}, "
                           f"{pg.still_immature} immature")
+            if pg.topups:
+                picks_line += f", topped up {len(pg.topups)}"
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             state["picks_failed"] = True
             picks_line = f"source-picks FAILED: {e}"[:200]
