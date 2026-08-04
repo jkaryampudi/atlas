@@ -2409,7 +2409,7 @@ async function renderOpenCalls(){
       <td style="color:var(--dim)">${esc(c.memo_date)}</td>
       <td style="color:var(--dim)">${esc(c.conviction||"—")}</td>
       <td>${c.sessions}</td>
-      <td>${c.excess===null||c.excess===undefined?'<span class="quiet">unpriceable</span>':`<span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span>`}</td>
+      <td>${c.sessions===0?'<span class="quiet">too new — no completed session yet</span>':(c.excess===null||c.excess===undefined?'<span class="quiet">unpriceable</span>':`<span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span>`)}</td>
     </tr>`).join("")}
   </table>
   <div class="note" style="margin:10px 0 0">${esc((r.data&&r.data.note)||"")}</div>`;
