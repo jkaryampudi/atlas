@@ -11,7 +11,8 @@ Shadow-run memos are excluded (non-actionable by definition, ADR-0018 labelling)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -28,15 +29,36 @@ class OpenCall:
     memo_date: date
     conviction: str | None
     sessions: int              # priceable sessions elapsed since the memo anchor
-    excess: float | None       # unrealized excess vs SPY; None = unpriceable
+    excess: float | None       # unrealized excess vs SPY; None = unpriceable/too new
+
+
+# Presentational cache: the AUD reporting series is full-history per symbol
+# (~1s each), so an uncached read over the whole BUY corpus takes ~a minute and
+# would let the console's 30s refresh loop pile requests up. The cache is
+# invalidated by a FINGERPRINT of the BUY memo corpus (any new memo recomputes
+# immediately — the freshness contract) and by a TTL (new bars show up within
+# minutes). Preview-only surface; the scorecard never reads this.
+_CACHE_TTL_SECONDS = 600.0
+_cache_fp: str | None = None
+_cache_at: datetime | None = None
+_cache_calls: list[OpenCall] | None = None
 
 
 def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
     """One row per (symbol, memo day) BUY memo, newest first. `excess` is the
     symbol's return minus SPY's over the same anchored window, both on the AUD
     total-return reporting basis; `sessions` shows how seasoned the reading is
-    (small = noise, the caller labels it honestly)."""
-    on = clock.now().date()
+    (0 = no completed session since the memo yet — too new, not unpriceable)."""
+    global _cache_fp, _cache_at, _cache_calls
+    now = clock.now()
+    fp = str(session.execute(text(
+        "SELECT count(*) || ':' || coalesce(max(created_at)::text, '-') "
+        "FROM research.memos WHERE recommendation = 'BUY'")).scalar())
+    if (_cache_calls is not None and _cache_fp == fp and _cache_at is not None
+            and (now - _cache_at).total_seconds() < _CACHE_TTL_SECONDS):
+        return list(_cache_calls)
+
+    on = now.date()
     try:
         spy = sorted(benchmark_reporting_series(session, through=on).items())
     except RuntimeError:                    # benchmark unpriceable -> fail closed
@@ -53,22 +75,26 @@ def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
         "WHERE m.recommendation = 'BUY' AND COALESCE(r.shadow, false) = false "
         "ORDER BY m.instrument_symbol, m.created_at::date, m.created_at DESC")).all()
 
+    series_cache: dict[str, list[tuple[date, Decimal]]] = {}
     out: list[OpenCall] = []
     for r in rows:
         excess: float | None = None
         sessions = 0
-        if r.iid is not None and spy:
-            try:
-                series = sorted(reporting_close_series(
-                    session, instrument_id=r.iid, symbol=r.sym,
-                    currency=r.currency, through=on).items())
-            except RuntimeError:            # unpriceable in AUD -> fail closed
-                series = []
+        sa = anchor_index(spy_dates, r.d0) if spy else None
+        # early skip: no completed SPY session after the anchor -> the memo is
+        # too new to have a reading; do not pay for its full series
+        if r.iid is not None and sa is not None and len(spy) - 1 > sa:
+            if r.sym not in series_cache:
+                try:
+                    series_cache[r.sym] = sorted(reporting_close_series(
+                        session, instrument_id=r.iid, symbol=r.sym,
+                        currency=r.currency, through=on).items())
+                except RuntimeError:        # unpriceable in AUD -> fail closed
+                    series_cache[r.sym] = []
+            series = series_cache[r.sym]
             dates = [d for d, _ in series]
             a = anchor_index(dates, r.d0)
-            sa = anchor_index(spy_dates, r.d0)
-            if (a is not None and sa is not None and len(series) - 1 > a
-                    and len(spy) - 1 > sa
+            if (a is not None and len(series) - 1 > a
                     and series[a][1] > 0 and spy[sa][1] > 0):
                 sessions = min(len(series) - 1 - a, len(spy) - 1 - sa)
                 px_ret = series[a + sessions][1] / series[a][1] - 1
@@ -78,4 +104,5 @@ def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
                             conviction=r.conviction, sessions=sessions,
                             excess=excess))
     out.sort(key=lambda c: (c.memo_date, c.symbol), reverse=True)
-    return out
+    _cache_fp, _cache_at, _cache_calls = fp, now, out
+    return list(out)

@@ -136,3 +136,19 @@ def test_performance_endpoint_marks_buys_to_market(client):
     assert call["memo_date"] == "2026-07-24"
     assert call["sessions"] > 0
     assert call["excess"] is not None and call["excess"] > 0   # 1%/day vs flat SPY
+
+
+def test_performance_cache_invalidates_on_new_buy_memo(client):
+    """The presentational cache never hides a new call: its fingerprint covers
+    the BUY corpus, so the request AFTER a new memo recomputes immediately.
+    A memo with no completed session yet reads sessions=0 (too new)."""
+    c, s = client
+    body1 = c.get("/v1/research/memos/performance").json()
+    syms1 = {x["symbol"] for x in body1["calls"]}
+    assert "ZBUY" not in syms1
+    _memo(s, "ZBUY", "BUY", datetime(2026, 8, 4, 23, 30, tzinfo=UTC))
+    s.commit()
+    body2 = c.get("/v1/research/memos/performance").json()
+    call = next(x for x in body2["calls"] if x["symbol"] == "ZBUY")
+    # ZBUY has no instrument/bars in this test -> honestly too-new/unpriceable
+    assert call["sessions"] == 0 and call["excess"] is None
