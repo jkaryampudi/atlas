@@ -29,7 +29,9 @@ class OpenCall:
     memo_date: date
     conviction: str | None
     sessions: int              # priceable sessions elapsed since the memo anchor
-    excess: float | None       # unrealized excess vs SPY; None = unpriceable/too new
+    gain: float | None         # unrealized return since the memo (AUD TR basis)
+    spy: float | None          # SPY over the same anchored window, same basis
+    excess: float | None       # gain - spy; None = unpriceable/too new
 
 
 # Presentational cache: the AUD reporting series is full-history per symbol
@@ -45,10 +47,11 @@ _cache_calls: list[OpenCall] | None = None
 
 
 def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
-    """One row per (symbol, memo day) BUY memo, newest first. `excess` is the
-    symbol's return minus SPY's over the same anchored window, both on the AUD
-    total-return reporting basis; `sessions` shows how seasoned the reading is
-    (0 = no completed session since the memo yet — too new, not unpriceable)."""
+    """One row per (symbol, memo day) BUY memo, newest first. `gain` is the
+    symbol's own return since the memo, `spy` the benchmark's over the same
+    anchored window, `excess` their difference — all on the AUD total-return
+    reporting basis; `sessions` shows how seasoned the reading is (0 = no
+    completed session since the memo yet — too new, not unpriceable)."""
     global _cache_fp, _cache_at, _cache_calls
     now = clock.now()
     fp = str(session.execute(text(
@@ -78,6 +81,8 @@ def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
     series_cache: dict[str, list[tuple[date, Decimal]]] = {}
     out: list[OpenCall] = []
     for r in rows:
+        gain: float | None = None
+        spy_ret: float | None = None
         excess: float | None = None
         sessions = 0
         sa = anchor_index(spy_dates, r.d0) if spy else None
@@ -97,12 +102,12 @@ def open_buy_calls(session: Session, clock: Clock) -> list[OpenCall]:
             if (a is not None and len(series) - 1 > a
                     and series[a][1] > 0 and spy[sa][1] > 0):
                 sessions = min(len(series) - 1 - a, len(spy) - 1 - sa)
-                px_ret = series[a + sessions][1] / series[a][1] - 1
-                spy_ret = spy[sa + sessions][1] / spy[sa][1] - 1
-                excess = float(px_ret - spy_ret)
+                gain = float(series[a + sessions][1] / series[a][1] - 1)
+                spy_ret = float(spy[sa + sessions][1] / spy[sa][1] - 1)
+                excess = gain - spy_ret
         out.append(OpenCall(symbol=str(r.sym), memo_date=r.d0,
                             conviction=r.conviction, sessions=sessions,
-                            excess=excess))
+                            gain=gain, spy=spy_ret, excess=excess))
     out.sort(key=lambda c: (c.memo_date, c.symbol), reverse=True)
     _cache_fp, _cache_at, _cache_calls = fp, now, out
     return list(out)

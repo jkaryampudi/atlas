@@ -135,7 +135,10 @@ def test_performance_endpoint_marks_buys_to_market(client):
     call = next(x for x in body["calls"] if x["symbol"] == "ZBUY")
     assert call["memo_date"] == "2026-07-24"
     assert call["sessions"] > 0
+    assert call["gain"] is not None and call["gain"] > 0       # 1%/day drift
+    assert call["spy"] is not None and abs(call["spy"]) < 1e-9  # flat SPY
     assert call["excess"] is not None and call["excess"] > 0   # 1%/day vs flat SPY
+    assert abs(call["excess"] - (call["gain"] - call["spy"])) < 1e-12
 
 
 def test_performance_cache_invalidates_on_new_buy_memo(client):
@@ -152,3 +155,4 @@ def test_performance_cache_invalidates_on_new_buy_memo(client):
     call = next(x for x in body2["calls"] if x["symbol"] == "ZBUY")
     # ZBUY has no instrument/bars in this test -> honestly too-new/unpriceable
     assert call["sessions"] == 0 and call["excess"] is None
+    assert call["gain"] is None and call["spy"] is None

@@ -115,10 +115,11 @@ def memos(symbol: str | None = None, limit: int = 25) -> list[dict[str, object]]
 
 @router.get("/memos/performance")
 def memos_performance() -> dict[str, object]:
-    """Live (unrealized) excess vs SPY for every non-shadow BUY memo, on the
-    AUD total-return reporting basis (same services as the scorecard, F-006).
-    Informal by design — the write-once 20/60-session scorecard outcomes are
-    the only decision-grade verdict; this is the always-current preview."""
+    """Live (unrealized) % gain since each memo + excess vs SPY for every
+    non-shadow BUY memo, on the AUD total-return reporting basis (same services
+    as the scorecard, F-006). Informal by design — the write-once 20/60-session
+    scorecard outcomes are the only decision-grade verdict; this is the
+    always-current preview."""
     from atlas.dcp.research.memo_performance import open_buy_calls
 
     with session_scope() as s:
@@ -127,6 +128,7 @@ def memos_performance() -> dict[str, object]:
                      "grades are the verdict"),
             "calls": [{"symbol": c.symbol, "memo_date": c.memo_date.isoformat(),
                        "conviction": c.conviction, "sessions": c.sessions,
+                       "gain": c.gain, "spy": c.spy,
                        "excess": c.excess} for c in calls]}
 
 
