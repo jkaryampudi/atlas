@@ -1,12 +1,56 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from sqlalchemy import text
 
+from atlas.api.auth import require_operator
 from atlas.core.db import session_scope
 
 router = APIRouter()
+
+
+@router.get("/delisting-candidates")
+def delisting_candidates() -> list[dict[str, object]]:
+    """Delisting watch (read-only): active US stocks whose stored bars have
+    stopped before the last completed session, probed at the vendor. The
+    SATS/EA pattern surfaced explicitly instead of as a mystery RED gate.
+    Zero candidates costs zero vendor calls."""
+    from atlas.core.clock import SystemClock
+    from atlas.dcp.market_data.delisting import find_delisting_candidates
+    from atlas.dcp.scorecard import vendor_adapter_for
+
+    with session_scope() as s:
+        out = find_delisting_candidates(s, SystemClock(), vendor_adapter_for)
+    return [{"symbol": c.symbol,
+             "last_bar": c.last_bar.isoformat() if c.last_bar else None,
+             "vendor_delisted": c.vendor_delisted,
+             "delisted_date": c.delisted_date, "held": c.held} for c in out]
+
+
+@router.post("/instruments/{symbol}/deactivate-delisted",
+             dependencies=[Depends(require_operator)])
+def deactivate_delisted_instrument(symbol: str) -> object:
+    """The guarded one-click for a vendor-delisted name: the vendor is
+    RE-PROBED server-side (the click is never trusted), a held name is refused,
+    and the flip is audited. 409 with the honest reason on any refusal."""
+    from atlas.core.clock import SystemClock
+    from atlas.dcp.market_data.delisting import DelistingError, deactivate_delisted
+    from atlas.dcp.scorecard import vendor_adapter_for
+
+    with session_scope() as s:
+        try:
+            res = deactivate_delisted(s, SystemClock(), vendor_adapter_for,
+                                      symbol.strip().upper())
+        except DelistingError as e:
+            s.rollback()
+            return JSONResponse(status_code=409, content={"error": {
+                "code": "REFUSED", "message": str(e), "details": None}})
+    return {"deactivated": res.symbol,
+            "delisted_date": res.delisted_date.isoformat(),
+            "membership_rows": res.membership_rows,
+            "audit_seq": res.audit_seq}
 
 
 @router.get("/instruments")
