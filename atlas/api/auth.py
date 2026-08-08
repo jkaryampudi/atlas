@@ -137,6 +137,7 @@ SENSITIVE_ROUTE_ROLES: dict[tuple[str, str], Role] = {
     ("POST", "/v1/risk/breaker-clearances/{clearance_id}/confirm"): Role.RISK_ADMIN,
     ("POST", "/v1/risk/preflight"): Role.OPERATOR,
     # System
+    ("POST", "/v1/market/instruments/{symbol}/deactivate-delisted"): Role.OPERATOR,
     ("POST", "/v1/system/run-daily"): Role.SYSTEM_INTERNAL,
     # Trading — capital actions
     ("POST", "/v1/trading/proposals/{proposal_id}/approve"): Role.TRADE_APPROVER,

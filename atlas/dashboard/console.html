@@ -211,6 +211,9 @@
       <div class="card" id="freshness"><div class="quiet">awaiting data</div></div>
       <h2>Quality Gates — Latest Per Market</h2>
       <div class="card" id="gates"><div class="quiet">awaiting data</div></div>
+      <h2>Delisting Watch</h2>
+      <div class="note">Active names whose vendor bars have stopped (the SATS/EA pattern — a delisted stock still marked active turns the gate RED nightly). DEACTIVATE re-verifies the delisting at the vendor server-side and refuses held names; the flip is audited. Nothing is deleted — the gate just stops expecting a bar that will never come.</div>
+      <div class="card" id="delist-watch"><div class="quiet">no candidates — every active name has current bars</div></div>
       <h2>Audit Ledger — Recent Events</h2>
       <div class="card ledger" id="audit"><div class="quiet">awaiting data</div></div>
     </section>
@@ -2415,13 +2418,39 @@ async function renderOpenCalls(){
   <div class="note" style="margin:10px 0 0">${esc((r.data&&r.data.note)||"")}</div>`;
 }
 
+
+/* ---------- delisting watch: the SATS/EA pattern, one guarded click ---------- */
+async function renderDelistWatch(){
+  const el = document.getElementById("delist-watch");
+  if(!el) return;
+  const r = await get("/v1/market/delisting-candidates");
+  if(r.err) return deg(el, r.err);
+  if(!r.data.length){ el.innerHTML = `<div class="quiet">no candidates — every active name has current bars</div>`; return; }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>LAST BAR</th><th>VENDOR SAYS</th><th>HELD</th><th></th></tr>
+    ${r.data.map(c=>`<tr style="border-top:1px solid var(--line)">
+      <td style="padding:4px 8px">${symLink(c.symbol)}</td>
+      <td style="color:var(--dim)">${esc(c.last_bar||"—")}</td>
+      <td>${c.vendor_delisted===true?`<span class="pill r">DELISTED ${esc(c.delisted_date||"")}</span>`:c.vendor_delisted===false?`<span class="pill gray">still listed — likely a vendor gap</span>`:`<span class="quiet">probe failed</span>`}</td>
+      <td>${c.held?`<span class="pill r">HELD</span>`:`<span class="quiet">no</span>`}</td>
+      <td>${(c.vendor_delisted===true&&!c.held)?`<button class="dl-btn" data-sym="${esc(c.symbol)}" style="background:none;border:1px solid rgba(255,92,92,0.5);color:var(--red);font-family:var(--mono);font-size:10px;letter-spacing:0.1em;padding:4px 12px;cursor:pointer">DEACTIVATE</button>`:""}</td>
+    </tr>`).join("")}
+  </table>`;
+  el.querySelectorAll("button.dl-btn").forEach(b=>b.onclick=async()=>{
+    b.disabled=true; b.textContent="DEACTIVATING…";
+    const r2 = await postFull(`/v1/market/instruments/${encodeURIComponent(b.dataset.sym)}/deactivate-delisted`, {});
+    if(r2.err||(r2.data&&r2.data.error)){ b.disabled=false; b.textContent="FAILED — "+esc((r2.data&&r2.data.error&&r2.data.error.message)||r2.err||"retry").slice(0,60); return; }
+    renderDelistWatch(); renderStrip();
+  });
+}
+
 const RENDERERS = [renderStrip, renderPipeline, renderBrief, renderOverview,
                    renderJobs, renderAttribution, renderSleeveAttribution,
                    renderTradingBrief,
                    renderStrategy, renderTrading,
                    renderResearch, renderOpenCalls, renderScorecard, renderLearning,
                    renderProgress, renderRuns,
-                   renderQuant, renderRecipeBoard, renderRisk, renderMarket];
+                   renderQuant, renderRecipeBoard, renderRisk, renderMarket, renderDelistWatch];
 async function refreshAll(){
   const results = await Promise.allSettled(RENDERERS.map(fn => fn()));
   results.forEach((r,i)=>{ if(r.status==="rejected")
