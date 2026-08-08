@@ -2415,6 +2415,7 @@ document.getElementById("rc-btn").onclick = async()=>{
    rest (roundtable P0) */
 
 /* ---------- open BUY calls: live vs SPY (unrealized preview; scorecard = verdict) ---------- */
+let ocShowAll = false;   // default: 12 most recent calls — the full list is opt-in
 async function renderOpenCalls(){
   const el = document.getElementById("open-calls");
   if(!el) return;
@@ -2437,7 +2438,9 @@ async function renderOpenCalls(){
       <td><span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span></td>`)}
     </tr>`).join("")}
   </table>
+  ${(ocMore>0||ocShowAll)?`<button id="oc-more" class="rchip" style="margin-top:10px">${ocShowAll?"SHOW RECENT ONLY":`SHOW ALL (${allCalls.length})`}</button>`:""}
   <div class="note" style="margin:10px 0 0">${esc((r.data&&r.data.note)||"")}</div>`;
+  const om=document.getElementById("oc-more"); if(om) om.onclick=()=>{ ocShowAll=!ocShowAll; renderOpenCalls(); };
 }
 
 
