@@ -2425,13 +2425,16 @@ async function renderOpenCalls(){
   const calls = ocShowAll ? allCalls : allCalls.slice(0, 12);
   const ocMore = allCalls.length - calls.length;
   el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
-    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>MEMO DATE</th><th>CONVICTION</th><th>SESSIONS</th><th>vs SPY (unrealized)</th></tr>
+    <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>MEMO DATE</th><th>CONVICTION</th><th>SESSIONS</th><th>GAIN (since memo)</th><th>SPY</th><th>vs SPY (unrealized)</th></tr>
     ${calls.map(c=>`<tr style="border-top:1px solid var(--line)">
       <td style="padding:4px 8px">${symLink(c.symbol)}</td>
       <td style="color:var(--dim)">${esc(c.memo_date)}</td>
       <td style="color:var(--dim)">${esc(c.conviction||"—")}</td>
       <td>${c.sessions}</td>
-      <td>${c.sessions===0?'<span class="quiet">too new — no completed session yet</span>':(c.excess===null||c.excess===undefined?'<span class="quiet">unpriceable</span>':`<span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span>`)}</td>
+      ${c.sessions===0?'<td colspan="3"><span class="quiet">too new — no completed session yet</span></td>':(c.gain===null||c.gain===undefined?'<td colspan="3"><span class="quiet">unpriceable</span></td>':`
+      <td><span class="pill ${spSign(c.gain)}">${c.gain>0?"+":""}${spPct(c.gain)}</span></td>
+      <td style="color:var(--dim)">${c.spy>0?"+":""}${spPct(c.spy)}</td>
+      <td><span class="pill ${spSign(c.excess)}">${c.excess>0?"+":""}${spPct(c.excess)}</span></td>`)}
     </tr>`).join("")}
   </table>
   <div class="note" style="margin:10px 0 0">${esc((r.data&&r.data.note)||"")}</div>`;
