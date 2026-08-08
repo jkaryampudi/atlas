@@ -715,6 +715,7 @@ const REC_ORDER = ["BUY","WATCHLIST","HOLD","REJECT","INSUFFICIENT_EVIDENCE"];
 const REC_COLOR = {BUY:"var(--green)", WATCHLIST:"var(--blue)", HOLD:"var(--gold)",
                    REJECT:"var(--red)", INSUFFICIENT_EVIDENCE:"var(--dim)"};
 let recFilter = "ALL";
+let memoHistory = false;   // default: only the latest desk run's memos — history is opt-in
 function _recRank(r){ const i = REC_ORDER.indexOf(r); return i < 0 ? REC_ORDER.length : i; }
 function _renderRecPills(data){
   const holder = document.getElementById("rec-filter");
@@ -738,9 +739,19 @@ async function renderResearch(){
   const el = document.getElementById("memos");
   if(m.err) return deg(el, m.err);
   if(!m.data.length) return el.innerHTML = `<div class="quiet">no memos yet — the desk hasn't run${sym?` for ${esc(sym)}`:""}</div>`;
-  _renderRecPills(m.data);
-  let rows = m.data.filter(x=>recFilter==="ALL" || x.recommendation===recFilter);
-  if(!rows.length){ recFilter = "ALL"; rows = m.data; _renderRecPills(m.data); }  // filter emptied by refresh
+  const scope = memoHistory ? m.data : m.data.filter(x=>x.freshness==="current");
+  const hidden = m.data.length - scope.length;
+  _renderRecPills(scope);
+  const holder = document.getElementById("rec-filter");
+  if(holder && hidden > 0 || (holder && memoHistory)){
+    holder.insertAdjacentHTML("beforeend",
+      `<button class="rchip" id="memo-hist" style="margin-left:auto">${memoHistory?`HIDE HISTORY`:`SHOW HISTORY (${hidden})`}</button>`);
+    const hb=document.getElementById("memo-hist");
+    if(hb) hb.onclick=()=>{ memoHistory=!memoHistory; renderResearch(); };
+  }
+  let rows = scope.filter(x=>recFilter==="ALL" || x.recommendation===recFilter);
+  if(!rows.length && scope.length){ recFilter = "ALL"; rows = scope; }  // filter emptied by refresh
+  if(!rows.length){ el.innerHTML = `<div class="quiet">no memos from the latest desk run — SHOW HISTORY for earlier ones</div>`; return; }
   // grouped view: category order first (BUY on top), newest first inside each
   rows = [...rows].sort((a,b)=>(_recRank(a.recommendation)-_recRank(b.recommendation))
                               || String(b.created_at).localeCompare(String(a.created_at)));
@@ -1151,11 +1162,15 @@ async function renderPickAutopsy(){
   el.innerHTML = wl + ft + ht;
 }
 
+let spShowAll = false;
 async function renderPickList(){
   const el = document.getElementById("sp-list");
   const r = await get("/v1/research/source-picks?limit=200");
   if(r.err) return;
   if(!r.data.length){ el.innerHTML = `<div class="quiet">no picks recorded yet — paste a list above and INGEST</div>`; return; }
+  const all = r.data;
+  r.data = spShowAll ? all : all.slice(0, 30);
+  const spMore = all.length - r.data.length;
   el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
     <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">DATE</th><th>SOURCE</th><th>TICKER</th><th>SECTOR</th><th>REGIME</th><th>MOM 12-1</th><th>vs SPY @5s</th><th>vs SPY @10s</th><th>vs SPY @20s</th><th>vs SPY @60s</th></tr>
     ${r.data.map(p=>`<tr style="border-top:1px solid var(--line)">
@@ -1167,7 +1182,9 @@ async function renderPickList(){
       <td>${p.mom_12_1===null||p.mom_12_1===undefined?"—":(p.mom_12_1*100).toFixed(0)+"%"}</td>
       ${[p.excess_5,p.excess_10,p.excess_20,p.excess_60].map(x=>`<td>${x===null||x===undefined?'<span class="quiet">immature</span>':`<span class="pill ${spSign(x)}">${x>0?"+":""}${spPct(x)}</span>`}</td>`).join("")}
     </tr>`).join("")}
-  </table>`;
+  </table>
+  ${(spMore>0||spShowAll)?`<button id="sp-more" class="rchip" style="margin-top:10px">${spShowAll?"SHOW RECENT ONLY":`SHOW ALL (${all.length})`}</button>`:""}`;
+  const sm=document.getElementById("sp-more"); if(sm) sm.onclick=()=>{ spShowAll=!spShowAll; renderPickList(); };
   el.querySelectorAll("button.sp-dossier-btn").forEach(b=>b.onclick=()=>window.open(`/console/dossier?id=${encodeURIComponent(b.dataset.id)}`, "_blank"));
 }
 
@@ -2403,8 +2420,10 @@ async function renderOpenCalls(){
   if(!el) return;
   const r = await get("/v1/research/memos/performance");
   if(r.err) return deg(el, r.err);
-  const calls = (r.data && r.data.calls) || [];
-  if(!calls.length){ el.innerHTML = `<div class="quiet">no BUY memos yet</div>`; return; }
+  const allCalls = (r.data && r.data.calls) || [];
+  if(!allCalls.length){ el.innerHTML = `<div class="quiet">no BUY memos yet</div>`; return; }
+  const calls = ocShowAll ? allCalls : allCalls.slice(0, 12);
+  const ocMore = allCalls.length - calls.length;
   el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
     <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>MEMO DATE</th><th>CONVICTION</th><th>SESSIONS</th><th>vs SPY (unrealized)</th></tr>
     ${calls.map(c=>`<tr style="border-top:1px solid var(--line)">
