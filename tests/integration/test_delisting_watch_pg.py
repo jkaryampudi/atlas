@@ -57,21 +57,42 @@ def _inst(s, sym, *, active=True, last_bar: date | None):
 def test_detection_is_bounded_and_probes_only_stale_names(pg_session):
     """Relative assertions on THIS test's seeds — the shared atlas_test may
     carry committed instruments from other tests (deleting them all trips FK
-    references), and any such stale stranger is simply another fail-soft probe."""
+    references), and any such stale stranger is simply another fail-soft probe.
+    probe_cap is raised explicitly so committed strangers can never trip the
+    universe-stale refusal and make this test flaky."""
     s = pg_session
     _inst(s, "ZCUR", last_bar=date(2026, 8, 7))            # current -> not probed
     _inst(s, "ZDEAD", last_bar=date(2026, 7, 1))           # stale -> candidate
     _inst(s, "ZOFF", active=False, last_bar=date(2026, 6, 1))  # inactive -> ignored
     v = _Vendor({"ZDEAD": {"General": {"IsDelisted": True,
                                        "DelistedDate": "2026-07-01"}}})
-    out = find_delisting_candidates(s, CLOCK, lambda sym, exch: v)
-    by = {c.symbol: c for c in out}
+    scan = find_delisting_candidates(s, CLOCK, lambda sym, exch: v,
+                                     probe_cap=10_000)
+    assert scan.probed is True and scan.note is None
+    assert scan.stale_total >= 1
+    by = {c.symbol: c for c in scan.candidates}
     assert "ZDEAD" in by and "ZCUR" not in by and "ZOFF" not in by
     assert by["ZDEAD"].vendor_delisted is True
     assert by["ZDEAD"].delisted_date == "2026-07-01"
     assert by["ZDEAD"].held is False
     assert "ZDEAD" in v.probed                             # the stale seed probed
     assert "ZCUR" not in v.probed and "ZOFF" not in v.probed  # bounded
+
+
+def test_universe_wide_staleness_refuses_to_probe(pg_session):
+    """The missed-cycle case (2026-08-11, live): when the whole book's bars
+    are behind, the watch must say 'ingest is behind' with ZERO vendor calls —
+    not probe 500 names serially on every console refresh."""
+    s = pg_session
+    for i in range(11):                       # 11 stale actives > default cap 10
+        _inst(s, f"ZST{i:02d}", last_bar=date(2026, 7, 1))
+    v = _Vendor({})
+    scan = find_delisting_candidates(s, CLOCK, lambda sym, exch: v)
+    assert scan.probed is False
+    assert scan.candidates == []
+    assert scan.stale_total >= 11
+    assert scan.note is not None and "ingest is behind" in scan.note
+    assert v.probed == []                     # the bound that matters
 
 
 def test_deactivate_happy_path_is_audited(clean_audit):
