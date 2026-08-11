@@ -2450,10 +2450,13 @@ async function renderDelistWatch(){
   if(!el) return;
   const r = await get("/v1/market/delisting-candidates");
   if(r.err) return deg(el, r.err);
-  if(!r.data.length){ el.innerHTML = `<div class="quiet">no candidates — every active name has current bars</div>`; return; }
+  const d = r.data || {};
+  if(d.probed === false){ el.innerHTML = `<div class="quiet">◌ ${esc(d.note||"universe-wide staleness — vendor not probed")}</div>`; return; }
+  const dlRows = d.candidates || [];
+  if(!dlRows.length){ el.innerHTML = `<div class="quiet">no candidates — every active name has current bars</div>`; return; }
   el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
     <tr style="color:var(--dim);text-align:left"><th style="padding:4px 8px">SYMBOL</th><th>LAST BAR</th><th>VENDOR SAYS</th><th>HELD</th><th></th></tr>
-    ${r.data.map(c=>`<tr style="border-top:1px solid var(--line)">
+    ${dlRows.map(c=>`<tr style="border-top:1px solid var(--line)">
       <td style="padding:4px 8px">${symLink(c.symbol)}</td>
       <td style="color:var(--dim)">${esc(c.last_bar||"—")}</td>
       <td>${c.vendor_delisted===true?`<span class="pill r">DELISTED ${esc(c.delisted_date||"")}</span>`:c.vendor_delisted===false?`<span class="pill gray">still listed — likely a vendor gap</span>`:`<span class="quiet">probe failed</span>`}</td>

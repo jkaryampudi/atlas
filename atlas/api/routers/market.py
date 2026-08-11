@@ -12,21 +12,25 @@ router = APIRouter()
 
 
 @router.get("/delisting-candidates")
-def delisting_candidates() -> list[dict[str, object]]:
+def delisting_candidates() -> dict[str, object]:
     """Delisting watch (read-only): active US stocks whose stored bars have
     stopped before the last completed session, probed at the vendor. The
     SATS/EA pattern surfaced explicitly instead of as a mystery RED gate.
-    Zero candidates costs zero vendor calls."""
+    Zero candidates costs zero vendor calls; universe-wide staleness (a missed
+    ingest) is reported honestly with probed=false and zero vendor calls."""
     from atlas.core.clock import SystemClock
     from atlas.dcp.market_data.delisting import find_delisting_candidates
     from atlas.dcp.scorecard import vendor_adapter_for
 
     with session_scope() as s:
-        out = find_delisting_candidates(s, SystemClock(), vendor_adapter_for)
-    return [{"symbol": c.symbol,
-             "last_bar": c.last_bar.isoformat() if c.last_bar else None,
-             "vendor_delisted": c.vendor_delisted,
-             "delisted_date": c.delisted_date, "held": c.held} for c in out]
+        scan = find_delisting_candidates(s, SystemClock(), vendor_adapter_for)
+    return {"probed": scan.probed, "stale_total": scan.stale_total,
+            "note": scan.note,
+            "candidates": [{"symbol": c.symbol,
+                            "last_bar": c.last_bar.isoformat() if c.last_bar else None,
+                            "vendor_delisted": c.vendor_delisted,
+                            "delisted_date": c.delisted_date,
+                            "held": c.held} for c in scan.candidates]}
 
 
 @router.post("/instruments/{symbol}/deactivate-delisted",

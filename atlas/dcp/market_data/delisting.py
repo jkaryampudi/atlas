@@ -9,7 +9,11 @@ explicit surface:
   * ``find_delisting_candidates`` — read-only: every ACTIVE US stock whose
     stored bars have stopped before the last completed session, probed against
     the vendor's fundamentals (IsDelisted/DelistedDate, fail-soft per symbol).
-    Zero candidates costs zero vendor calls.
+    Bounded TWICE: zero candidates costs zero vendor calls, and when more than
+    ``probe_cap`` names are stale at once the scan refuses to probe at all —
+    universe-wide staleness means the INGEST is behind (a missed cycle), not
+    that half the S&P delisted overnight, and the honest answer is that
+    sentence, not 500 serial vendor calls per console refresh.
   * ``deactivate_delisted`` — the guarded, audited one-click: re-verifies the
     delisting AT THE VENDOR server-side (never trusts the console click),
     REFUSES a held name (capital preservation first), then flips
@@ -54,6 +58,20 @@ class DelistingCandidate:
 
 
 @dataclass(frozen=True)
+class DelistingScan:
+    """The result of one watch pass. ``probed=False`` means the vendor was
+    deliberately NOT consulted because staleness was universe-wide — the note
+    carries the honest reason and ``candidates`` is empty."""
+    candidates: list[DelistingCandidate]
+    stale_total: int
+    probed: bool
+    note: str | None
+
+
+PROBE_CAP = 10
+
+
+@dataclass(frozen=True)
 class DeactivationResult:
     symbol: str
     delisted_date: date
@@ -84,9 +102,12 @@ def _vendor_delisting(adapter_for: AdapterFor, symbol: str,
 
 
 def find_delisting_candidates(session: Session, clock: Clock,
-                              adapter_for: AdapterFor) -> list[DelistingCandidate]:
+                              adapter_for: AdapterFor,
+                              probe_cap: int = PROBE_CAP) -> DelistingScan:
     """Active US stocks whose stored bars stop before the last completed US
-    session. Bounded: the vendor is probed only for these (normally zero)."""
+    session. Bounded: the vendor is probed only for these (normally zero), and
+    not at all when more than ``probe_cap`` names are stale at once — that is
+    an ingest gap (missed cycle), reported as such with zero vendor calls."""
     last_session = last_completed_session("US", clock.now())
     rows = session.execute(text(
         "SELECT i.symbol, i.exchange, "
@@ -94,16 +115,23 @@ def find_delisting_candidates(session: Session, clock: Clock,
         "         WHERE pb.instrument_id = i.id) AS last_bar "
         "FROM market.instruments i "
         "WHERE i.market = 'US' AND i.is_active AND i.instrument_type = 'stock'")).all()
+    stale = [r for r in rows
+             if r.last_bar is None or r.last_bar < last_session]
+    if len(stale) > probe_cap:
+        return DelistingScan(
+            candidates=[], stale_total=len(stale), probed=False,
+            note=(f"{len(stale)} active names missing bars for {last_session} "
+                  "— universe-wide staleness (the ingest is behind, e.g. a "
+                  "missed cycle), not delistings; vendor not probed"))
     out: list[DelistingCandidate] = []
-    for r in rows:
-        if r.last_bar is not None and r.last_bar >= last_session:
-            continue
+    for r in stale:
         delisted, ddate = _vendor_delisting(adapter_for, r.symbol, r.exchange)
         out.append(DelistingCandidate(
             symbol=str(r.symbol), last_bar=r.last_bar, vendor_delisted=delisted,
             delisted_date=ddate, held=_held_qty(session, r.symbol) > 0))
     out.sort(key=lambda c: c.symbol)
-    return out
+    return DelistingScan(candidates=out, stale_total=len(stale), probed=True,
+                         note=None)
 
 
 def deactivate_delisted(session: Session, clock: Clock, adapter_for: AdapterFor,
