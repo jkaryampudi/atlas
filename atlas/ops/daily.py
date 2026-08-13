@@ -300,9 +300,11 @@ def merge_shortlist(priority: list[str], rest: list[str]) -> list[str]:
     return list(dict.fromkeys([*priority, *rest]))
 
 
-def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
+def build_scanned_desk(run_desk: Callable[..., Any],
                        desk_symbols: Callable[[Session], list[str]],
-                       *, top_n: int = 5) -> Callable[[Session, Clock], ScannedDeskReport]:
+                       *, top_n: int = 5,
+                       progress: Callable[[str], None] | None = None,
+                       ) -> Callable[[Session, Clock], ScannedDeskReport]:
     """The T7 desk callable: ACTIVE SIGNAL NAMES first (ADR-0010 — signals
     with valid_until >= session and no non-expired proposal standing), then
     the deterministic scan (ADR-0007), the LLM desk on exactly the merged
@@ -312,6 +314,10 @@ def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
     like a desk failure. This covers ranking bugs, not a dead database: a
     scan failure that aborts the transaction kills the run like any other
     node-level SQL failure."""
+    # kwarg passed only when a heartbeat is wired: existing desk callables
+    # (and test fakes) without a `progress` parameter stay valid.
+    desk_kwargs: dict[str, Any] = {} if progress is None else {"progress": progress}
+
     def scanned_desk(session: Session, clock: Clock) -> ScannedDeskReport:
         # BOTH satellite sleeves lead the shortlist (ADR-0010/0013/0014):
         # momentum's active names, then PEAD's, deduped preserving order — so
@@ -323,13 +329,14 @@ def build_scanned_desk(run_desk: Callable[[Session, Clock, list[str]], Any],
             report = scan(session, clock, top_n=top_n)
         except Exception as e:  # noqa: BLE001 — fail-soft, but never silent
             fallback = run_desk(session, clock,
-                                merge_shortlist(signal_names, desk_symbols(session)))
+                                merge_shortlist(signal_names, desk_symbols(session)),
+                                **desk_kwargs)
             return ScannedDeskReport(
                 scan_line=f"scan FAILED ({str(e)[:120]}) -> desk full eligible universe",
                 desk=fallback, scan_failed=True)
         shortlist = merge_shortlist(signal_names,
                                     [e.symbol for e in report.shortlist])
-        desk_report = run_desk(session, clock, shortlist)
+        desk_report = run_desk(session, clock, shortlist, **desk_kwargs)
         return ScannedDeskReport(
             scan_line=(f"signals {len(signal_names)} + scanned {report.scanned} "
                        f"-> desk {len(shortlist)} ({report.n_held} held)"),
@@ -763,8 +770,12 @@ def main() -> None:
         from atlas.agents.desk import desk_symbols, run_desk
 
         # scan first (ADR-0007): the desk studies the scanner's shortlist,
-        # never the full universe — breadth is the scanner's job, and it's free
-        desk = build_scanned_desk(run_desk, desk_symbols)
+        # never the full universe — breadth is the scanner's job, and it's free.
+        # The heartbeat rides the t7_desk @@CYCLE line so the console pipeline
+        # shows which memo the hours-long, single-transaction desk is on.
+        desk = build_scanned_desk(
+            run_desk, desk_symbols,
+            progress=lambda msg: _emit("t7_desk", "running", msg, clock=clock))
 
     business_date = clock.now().astimezone(UTC).date()
     run_id = f"daily-{business_date.isoformat()}"

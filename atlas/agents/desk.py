@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -94,8 +95,17 @@ def desk_symbols(session: Session, *, min_bars: int = 51) -> list[str]:
 
 
 def run_desk(session: Session, clock: Clock, symbols: list[str],
-             source: str | None = None) -> DeskReport:
+             source: str | None = None,
+             progress: Callable[[str], None] | None = None) -> DeskReport:
     """Debate + committee memo per symbol; every outcome recorded, none fatal.
+
+    `progress` is an optional per-candidate heartbeat ("memo 3/10 · SMCI"),
+    called before each symbol's debate. The nightly cycle wires it to a
+    @@CYCLE progress line so the console pipeline shows life during the
+    desk's long, single-transaction run (whose DB writes are invisible until
+    commit — the 2026-08-12 misdiagnosis: a healthy 35-minute desk was killed
+    as "hung" because nothing on any surface moved). A callback failure is
+    swallowed: the heartbeat must never kill the desk.
 
     `source` is the optional external-origin tag for on-demand analyses
     (ANALYZE-ANY-TICKER; e.g. 'investing.com'), threaded verbatim to
@@ -113,6 +123,11 @@ def run_desk(session: Session, clock: Clock, symbols: list[str],
     skipped: list[tuple[str, str]] = []
     with budget_surface(current_budget_surface() or "nightly"):
         for i, symbol in enumerate(symbols):
+            if progress is not None:
+                try:
+                    progress(f"memo {i + 1}/{len(symbols)} · {symbol}")
+                except Exception:  # noqa: BLE001, S110 — heartbeat only
+                    pass
             try:
                 evidence = build_evidence(session, symbol)
             except LookupError as e:
