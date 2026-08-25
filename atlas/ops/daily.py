@@ -300,6 +300,24 @@ def merge_shortlist(priority: list[str], rest: list[str]) -> list[str]:
     return list(dict.fromkeys([*priority, *rest]))
 
 
+def desk_off_reason() -> str | None:
+    """None when the nightly desk should run; otherwise the honest t7 line.
+
+    ATLAS_DESK_ENABLED=0 is the 2026-08-25 scorecard verdict made config: the
+    desk failed its pre-committed bar on BOTH sides of the book (BUY 18/47
+    vindicated @20s vs dartboard 49% = -10.5pp; REJECT 9/23 vs 48% = -8.8pp),
+    so the nightly desk deploys no model spend. Analyze-on-demand and the
+    grading of already-issued memos are unaffected. Re-enablement is a
+    Principal decision on fresh evidence (e.g. the H1 out-of-sample verdict),
+    not a config whim."""
+    if os.environ.get("ATLAS_DESK_ENABLED", "1") == "0":
+        return ("desk off by verdict (ATLAS_DESK_ENABLED=0 — 2026-08-25 "
+                "scorecard: BUY -10.5pp, REJECT -8.8pp vs dartboard)")
+    if not os.environ.get("ATLAS_ANTHROPIC_API_KEY"):
+        return "desk off (no model key configured)"
+    return None
+
+
 def build_scanned_desk(run_desk: Callable[..., Any],
                        desk_symbols: Callable[[Session], list[str]],
                        *, top_n: int = 5,
@@ -467,7 +485,7 @@ def run_daily_cycle(session: Session, clock: Clock, adapter: MarketDataAdapter,
 
     def t7_desk() -> str:
         if desk is None:
-            return "desk off (no model key configured)"
+            return desk_off_reason() or "desk off (no model key configured)"
         us_day = clock.now().astimezone(UTC).date()
         if not is_trading_day("US", us_day):
             return f"desk skipped ({us_day} is not a US session)"
@@ -766,7 +784,7 @@ def main() -> None:
     adapter = adapter_from_settings(fixtures_root=root / "tests" / "fixtures",
                                     seeds_csv=root / "seeds" / "instruments_seed.csv")
     desk: Callable[[Session, Clock], Any] | None = None
-    if os.environ.get("ATLAS_ANTHROPIC_API_KEY"):
+    if desk_off_reason() is None:
         from atlas.agents.desk import desk_symbols, run_desk
 
         # scan first (ADR-0007): the desk studies the scanner's shortlist,
