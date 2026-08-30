@@ -528,18 +528,6 @@
     ]
   },
   {
-    "symbol": "AVB",
-    "exchange": "US",
-    "market": "US",
-    "instrument_type": "stock",
-    "name": "AvalonBay Communities Inc",
-    "sector_gics": "Real Estate",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
     "symbol": "AVGO",
     "exchange": "NASDAQ",
     "market": "US",
