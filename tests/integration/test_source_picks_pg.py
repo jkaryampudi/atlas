@@ -164,11 +164,33 @@ def test_source_edge_report_scores_against_dartboard(pg_session):
                     recommendation_date=dates[270], as_of_session=dates[270])
     grade_picks(s, CLOCK)
 
+    # ONE tracked source: the dart has nothing else to throw at, so the
+    # dartboard necessarily equals the source's own rate. The report must
+    # say "no comparator" (edge None) — never a fake 0.0 edge.
     rep = {(e.source, e.horizon): e for e in source_edge_report(s)}
     e20 = rep[("investing.com", 20)]
     assert e20.n_matured == 3
     assert abs(e20.outperform_rate - 2 / 3) < 1e-9
-    assert e20.dartboard is not None and e20.edge is not None
+    assert e20.dartboard is not None and abs(e20.dartboard - 2 / 3) < 1e-9
+    assert e20.edge is None
+
+    # A SECOND source with three underperformers: the dart is now the base
+    # rate over all six graded picks (2/6), so investing.com's edge is
+    # 2/3 - 1/3 = +1/3 and the other source's is 0 - 1/3. Before the
+    # 2026-08-30 fix both would have read 0.0 (each source was scored
+    # against its own picks — a tautology).
+    for sym in ("DDD", "EEE", "FFF"):
+        iid = _instrument(s, sym)
+        dates = _seed_bars(s, iid, date(2024, 1, 1), [100.0 * (0.998 ** i) for i in range(340)])
+        record_pick(s, source="other-src", ticker=sym, instrument_id=iid,
+                    recommendation_date=dates[270], as_of_session=dates[270])
+    grade_picks(s, CLOCK)
+    rep = {(e.source, e.horizon): e for e in source_edge_report(s)}
+    inv, oth = rep[("investing.com", 20)], rep[("other-src", 20)]
+    assert inv.dartboard is not None and abs(inv.dartboard - 2 / 6) < 1e-9
+    assert oth.dartboard == inv.dartboard            # one dart, thrown at everything
+    assert inv.edge is not None and abs(inv.edge - (2 / 3 - 2 / 6)) < 1e-9
+    assert oth.edge is not None and abs(oth.edge - (0.0 - 2 / 6)) < 1e-9
 
 
 def _sym_id(s, sym):

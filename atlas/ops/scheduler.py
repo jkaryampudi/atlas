@@ -16,6 +16,7 @@ run; the cycle itself still receives an injectable Clock.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import threading
@@ -29,6 +30,12 @@ from atlas.ops.alerts import notify
 
 CYCLE_UTC = time(23, 30)     # 09:30 AEST — after the US close + EODHD publish
 BACKUP_UTC = time(0, 30)     # an hour later, so the dump includes the run
+# launchd fire times (ops/launchd/com.atlas.{daily,backup}.plist) — LOCAL wall
+# clock, StartCalendarInterval semantics. Reported by status() under
+# ATLAS_INPROC_SCHEDULER=supervise so the console shows the real next fire,
+# not the retired in-process times (which it did until 2026-08-30).
+LAUNCHD_CYCLE_LOCAL = time(7, 0)
+LAUNCHD_BACKUP_LOCAL = time(8, 0)
 _REPO = Path(__file__).resolve().parents[2]
 
 _cycle_lock = threading.Lock()
@@ -129,14 +136,42 @@ def start_cycle() -> bool:
     return True
 
 
+def next_fire_local(now: datetime, at: time) -> datetime:
+    """The next instant of the daily LOCAL-wall-clock `at` time strictly after
+    `now`, returned in UTC — launchd's StartCalendarInterval semantics (the
+    plist hour is the machine's local hour, DST included)."""
+    if now.tzinfo is None:
+        raise ValueError("next_fire_local requires an aware datetime")
+    local_now = now.astimezone()                      # the machine's local tz
+    candidate = datetime.combine(local_now.date(), at, tzinfo=local_now.tzinfo)
+    if candidate <= local_now:
+        candidate = datetime.combine(local_now.date() + timedelta(days=1), at,
+                                     tzinfo=local_now.tzinfo)
+    return candidate.astimezone(UTC)
+
+
 def status() -> dict[str, object]:
+    """The console's view. `next_*_utc` are whichever fire times are REAL for
+    the running mode: launchd's local 07:00/08:00 under 'supervise' (this
+    process fires nothing), the in-process UTC times under '1', and None when
+    nothing in this process or on the record fires (systemd owns it)."""
     now = _WALL.now()
     last = dict(_last)
     last["progress"] = [dict(e) for e in _last.get("progress", [])]  # type: ignore[union-attr]
-    return {"cycle_running": _cycle_lock.locked(),
-            "next_cycle_utc": next_fire(now, CYCLE_UTC).isoformat(),
-            "next_backup_utc": next_fire(now, BACKUP_UTC).isoformat(),
-            "last": last}
+    mode = os.environ.get("ATLAS_INPROC_SCHEDULER")
+    if mode == "supervise":
+        fires: dict[str, object] = {
+            "mode": "supervise", "fires_owned_by": "launchd",
+            "next_cycle_utc": next_fire_local(now, LAUNCHD_CYCLE_LOCAL).isoformat(),
+            "next_backup_utc": next_fire_local(now, LAUNCHD_BACKUP_LOCAL).isoformat()}
+    elif mode == "1":
+        fires = {"mode": "inproc", "fires_owned_by": "api",
+                 "next_cycle_utc": next_fire(now, CYCLE_UTC).isoformat(),
+                 "next_backup_utc": next_fire(now, BACKUP_UTC).isoformat()}
+    else:
+        fires = {"mode": "off", "fires_owned_by": "external",
+                 "next_cycle_utc": None, "next_backup_utc": None}
+    return {"cycle_running": _cycle_lock.locked(), **fires, "last": last}
 
 
 def _run_backup() -> None:

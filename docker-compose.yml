@@ -11,8 +11,13 @@ services:
     ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U atlas"], interval: 5s, retries: 10}
+    # Come back with the daemon after a reboot / daemon restart (2026-08-30: a
+    # host reboot left db down and the launchd-supervised API looping exit 3).
+    # `unless-stopped` still honours an explicit `docker compose stop`.
+    restart: unless-stopped
   redis:
     image: redis:7
+    restart: unless-stopped
     # NO host publication (ADR-0018): Redis is declared but unused by any code
     # (no `import redis` in atlas/) and no developer workflow connects to it from
     # the host. The service stays for compose-network access — the api reaches it

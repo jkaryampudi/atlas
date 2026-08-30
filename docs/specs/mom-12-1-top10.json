@@ -1,0 +1,12 @@
+{
+  "name": "mom-12-1-top10",
+  "rank_feature": "momentum_12_1",
+  "direction": "desc",
+  "top_n": 10,
+  "rebalance": "monthly",
+  "universe": "pit-sp500",
+  "cost_bps_per_side": 10,
+  "lineage": "momentum",
+  "rationale": "PRE-REGISTERED 2026-08-30, NOT YET RUN. Canonical 12-1 cross-sectional momentum (Jegadeesh-Titman 1993), unchanged signal, held wider: top-10 equal-weight instead of the top-5 the production sleeve was validated on. Economic rationale: the momentum premium is a portfolio property of the top decile, not of its five strongest names; a wider book lowers idiosyncratic variance and single-episode crash exposure (the -16pp signed in ADR-0017) without changing the signal. Book-shape rationale (the reason this exists): at the L1 8%/name cap, ten names = 80% of NAV, so a passing recipe could size to (nearly) the whole book and remove the structural cash drag that makes the signed 40/60 allocation unable to match SPY even when the sleeve passes. Hypothesis: on the point-in-time S&P 500 panel, 12-1 momentum at top-10/monthly beats SPY total return after costs and survives the null model, the lineage-deflated Sharpe at the momentum lineage's honest trial count (n>=23 -> a HIGHER bar than the top-5 run faced), and purged walk-forward. Blocked until the identity/delisting feed lifts PIT panel coverage to >=90% (currently 74.5%: any run before that returns INSUFFICIENT EVIDENCE and burns a lineage trial for nothing). Sizing above the 40% sleeve cap is a separate Principal decision (ADR-0019 candidate) that a pass would unlock, never the other way round. top_n=10 is the RecipeSpec v1 grammar ceiling.",
+  "kill_start": "2016-01-01"
+}

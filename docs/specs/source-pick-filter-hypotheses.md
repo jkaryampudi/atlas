@@ -68,6 +68,54 @@ but labelled in-sample.)
 
 ---
 
+## H2 — "overheated entry" · REGISTERED 2026-08-30
+
+**Claim.** Source picks whose price is already stretched well above its
+50-session average at pick time underperform (the entry is late — the move has
+happened).
+
+**Predicate (frozen v1 features, evaluated at recommendation time):**
+
+```
+px_over_sma50 > 0.08
+```
+
+(Price more than 8% above its 50-session average. Picks missing the feature are
+`unknown`. The threshold is pinned from the provenance read below and was NOT
+tuned against any outcome — a different threshold is a different hypothesis.)
+
+**Provenance (in-sample, can never confirm H2).** Two reads, both in-sample:
+
+1. The 2026-08-30 counterfactual over the 49 graded desk BUY memos (a
+   *different* corpus from `research.source_picks` — desk memos, not source
+   picks — so it is context, not evidence for this table): vetoing
+   `px_over_sma50 > 0.08` kept 41 calls at 44% hit / −1.73% avg vs SPY, against
+   39% / −2.66% unfiltered — the least-bad of six vetoes tried, still negative,
+   still below the dart. The worst July calls (AMD +11.9%, AMAT +15.4% and +12.4%
+   above SMA50 at memo time) were bought on strength immediately before a sector
+   drawdown.
+2. The Principal's own reading of those losers ("bought overheated"), stated
+   before this counterfactual was run.
+
+Known confound: the same single July drawdown episode that motivated H1. H1's
+own out-of-sample reading (knives *outperforming* non-knives at 5–10 sessions)
+is a warning that one episode's pattern need not generalise — which is exactly
+why H2 waits for out-of-sample picks like H1 did.
+
+**Verdict dates.** Only picks recommended strictly after 2026-08-30 count.
+First out-of-sample 20-session readings: picks from 2026-08-31 onward mature
+from ~2026-09-28. 60-session verdict: from ~2026-11-24. In-sample context is
+reported throughout, labelled in-sample.
+
+**Status: REGISTERED — measuring.** Not a filter. Continuous readings:
+`GET /v1/research/source-picks/autopsy` (hypothesis `H2-overheated-entry`) and
+the console Research page. Code half of the registration:
+`atlas/dcp/research/source_picks.py` (`HYPOTHESES` registry).
+
+---
+
 *Adding a hypothesis: append a section with a dated registration, an exact
 predicate over frozen v1 features, provenance (what suggested it), and its
-verdict dates. Never edit a registered predicate — retire and re-register.*
+verdict dates; add the matching entry to the `HYPOTHESES` registry in
+`atlas/dcp/research/source_picks.py`. Never edit a registered predicate —
+retire and re-register.*
