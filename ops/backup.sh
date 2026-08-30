@@ -4,7 +4,7 @@
 # entire provenance. Dumps land in ~/AtlasBackups (sync that directory to
 # iCloud/Drive/another machine — an on-disk backup does not survive the disk).
 set -uo pipefail
-cd /Users/jayakrishnakaryampudi/Documents/atlas
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 [ -f .env ] && set -a && source .env && set +a
 DEST="${ATLAS_BACKUP_DIR:-$HOME/AtlasBackups}"
 mkdir -p "$DEST"

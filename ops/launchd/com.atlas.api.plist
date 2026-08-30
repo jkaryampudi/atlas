@@ -5,7 +5,7 @@
   <key>Label</key><string>com.atlas.api</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/jayakrishnakaryampudi/Documents/atlas/ops/run_api.sh</string>
+    <string>/Users/jayakrishnakaryampudi/atlas/ops/run_api.sh</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

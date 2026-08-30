@@ -5,11 +5,11 @@
   <key>Label</key><string>com.atlas.backup</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/jayakrishnakaryampudi/Documents/atlas/ops/backup.sh</string>
+    <string>/Users/jayakrishnakaryampudi/atlas/ops/backup.sh</string>
   </array>
   <!-- 10:30 local — after the daily pipeline, so the dump includes today's run -->
   <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>30</integer></dict>
+  <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
   <key>StandardOutPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-backup.log</string>
   <key>StandardErrorPath</key><string>/Users/jayakrishnakaryampudi/Library/Logs/atlas-backup.log</string>
 </dict>

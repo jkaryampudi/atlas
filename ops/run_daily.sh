@@ -4,7 +4,7 @@
 # Exit code is the ground truth: launchd logs it, the pipeline alerts on its
 # own failures, and this wrapper alerts if the process died before it could.
 set -uo pipefail
-cd /Users/jayakrishnakaryampudi/Documents/atlas
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 [ -f .env ] && set -a && source .env && set +a
 export ATLAS_DATABASE_URL="${ATLAS_DATABASE_URL:-postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas}"
 

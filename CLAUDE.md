@@ -31,8 +31,10 @@ Local stack: `docker compose up -d db redis`, then
 `alembic upgrade head`. API on **port 8001** on this machine (8000 is taken by
 another project). The API process IS the scheduler (`ATLAS_INPROC_SCHEDULER=1`
 in `.env`): 23:30 UTC cycle + 00:30 UTC backup — a manual API restart without
-`.env` sourced disarms BOTH (and drops the model key). launchd agents are dead
-on this Mac (TCC blocks `~/Documents`; exit 127 since install). Deterministic replay: `make replay DATE=2024-07-15` → gate=green.
+`.env` sourced disarms BOTH (and drops the model key). launchd agents were dead while the
+repo lived under `~/Documents` (TCC; exit 127) — relocated to `~/atlas` on
+2026-08-30: `make install-ops` now supervises the API (KeepAlive) and fires the
+daily at 07:00 AEST / backup 08:00; the in-proc scheduler is retired. Deterministic replay: `make replay DATE=2024-07-15` → gate=green.
 
 ## Status (as of handoff)
 - **P0 Architecture**: signed. **P1 Foundation**: near-exit — see remaining below.
