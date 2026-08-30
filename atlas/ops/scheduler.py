@@ -19,8 +19,10 @@ import asyncio
 import subprocess
 import sys
 import threading
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
+from typing import Any
 
 from atlas.core.clock import Clock, SystemClock
 from atlas.ops.alerts import notify
@@ -180,6 +182,31 @@ async def _supervise_safely(startup: bool) -> None:
     except Exception as e:  # noqa: BLE001 — supervision is best-effort
         notify("Atlas supervisor", f"cycle supervision failed: {e}",
                priority="high")
+
+
+async def supervisor_loop() -> None:
+    """Supervision WITHOUT firing: the F-025 dead-man / stuck-run supervisor at
+    boot (recovering any stale 'running' claim) and every SUPERVISE_EVERY_TICKS,
+    while launchd owns the cycle and backup fire times. Selected by
+    ATLAS_INPROC_SCHEDULER=supervise — the post-relocation mode (2026-08-30):
+    two schedulers would double-fire and trip the overlap guard daily; zero
+    supervisors would lose the net that killed the 19-hour stuck run of
+    2026-08-23."""
+    await _supervise_safely(startup=True)
+    while True:
+        await asyncio.sleep(TICK_SECONDS * SUPERVISE_EVERY_TICKS)
+        await _supervise_safely(startup=False)
+
+
+def loop_for_mode(mode: str | None) -> Callable[[], Coroutine[Any, Any, None]] | None:
+    """Which lifespan task ATLAS_INPROC_SCHEDULER selects: '1' fires AND
+    supervises (the pre-launchd interim), 'supervise' supervises only (launchd
+    fires), anything else runs nothing in-process (systemd/launchd own both)."""
+    if mode == "1":
+        return scheduler_loop
+    if mode == "supervise":
+        return supervisor_loop
+    return None
 
 
 async def scheduler_loop() -> None:

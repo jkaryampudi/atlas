@@ -55,10 +55,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if get_settings().db_require_least_privilege:
             assert_least_privilege_runtime(_s)
     task: asyncio.Task[None] | None = None
-    if os.environ.get("ATLAS_INPROC_SCHEDULER") == "1":
-        from atlas.ops.scheduler import scheduler_loop
+    from atlas.ops.scheduler import loop_for_mode
 
-        task = asyncio.create_task(scheduler_loop())
+    loop = loop_for_mode(os.environ.get("ATLAS_INPROC_SCHEDULER"))
+    if loop is not None:
+        task = asyncio.create_task(loop())
     yield
     if task is not None:
         task.cancel()
