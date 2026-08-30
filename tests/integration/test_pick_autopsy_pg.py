@@ -19,7 +19,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from atlas.api.main import app
-from atlas.dcp.research.source_picks import H1_REGISTERED, pick_autopsy
+from atlas.dcp.research.source_picks import (
+    H1_REGISTERED,
+    H2_REGISTERED,
+    pick_autopsy,
+)
 from tests.conftest import URL, requires_pg, reset_app_engine
 
 pytestmark = requires_pg
@@ -84,7 +88,8 @@ def test_h1_cohorts_split_in_vs_out_of_sample(pg_session):
     _seed(pg_session)
     out = pick_autopsy(pg_session)
     assert IN_SAMPLE <= H1_REGISTERED < OOS     # the seed really straddles it
-    by = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]}
+    by = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]
+          if h["name"] == "H1-falling-knife"}
     ins = by[("in_sample", 5)]
     assert ins["in_cohort"]["n"] == 1           # LOSK only
     assert ins["in_cohort"]["mean_excess"] == pytest.approx(-0.06)
@@ -95,6 +100,33 @@ def test_h1_cohorts_split_in_vs_out_of_sample(pg_session):
     assert oos["in_cohort"]["n"] == 1           # OOSK
     assert oos["in_cohort"]["mean_excess"] == pytest.approx(-0.03)
     assert oos["out_cohort"]["n"] == 0 and oos["unknown"] == 0
+
+
+def test_h2_overheated_entry_is_registered_and_split_by_its_own_date(pg_session):
+    """H2 (registered 2026-08-30) shares the registry loop with H1 but keeps
+    its OWN registration date and predicate: every seeded pick predates it,
+    so all rows are in-sample; px_over_sma50 > 0.08 puts none of the seeds
+    in the IN cohort (max seeded stretch is 0.03) and MYST stays unknown."""
+    _seed(pg_session)
+    _pick(pg_session, source="src-a", ticker="HOTT", rd=IN_SAMPLE, e5=-0.04,
+          feats={"ret_20d": 0.09, "px_over_sma50": 0.12})     # stretched entry
+    out = pick_autopsy(pg_session)
+    names = [h["name"] for h in out["hypotheses"]]
+    assert "H1-falling-knife" in names and "H2-overheated-entry" in names
+    assert H2_REGISTERED == date(2026, 8, 30) and OOS < H2_REGISTERED
+    h2 = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]
+          if h["name"] == "H2-overheated-entry"}
+    assert set(h2) == {("in_sample", 5)}        # nothing after 2026-08-30 yet
+    row = h2[("in_sample", 5)]
+    assert row["rule"].startswith("px_over_sma50 > 0.08")
+    assert row["in_cohort"]["n"] == 1           # HOTT only
+    assert row["in_cohort"]["mean_excess"] == pytest.approx(-0.04)
+    assert row["out_cohort"]["n"] == 4          # WINA, LOSK, LOSN, OOSK
+    assert row["unknown"] == 1                  # MYST: no px_over_sma50
+    # registering H2 must not have touched H1's numbers
+    h1 = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]
+          if h["name"] == "H1-falling-knife"}
+    assert h1[("in_sample", 5)]["in_cohort"]["n"] == 1      # LOSK (HOTT is no knife)
 
 
 @pytest.fixture

@@ -186,7 +186,7 @@ def test_labels_lessons_and_audit_end_to_end(clean_audit):
     assert len(compute_memo_outcomes(s, clock).written) == 1     # h20 matured
     rep = run_learning(s, clock)
     assert rep.labeling.summary() == ("learning: +1 outcome labels "
-                                      "(+3 specialist), +3 lessons")
+                                      "(+3 specialist), +1 lessons")
 
     ml = s.execute(text(
         "SELECT * FROM learning.outcome_labels WHERE label_kind = 'memo'")
@@ -213,25 +213,23 @@ def test_labels_lessons_and_audit_end_to_end(clean_audit):
     lessons = s.execute(text(
         "SELECT source_type, source_id, lesson, tags FROM learning.lessons "
         "ORDER BY lesson")).all()
+    # specialist_flags_validated retired 2026-08-30 (fired on 32/32 graded
+    # BUYs): the validated flag LABELS above are still written and measured,
+    # but they derive no lesson rows any more.
     assert [tuple(r.tags) for r in lessons] == [
-        ("high_conviction_call_failed", "h20", "BUY"),
-        ("specialist_flags_validated", "h20", "BUY", "macro"),
-        ("specialist_flags_validated", "h20", "BUY", "quality")]
+        ("high_conviction_call_failed", "h20", "BUY")]
     assert all(r.source_type == "memo_outcome"
                and str(r.source_id) == memo_id for r in lessons)
     assert lessons[0].lesson == (
         "HIGH-conviction BUY on ZSCL was not vindicated at 20 sessions: "
-        "excess -6.00% vs SPY — the dissent was right.")
-    assert lessons[2].lesson == (
-        "quality specialist flagged 2 risk(s) on ZSCL before the BUY; the "
-        "call failed at 20 sessions (excess -6.00% vs SPY) — flags validated.")
+        "excess -6.00% vs SPY — the call was wrong.")
 
     evs = s.execute(text(
         "SELECT payload FROM audit.decision_events "
         "WHERE event_type = 'learning.outcomes.labeled'")).scalars().all()
     assert len(evs) == 1
     assert evs[0]["memo_labels"] == 1 and evs[0]["specialist_labels"] == 3
-    assert evs[0]["lessons"] == 3 and evs[0]["memo_ids"] == [memo_id]
+    assert evs[0]["lessons"] == 1 and evs[0]["memo_ids"] == [memo_id]
     assert evs[0]["by_horizon"] == {"20": 1, "60": 0}
 
     # idempotent re-run: recorded labels stand, no rows, NO second event
@@ -244,7 +242,7 @@ def test_labels_lessons_and_audit_end_to_end(clean_audit):
     assert s.execute(text(
         "SELECT count(*) FROM learning.outcome_labels")).scalar() == 4
     assert s.execute(text(
-        "SELECT count(*) FROM learning.lessons")).scalar() == 3
+        "SELECT count(*) FROM learning.lessons")).scalar() == 1
     assert s.execute(text(
         "SELECT count(*) FROM audit.decision_events WHERE event_type "
         "LIKE 'learning.%'")).scalar() == 2      # labeled + snapshot, once each
@@ -313,7 +311,7 @@ def test_calibration_snapshot_pinned_with_prev_weight_lineage(clean_audit):
         {"p": period1}).scalar()) == pytest.approx(W_HIGH_N1)
     # no new lessons on a vindication night
     assert s.execute(text(
-        "SELECT count(*) FROM learning.lessons")).scalar() == 3
+        "SELECT count(*) FROM learning.lessons")).scalar() == 1
 
 
 def test_shadow_memo_labels_without_specialist_grades(clean_audit):
@@ -476,13 +474,13 @@ def test_learning_summary_api_shape_pinned(client):
     assert "h60" not in desk
     assert desk["weight"] == pytest.approx(W_HIGH_N1)
 
-    assert d["lessons"]["count"] == 3
-    assert len(d["lessons"]["recent"]) == 3
+    assert d["lessons"]["count"] == 1
+    assert len(d["lessons"]["recent"]) == 1
     texts = {x["lesson"] for x in d["lessons"]["recent"]}
     assert ("HIGH-conviction BUY on ZSCL was not vindicated at 20 sessions: "
-            "excess -6.00% vs SPY — the dissent was right.") in texts
-    assert all(x["tags"][0] in ("high_conviction_call_failed",
-                                "specialist_flags_validated")
+            "excess -6.00% vs SPY — the call was wrong.") in texts
+    # specialist_flags_validated retired 2026-08-30: never in a new row's tags
+    assert all(x["tags"][0] == "high_conviction_call_failed"
                for x in d["lessons"]["recent"])
 
 

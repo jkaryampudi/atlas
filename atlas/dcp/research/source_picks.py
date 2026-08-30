@@ -366,26 +366,43 @@ def source_edge_report(session: Session) -> list[SourceEdge]:
     than a dartboard would? `edge = outperform_rate - dartboard`; near-zero
     edge is the honest verdict that the source has no skill to filter (you
     cannot filter signal out of noise). Reuses scorecard.dartboard_baseline so
-    the baseline rule lives in exactly one place."""
+    the baseline rule lives in exactly one place.
+
+    The dart is thrown at EVERY graded pick at the horizon, across ALL sources
+    (scorecard rule: the base rate over everything the fund tracked, blind to
+    who picked it). Fixed 2026-08-30: the first version handed the dart only
+    the source's OWN excesses, which made dartboard == outperform_rate and
+    edge == 0.0 on every row by construction — the board could never show
+    edge. With a single tracked source the two still coincide (the dart has
+    nothing else to throw at), and `edge` is reported as None rather than a
+    fake 0.0 so the console can say "no comparator yet"."""
     out: list[SourceEdge] = []
-    for source in [r.source for r in session.execute(text(
-            "SELECT DISTINCT source FROM research.source_picks ORDER BY source")).all()]:
-        for h in PICK_HORIZONS:
-            col = f"excess_{h}"
-            excesses = [Decimal(r.e) for r in session.execute(text(
-                f"SELECT {col} AS e FROM research.source_picks "
-                f"WHERE source = :s AND {col} IS NOT NULL"), {"s": source}).all()]
+    sources = [r.source for r in session.execute(text(
+        "SELECT DISTINCT source FROM research.source_picks ORDER BY source")).all()]
+    for h in PICK_HORIZONS:
+        col = f"excess_{h}"
+        by_source: dict[str, list[Decimal]] = {s: [] for s in sources}
+        for r in session.execute(text(
+                f"SELECT source, {col} AS e FROM research.source_picks "
+                f"WHERE {col} IS NOT NULL")).all():
+            by_source[str(r.source)].append(Decimal(r.e))
+        universe = [e for xs in by_source.values() for e in xs]
+        # picks are BUY-shaped, so the dart is the base rate of excess > 0
+        # over the whole tracked universe at this horizon.
+        dart = dartboard_baseline("BUY", universe)
+        dartf = float(dart) if dart is not None else None
+        comparable = len([s for s, xs in by_source.items() if xs]) >= 2
+        for source in sources:
+            excesses = by_source[source]
             n = len(excesses)
             if n == 0:
                 out.append(SourceEdge(source, h, 0, None, None, None))
                 continue
             rate = sum(1 for e in excesses if e > 0) / n
-            # picks are BUY-shaped, so the dart is the base rate of excess > 0.
-            dart = dartboard_baseline("BUY", excesses)
-            dartf = float(dart) if dart is not None else None
-            out.append(SourceEdge(source, h, n, rate, dartf,
-                                  (rate - dartf) if dartf is not None else None))
-    return out
+            out.append(SourceEdge(
+                source, h, n, rate, dartf,
+                (rate - dartf) if (dartf is not None and comparable) else None))
+    return sorted(out, key=lambda e: (e.source, e.horizon))
 
 
 # --------------------------------------------------------------------------- #
@@ -400,12 +417,24 @@ _AUTOPSY_FEATURES: tuple[str, ...] = (
     "px_over_sma50", "px_over_sma200", "trailing_pe", "forward_pe",
     "sessions_to_next_earnings")
 
-# H1 "falling knife", registered 2026-08-01 (see the spec for provenance and
-# verdict dates). The registration date is load-bearing: picks recommended ON or
-# BEFORE it are in-sample context; only later picks can confirm or refute.
+# Registered hypotheses (see the spec for provenance and verdict dates). Each
+# registration date is load-bearing: picks recommended ON or BEFORE it are
+# in-sample context; only later picks can confirm or refute. A registered
+# predicate is never edited — retire and re-register (spec house rule).
 H1_NAME = "H1-falling-knife"
 H1_REGISTERED = date(2026, 8, 1)
 H1_RULE = "ret_20d < 0 AND px_over_sma50 < 0 (short-term downtrend at pick time)"
+
+# H2 "overheated entry", registered 2026-08-30: price already stretched more
+# than 8% above its 50-session average at pick time. Provenance is the
+# 2026-08-30 desk-memo counterfactual (in-sample, 49 graded BUYs: the least-bad
+# of six vetoes — 41 kept, 44% hit, -1.73% avg vs SPY against 39% / -2.66%
+# unfiltered) and the Principal's own reading of the July losers (AMD, AMAT
+# bought 12-15% above SMA50). Threshold pinned from that read; not tuned.
+H2_NAME = "H2-overheated-entry"
+H2_REGISTERED = date(2026, 8, 30)
+H2_RULE = "px_over_sma50 > 0.08 (price stretched > 8% above its 50-session average at pick time)"
+H2_OVER_SMA50 = 0.08
 
 
 def _feat_num(feats: dict[str, object], key: str) -> float | None:
@@ -430,6 +459,25 @@ def _h1_matches(feats: dict[str, object]) -> bool | None:
     if r20 is None or sma is None:
         return None
     return r20 < 0 and sma < 0
+
+
+def _h2_matches(feats: dict[str, object]) -> bool | None:
+    """Overheated entry: price > H2_OVER_SMA50 above its 50-session average.
+    None when the feature is missing (reported `unknown`)."""
+    sma = _feat_num(feats, "px_over_sma50")
+    if sma is None:
+        return None
+    return sma > H2_OVER_SMA50
+
+
+# (name, registration date, rule text, predicate) — the closed registry the
+# autopsy iterates; appending here is the code half of registering a
+# hypothesis (the spec section is the other half). Order = registration order.
+HYPOTHESES: tuple[tuple[str, date, str,
+                        Callable[[dict[str, object]], bool | None]], ...] = (
+    (H1_NAME, H1_REGISTERED, H1_RULE, _h1_matches),
+    (H2_NAME, H2_REGISTERED, H2_RULE, _h2_matches),
+)
 
 
 def _mean(xs: list[float]) -> float | None:
@@ -488,28 +536,30 @@ def pick_autopsy(session: Session) -> dict[str, object]:
             feature_rows.append({"horizon": h, "feature": feat,
                                  "win_mean": _mean(w_vals), "n_win": len(w_vals),
                                  "loss_mean": _mean(l_vals), "n_loss": len(l_vals)})
-        for sample, sample_rows in (
-                ("in_sample", [r for r in graded
-                               if r["recommendation_date"] <= H1_REGISTERED]),
-                ("out_of_sample", [r for r in graded
-                                   if r["recommendation_date"] > H1_REGISTERED])):
-            if not sample_rows:
-                continue
-            in_x: list[float] = []
-            out_x: list[float] = []
-            unknown = 0
-            for r in sample_rows:
-                m = _h1_matches(dict(r["features"] or {}))
-                if m is None:
-                    unknown += 1
-                elif m:
-                    in_x.append(float(r[col]))
-                else:
-                    out_x.append(float(r[col]))
-            hyp_rows.append({"name": H1_NAME, "registered": H1_REGISTERED.isoformat(),
-                             "rule": H1_RULE, "horizon": h, "sample": sample,
-                             "in_cohort": _cohort(in_x), "out_cohort": _cohort(out_x),
-                             "unknown": unknown})
+        for name, registered, rule, matches in HYPOTHESES:
+            for sample, sample_rows in (
+                    ("in_sample", [r for r in graded
+                                   if r["recommendation_date"] <= registered]),
+                    ("out_of_sample", [r for r in graded
+                                       if r["recommendation_date"] > registered])):
+                if not sample_rows:
+                    continue
+                in_x: list[float] = []
+                out_x: list[float] = []
+                unknown = 0
+                for r in sample_rows:
+                    m = matches(dict(r["features"] or {}))
+                    if m is None:
+                        unknown += 1
+                    elif m:
+                        in_x.append(float(r[col]))
+                    else:
+                        out_x.append(float(r[col]))
+                hyp_rows.append({"name": name, "registered": registered.isoformat(),
+                                 "rule": rule, "horizon": h, "sample": sample,
+                                 "in_cohort": _cohort(in_x),
+                                 "out_cohort": _cohort(out_x),
+                                 "unknown": unknown})
 
     return {"note": ("measured only — a hypothesis becomes a filter only after "
                      "surviving out-of-sample at 20/60 sessions AND a "

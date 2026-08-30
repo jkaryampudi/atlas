@@ -1394,7 +1394,9 @@ async function renderScorecard(){
       if(!m) return pills.push(`<span class="pill gray">${esc(rec)}: 0 matured @${h}s</span>`);
       /* dart = what a direction-blind throw at ALL tracked outcomes would score, on this slice's denominator */
       const dart = (b==null||edge==null) ? "" : ` (dart: ${Math.round(b*m)}/${m}, edge ${esc(ppS(edge))})`;
-      const line = `${esc(rec)}: ${v}/${m} vindicated @${h}s${dart} · avg excess ${esc(pctS(ax))} · dissent right ${dr}/${m}`;
+      /* dissent_right is NOT vindicated by definition (scorecard rule) — it is the same fact as the
+         miss count, so it is shown as "wrong N/M", never as an independent "dissent right" score */
+      const line = `${esc(rec)}: ${v}/${m} vindicated @${h}s${dart} · avg excess ${esc(pctS(ax))} · wrong ${dr}/${m}`;
       if(m < SCORE_MIN_MATURED)   /* honesty below the documented minimum */
         pills.push(`<span class="pill gray">${line} (too few matured to judge)</span>`);
       else  /* green = positive edge over the dart, red = negative, amber = the desk IS the dart */
@@ -1408,7 +1410,7 @@ async function renderScorecard(){
   });
   const rows = d.recent || [];
   const tbl = !rows.length ? "" :
-    `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th><th>DISSENT</th></tr>` +
+    `<table style="margin-top:14px"><tr><th>SYMBOL</th><th>CALL</th><th>HORIZON</th><th>STOCK</th><th>SPY</th><th>EXCESS</th><th>VERDICT</th><th title="graded as the exact complement of the call — the same fact as VERDICT, not an independent signal">DISSENT (= ¬VERDICT)</th></tr>` +
     rows.map(o=>`<tr>
       <td>${symLink(o.symbol)}${o.source?` <span style="color:var(--gold);font-size:9.5px" title="external origin">${esc(o.source)}</span>`:""}</td>
       <td><span class="pill ${o.recommendation==="BUY"?"g":o.recommendation==="REJECT"?"r":"gray"}" title="conviction ${esc(o.conviction||"—")}">${esc(o.recommendation)}</span></td>
