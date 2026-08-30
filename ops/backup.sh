@@ -5,6 +5,7 @@
 # iCloud/Drive/another machine — an on-disk backup does not survive the disk).
 set -uo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # launchd PATH lacks docker / pg tools
 [ -f .env ] && set -a && source .env && set +a
 DEST="${ATLAS_BACKUP_DIR:-$HOME/AtlasBackups}"
 mkdir -p "$DEST"

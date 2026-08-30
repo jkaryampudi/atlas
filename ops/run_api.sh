@@ -3,6 +3,7 @@
 # background-task lifecycle has already killed twice on this machine.
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # launchd PATH lacks docker / pg tools
 [ -f .env ] && set -a && source .env && set +a
 export ATLAS_DATABASE_URL="${ATLAS_DATABASE_URL:-postgresql+psycopg://atlas:atlas_local_only@localhost:5432/atlas}"
 exec ./.venv/bin/uvicorn atlas.api.main:app --port 8001
