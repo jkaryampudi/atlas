@@ -114,6 +114,48 @@ the console Research page. Code half of the registration:
 
 ---
 
+## H3 — "outside the S&P lane" · REGISTERED 2026-10-18
+
+**Claim.** Source picks that are not S&P 500 members on their recommendation
+date underperform; the source's measured edge lives in its S&P picks.
+
+**Predicate (point-in-time membership, evaluated at recommendation time):**
+
+```
+NOT member of GSPC.INDX on recommendation_date
+    (validation.index_membership: start_date <= date <= COALESCE(end_date, ∞))
+```
+
+(Membership is read from the dated membership table, never from today's
+`is_active` — a name that left the index before its pick is outside the lane.
+With no membership data loaded the predicate is `unknown` for every pick.)
+
+**Provenance (in-sample, can never confirm H3).** The 2026-10-18 split of all
+graded investing.com picks by point-in-time membership:
+
+| | @20s n | @20s mean vs SPY | @60s n | @60s win | @60s mean vs SPY |
+|---|---|---|---|---|---|
+| S&P members | 18 | +2.9% | 12 | 58% | +10.8% |
+| non-members | 27 | −1.3% | 13 | 15% | −11.3% |
+
+The source's aggregate +12pp edge at 60 sessions is carried entirely by the
+members. Samples are small and July-heavy; both groups contain July picks,
+which partly controls for that single episode. The September cohort (mostly
+non-members) lost at 20 sessions (35% win, −5.4%), consistent with the claim but
+also part of what suggested it.
+
+**Verdict dates.** Only picks recommended strictly after 2026-10-18 count. The
+first out-of-sample 20-session readings land ~20 sessions after the first
+post-registration list is ingested; the 60-session verdict ~60 sessions after.
+
+**Status: REGISTERED — measuring.** Not a selection filter inside Atlas. ADR-0019
+(proposed) uses the S&P lane as the *real-money* risk boundary — restricting to
+the lane where the edge was measured is conservative and weakens no gate.
+Readings: `GET /v1/research/source-picks/autopsy` (hypothesis
+`H3-outside-sp500-lane`).
+
+---
+
 *Adding a hypothesis: append a section with a dated registration, an exact
 predicate over frozen v1 features, provenance (what suggested it), and its
 verdict dates; add the matching entry to the `HYPOTHESES` registry in
