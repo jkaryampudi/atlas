@@ -22,6 +22,8 @@ from atlas.api.main import app
 from atlas.dcp.research.source_picks import (
     H1_REGISTERED,
     H2_REGISTERED,
+    H3_REGISTERED,
+    SP500_INDEX_CODE,
     pick_autopsy,
 )
 from tests.conftest import URL, requires_pg, reset_app_engine
@@ -127,6 +129,53 @@ def test_h2_overheated_entry_is_registered_and_split_by_its_own_date(pg_session)
     h1 = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]
           if h["name"] == "H1-falling-knife"}
     assert h1[("in_sample", 5)]["in_cohort"]["n"] == 1      # LOSK (HOTT is no knife)
+
+
+def _member(s, ticker: str, start: date, end: date | None) -> None:
+    s.execute(text(
+        "INSERT INTO validation.index_membership (index_code, ticker, name, "
+        " start_date, end_date, is_active_now, is_delisted, fetched_at) "
+        "VALUES (:ix, :t, :t, :st, :en, :act, false, now())"),
+        {"ix": SP500_INDEX_CODE, "t": ticker, "st": start, "en": end,
+         "act": end is None})
+
+
+def test_h3_outside_sp_lane_uses_point_in_time_membership(pg_session):
+    """H3's IN cohort is 'not an S&P member ON THE PICK DATE'. A name that left
+    the index before its pick is outside the lane even though it was once a
+    member; a name with no membership row is outside too. Every seeded pick
+    predates H3's registration, so all rows are in-sample context."""
+    _seed(pg_session)
+    pg_session.execute(text(
+        "DELETE FROM validation.index_membership WHERE index_code = :ix"),
+        {"ix": SP500_INDEX_CODE})                               # txn-local
+    _member(pg_session, "WINA", date(2020, 1, 1), None)          # member at pick
+    _member(pg_session, "LOSK", date(2020, 1, 1), date(2026, 7, 1))  # left before pick
+    out = pick_autopsy(pg_session)
+    assert OOS < H3_REGISTERED == date(2026, 10, 18)
+    h3 = {(h["sample"], h["horizon"]): h for h in out["hypotheses"]
+          if h["name"] == "H3-outside-sp500-lane"}
+    assert set(h3) == {("in_sample", 5)}
+    row = h3[("in_sample", 5)]
+    assert row["out_cohort"]["n"] == 1                           # WINA only
+    assert row["out_cohort"]["mean_excess"] == pytest.approx(0.05)
+    assert row["in_cohort"]["n"] == 4                            # LOSK, LOSN, MYST, OOSK
+    assert row["in_cohort"]["mean_excess"] == pytest.approx(-0.02)
+    assert row["unknown"] == 0
+
+
+def test_h3_is_unknown_without_membership_data(pg_session):
+    """No point-in-time membership loaded means the predicate is unknowable:
+    every graded pick lands in `unknown`, never silently in a cohort."""
+    _seed(pg_session)
+    pg_session.execute(text(
+        "DELETE FROM validation.index_membership WHERE index_code = :ix"),
+        {"ix": SP500_INDEX_CODE})
+    out = pick_autopsy(pg_session)
+    row = next(h for h in out["hypotheses"]
+               if h["name"] == "H3-outside-sp500-lane" and h["horizon"] == 5)
+    assert row["in_cohort"]["n"] == 0 and row["out_cohort"]["n"] == 0
+    assert row["unknown"] == 5                                   # all graded picks
 
 
 @pytest.fixture

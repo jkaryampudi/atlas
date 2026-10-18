@@ -1968,18 +1968,6 @@
     ]
   },
   {
-    "symbol": "EQR",
-    "exchange": "US",
-    "market": "US",
-    "instrument_type": "stock",
-    "name": "Equity Residential",
-    "sector_gics": "Real Estate",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
     "symbol": "EQT",
     "exchange": "US",
     "market": "US",
@@ -4596,18 +4584,6 @@
     ]
   },
   {
-    "symbol": "PSKY",
-    "exchange": "US",
-    "market": "US",
-    "instrument_type": "stock",
-    "name": "Paramount Skydance Corporation Class B Common Stock",
-    "sector_gics": "Communication Services",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
     "symbol": "PSX",
     "exchange": "US",
     "market": "US",
@@ -5838,18 +5814,6 @@
     "instrument_type": "stock",
     "name": "Waters Corporation",
     "sector_gics": "Health Care",
-    "currency": "USD",
-    "economic_exposure": [
-      "US"
-    ]
-  },
-  {
-    "symbol": "WBD",
-    "exchange": "US",
-    "market": "US",
-    "instrument_type": "stock",
-    "name": "Warner Bros Discovery Inc",
-    "sector_gics": "Communication Services",
     "currency": "USD",
     "economic_exposure": [
       "US"

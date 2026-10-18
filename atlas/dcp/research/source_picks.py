@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import RowMapping, text
 from sqlalchemy.orm import Session
 
 from atlas.core.clock import Clock
@@ -436,6 +436,21 @@ H2_REGISTERED = date(2026, 8, 30)
 H2_RULE = "px_over_sma50 > 0.08 (price stretched > 8% above its 50-session average at pick time)"
 H2_OVER_SMA50 = 0.08
 
+# H3 "outside the S&P lane", registered 2026-10-18: the pick was NOT an S&P 500
+# member on its recommendation date (point-in-time validation.index_membership,
+# never today's membership). Provenance, in-sample, n small and July-heavy: at
+# 60 sessions S&P picks went 58% win / +10.8% mean vs SPY (n=12) while
+# non-S&P picks went 15% / -11.3% (n=13); at 20 sessions +2.9% vs -1.3%. Both
+# groups contain July picks, which partly controls for that single episode.
+# The IN cohort is the non-member profile, expected to underperform.
+H3_NAME = "H3-outside-sp500-lane"
+H3_REGISTERED = date(2026, 10, 18)
+H3_RULE = "not an S&P 500 member on the recommendation date (point-in-time membership)"
+SP500_INDEX_CODE = "GSPC.INDX"
+# Injected into a COPY of the frozen features for the hypothesis loop only;
+# never written back and never part of the feature split.
+_SP_MEMBER_KEY = "_sp500_member_at_pick"
+
 
 def _feat_num(feats: dict[str, object], key: str) -> float | None:
     v = feats.get(key)
@@ -470,6 +485,16 @@ def _h2_matches(feats: dict[str, object]) -> bool | None:
     return sma > H2_OVER_SMA50
 
 
+def _h3_matches(feats: dict[str, object]) -> bool | None:
+    """Outside the S&P lane: True when the pick was not an index member on its
+    recommendation date. None when membership is unknowable (no point-in-time
+    membership data loaded), reported `unknown`."""
+    member = feats.get(_SP_MEMBER_KEY)
+    if not isinstance(member, bool):
+        return None
+    return not member
+
+
 # (name, registration date, rule text, predicate) — the closed registry the
 # autopsy iterates; appending here is the code half of registering a
 # hypothesis (the spec section is the other half). Order = registration order.
@@ -477,6 +502,7 @@ HYPOTHESES: tuple[tuple[str, date, str,
                         Callable[[dict[str, object]], bool | None]], ...] = (
     (H1_NAME, H1_REGISTERED, H1_RULE, _h1_matches),
     (H2_NAME, H2_REGISTERED, H2_RULE, _h2_matches),
+    (H3_NAME, H3_REGISTERED, H3_RULE, _h3_matches),
 )
 
 
@@ -504,8 +530,22 @@ def pick_autopsy(session: Session) -> dict[str, object]:
     Purely descriptive; the router serves it verbatim to the console."""
     cols = ", ".join(f"excess_{h}" for h in PICK_HORIZONS)
     rows = session.execute(text(
-        f"SELECT source, ticker, recommendation_date, features, {cols} "
-        "FROM research.source_picks ORDER BY recommendation_date, ticker")).mappings().all()
+        f"SELECT p.source, p.ticker, p.recommendation_date, p.features, {cols}, "
+        "  EXISTS (SELECT 1 FROM validation.index_membership m "
+        "          WHERE m.index_code = :ix AND m.ticker = p.ticker "
+        "            AND m.start_date <= p.recommendation_date "
+        "            AND (m.end_date IS NULL OR m.end_date >= p.recommendation_date)"
+        "  ) AS sp_member "
+        "FROM research.source_picks p ORDER BY p.recommendation_date, p.ticker"),
+        {"ix": SP500_INDEX_CODE}).mappings().all()
+    have_membership = bool(session.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM validation.index_membership "
+        "WHERE index_code = :ix)"), {"ix": SP500_INDEX_CODE}).scalar())
+
+    def hyp_feats(r: RowMapping) -> dict[str, object]:
+        f = dict(r["features"] or {})
+        f[_SP_MEMBER_KEY] = bool(r["sp_member"]) if have_membership else None
+        return f
 
     win_loss: list[dict[str, object]] = []
     feature_rows: list[dict[str, object]] = []
@@ -548,7 +588,7 @@ def pick_autopsy(session: Session) -> dict[str, object]:
                 out_x: list[float] = []
                 unknown = 0
                 for r in sample_rows:
-                    m = matches(dict(r["features"] or {}))
+                    m = matches(hyp_feats(r))
                     if m is None:
                         unknown += 1
                     elif m:
